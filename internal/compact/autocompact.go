@@ -1,0 +1,72 @@
+package compact
+
+const (
+	AutoCompactBufferTokens        = 10000
+	WarningThresholdBufferTokens   = 30000
+	ErrorThresholdBufferTokens     = 5000
+	ManualCompactBufferTokens      = 10000
+	PostCompactMaxFilesToRestore   = 10
+	PostCompactTokenBudget         = 5000
+	PostCompactMaxTokensPerFile    = 500
+	PostCompactMaxTokensPerSkill   = 500
+	PostCompactSkillsTokenBudget   = 1000
+)
+
+type TokenWarningState int
+
+const (
+	WarningNone TokenWarningState = iota
+	WarningLow
+	WarningCritical
+)
+
+type AutoCompactTrackingState struct {
+	LastCompactTokenCount int
+	TotalCompactions      int
+	WarningState          TokenWarningState
+}
+
+type CompactionResult struct {
+	TotalTokensBefore int
+	TotalTokensAfter  int
+	MessagesRemoved   int
+	MessagesKept      int
+	Summary           string
+	WasPartial        bool
+}
+
+func GetEffectiveContextWindowSize(configuredWindowSize int) int {
+	if configuredWindowSize > 0 {
+		return configuredWindowSize
+	}
+	return 200000
+}
+
+func GetAutoCompactThreshold(windowSize int) int {
+	return windowSize - AutoCompactBufferTokens
+}
+
+func CalculateTokenWarningState(currentTokens, windowSize int) TokenWarningState {
+	threshold := GetAutoCompactThreshold(windowSize)
+	warningThreshold := windowSize - WarningThresholdBufferTokens
+
+	if currentTokens >= threshold {
+		return WarningCritical
+	}
+	if currentTokens >= warningThreshold {
+		return WarningLow
+	}
+	return WarningNone
+}
+
+func IsAutoCompactEnabled() bool {
+	return true
+}
+
+func ShouldAutoCompact(currentTokens, windowSize int) bool {
+	if !IsAutoCompactEnabled() {
+		return false
+	}
+	threshold := GetAutoCompactThreshold(windowSize)
+	return currentTokens >= threshold
+}
