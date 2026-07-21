@@ -322,7 +322,7 @@ function App() {
     try {
       addLog("handleSubmit: 调用 SendMessage API...");
       const result = await SendMessage({ prompt: currentInput });
-      addLog("handleSubmit: SendMessage 返回结果: " + JSON.stringify(result));
+      addLog("handleSubmit: SendMessage 返回结果: success=" + result.success + ", session_id=" + result.session_id + ", error=" + (result.error || "无"));
     } catch (err) {
       addLog("ERROR: handleSubmit SendMessage 调用失败: " + String(err));
       setIsLoading(false);

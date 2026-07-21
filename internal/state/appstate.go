@@ -260,8 +260,9 @@ func (s *AppState) GetToolPermissionContext() types.ToolPermissionContext {
 
 func (s *AppState) SetToolPermissionContext(f func(prev types.ToolPermissionContext) types.ToolPermissionContext) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.ToolPermissionCtx = f(s.ToolPermissionCtx)
+	s.mu.Unlock()
+
 	s.emit(StateChangeEvent{Type: "permission_context_update"})
 }
 
@@ -294,15 +295,17 @@ func (s *AppState) GetTasks() map[string]TaskState {
 
 func (s *AppState) SetTask(taskID string, task TaskState) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.Tasks[taskID] = task
+	s.mu.Unlock()
+
 	s.emit(StateChangeEvent{Type: "task_update", Key: taskID, Value: task})
 }
 
 func (s *AppState) RemoveTask(taskID string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	delete(s.Tasks, taskID)
+	s.mu.Unlock()
+
 	s.emit(StateChangeEvent{Type: "task_remove", Key: taskID})
 }
 
@@ -316,22 +319,25 @@ func (s *AppState) GetMessages() []types.Message {
 
 func (s *AppState) AppendMessage(msg types.Message) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.Messages = append(s.Messages, msg)
+	s.mu.Unlock()
+
 	s.emit(StateChangeEvent{Type: "message_append", Value: msg})
 }
 
 func (s *AppState) SetMessages(messages []types.Message) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.Messages = messages
+	s.mu.Unlock()
+
 	s.emit(StateChangeEvent{Type: "messages_update"})
 }
 
 func (s *AppState) SetIsProcessing(processing bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.IsProcessing = processing
+	s.mu.Unlock()
+
 	s.emit(StateChangeEvent{Type: "processing_update", Value: processing})
 }
 
@@ -343,8 +349,9 @@ func (s *AppState) GetIsProcessing() bool {
 
 func (s *AppState) SetCurrentToolUse(toolUse *ToolUseState) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.CurrentToolUse = toolUse
+	s.mu.Unlock()
+
 	s.emit(StateChangeEvent{Type: "tool_use_update", Value: toolUse})
 }
 
@@ -356,8 +363,9 @@ func (s *AppState) GetCurrentToolUse() *ToolUseState {
 
 func (s *AppState) SetStatusLineText(text string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.StatusLineText = text
+	s.mu.Unlock()
+
 	s.emit(StateChangeEvent{Type: "status_update", Value: text})
 }
 
@@ -369,22 +377,25 @@ func (s *AppState) GetStatusLineText() string {
 
 func (s *AppState) SetRemoteConnectionStatus(status string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.RemoteConnectionStatus = status
+	s.mu.Unlock()
+
 	s.emit(StateChangeEvent{Type: "remote_status_update", Value: status})
 }
 
 func (s *AppState) SetThinkingEnabled(enabled bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.ThinkingEnabled = enabled
+	s.mu.Unlock()
+
 	s.emit(StateChangeEvent{Type: "thinking_update", Value: enabled})
 }
 
 func (s *AppState) SetFastMode(enabled bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.FastMode = enabled
+	s.mu.Unlock()
+
 	s.emit(StateChangeEvent{Type: "fast_mode_update", Value: enabled})
 }
 
@@ -396,25 +407,32 @@ func (s *AppState) GetFastMode() bool {
 
 func (s *AppState) AddTodo(todo TodoState) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.Todos[todo.ID] = todo
+	s.mu.Unlock()
+
 	s.emit(StateChangeEvent{Type: "todo_add", Key: todo.ID, Value: todo})
 }
 
 func (s *AppState) UpdateTodoStatus(id, status string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if todo, ok := s.Todos[id]; ok {
+	var todo TodoState
+	var ok bool
+	if todo, ok = s.Todos[id]; ok {
 		todo.Status = status
 		s.Todos[id] = todo
+	}
+	s.mu.Unlock()
+
+	if ok {
 		s.emit(StateChangeEvent{Type: "todo_update", Key: id, Value: todo})
 	}
 }
 
 func (s *AppState) SetMCPState(mcp MCPState) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.MCP = mcp
+	s.mu.Unlock()
+
 	s.emit(StateChangeEvent{Type: "mcp_update"})
 }
 

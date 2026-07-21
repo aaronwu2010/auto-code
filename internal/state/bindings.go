@@ -81,7 +81,7 @@ type SendMessageResponse struct {
 
 func (b *WailsBindings) SendMessage(request SendMessageRequest) SendMessageResponse {
 	println("SendMessage: 收到请求, prompt=", request.Prompt)
-	
+
 	b.mu.RLock()
 	eng := b.engine
 	b.mu.RUnlock()
@@ -91,13 +91,25 @@ func (b *WailsBindings) SendMessage(request SendMessageRequest) SendMessageRespo
 		return SendMessageResponse{Success: false, Error: "engine not initialized"}
 	}
 
+	if b.ctx == nil {
+		println("SendMessage: 错误 - ctx 为 nil")
+		return SendMessageResponse{Success: false, Error: "context is nil"}
+	}
+
 	println("SendMessage: engine 已就绪，开始处理消息")
+
+	println("SendMessage: 准备调用 SetIsProcessing(true)")
 	b.appState.SetIsProcessing(true)
+	println("SendMessage: SetIsProcessing(true) 返回")
 	defer b.appState.SetIsProcessing(false)
 
-	println("SendMessage: 调用 eng.SubmitMessage")
+	println("SendMessage: 准备调用 eng.SubmitMessage, ctx=", b.ctx != nil)
+	println("SendMessage: engine type=", fmt.Sprintf("%T", eng))
+
+	// 检查 engine 是否实现了正确的方法
+	println("SendMessage: 调用前...")
 	outputCh := eng.SubmitMessage(b.ctx, request.Prompt)
-	println("SendMessage: SubmitMessage 返回，启动消息监听 goroutine")
+	println("SendMessage: 调用后，channel=", outputCh != nil)
 
 	go func() {
 		msgCount := 0
@@ -331,6 +343,15 @@ func (b *WailsBindings) SetOllamaConfig(request OllamaConfigRequest) error {
 
 	if request.Model != "" {
 		b.appState.SetMainLoopModel(types.ModelSetting(request.Model))
+
+		// 同时更新 QueryEngine 的模型
+		b.mu.RLock()
+		eng := b.engine
+		b.mu.RUnlock()
+
+		if eng != nil {
+			eng.SetModel(types.ModelSetting(request.Model))
+		}
 	}
 
 	return nil

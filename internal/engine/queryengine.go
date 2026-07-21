@@ -97,6 +97,11 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 
 	go func() {
 		defer close(ch)
+		defer func() {
+			if r := recover(); r != nil {
+				println("SubmitMessage: panic recovered - ", fmt.Sprint(r))
+			}
+		}()
 		println("SubmitMessage: goroutine 开始执行")
 
 		qe.mu.Lock()
@@ -108,11 +113,12 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		}
 		qe.messages = append(qe.messages, userMsg)
 		qe.mu.Unlock()
-		println("SubmitMessage: 用户消息已添加")
+		println("SubmitMessage: 用户消息已添加, id=", userMsg.ID)
 
 		ch <- SDKMessage{Type: "user", Message: &userMsg, SessionID: qe.sessionID}
 		println("SubmitMessage: 用户消息已发送到通道")
 
+		println("SubmitMessage: 开始构建系统提示")
 		systemPrompt, err := qe.buildSystemPrompt(ctx)
 		if err != nil {
 			println("SubmitMessage: 构建系统提示失败 - ", err.Error())
@@ -123,6 +129,7 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 
 		permissionCtx := qe.appState.GetToolPermissionContext()
 		availableTools := qe.toolReg.GetTools(permissionCtx)
+		println("SubmitMessage: 可用工具数量=", len(availableTools))
 
 		canUseTool := qe.config.CanUseTool
 		if canUseTool == nil {
@@ -171,19 +178,26 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		}
 
 		outputCh := query.Query(ctx, queryParams, deps)
+		println("SubmitMessage: query.Query 返回，开始循环读取输出")
 
+		outputCount := 0
 		for output := range outputCh {
+			outputCount++
+			println("SubmitMessage: 收到输出 #", outputCount, ", type=", output.Type)
 			sdkMsg := qe.processQueryOutput(output)
 			if sdkMsg != nil {
 				ch <- *sdkMsg
 			}
 
 			if output.Type == "terminal" || output.Type == "error" || output.Type == "interrupted" {
+				println("SubmitMessage: 终止输出，退出循环")
 				return
 			}
 		}
+		println("SubmitMessage: 输出通道关闭，共处理 ", outputCount, " 个输出")
 	}()
 
+	println("SubmitMessage: 返回通道")
 	return ch
 }
 
@@ -238,14 +252,18 @@ func (qe *QueryEngine) ListModels(ctx context.Context) ([]api.ModelInfo, error) 
 }
 
 func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) (<-chan query.QueryOutput, error) {
+	println("callModel: 开始调用, model=", params.Model)
 	if qe.apiClient == nil {
+		println("callModel: 错误 - apiClient 为 nil")
 		ch := make(chan query.QueryOutput, 1)
 		ch <- query.QueryOutput{Type: "error", Error: fmt.Errorf("Ollama 客户端未配置")}
 		close(ch)
 		return ch, nil
 	}
+	println("callModel: apiClient 已就绪")
 
 	ollamaMessages := api.ConvertMessagesToOllama(params.Messages, params.SystemPrompt.Content)
+	println("callModel: 消息转换完成, 消息数量=", len(ollamaMessages))
 
 	toolDefs := make([]api.ToolFunction, 0, len(params.Tools))
 	for _, t := range params.Tools {
@@ -256,6 +274,7 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 			Parameters:  t.InputSchema(),
 		})
 	}
+	println("callModel: 工具定义完成, 工具数量=", len(toolDefs))
 
 	req := api.OllamaChatRequest{
 		Model:    api.NormalizeModelName(string(params.Model)),
@@ -263,6 +282,7 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 		Stream:   true,
 		Options:  qe.config.ModelOptions,
 	}
+	println("callModel: 请求创建完成, model=", req.Model)
 
 	if len(toolDefs) > 0 {
 		req.Tools = api.ConvertToolsToOllama(toolDefs)
@@ -272,10 +292,13 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 		req.Think = true
 	}
 
+	println("callModel: 调用 ChatWithStreaming...")
 	streamCh, err := qe.apiClient.ChatWithStreaming(ctx, req)
 	if err != nil {
+		println("callModel: ChatWithStreaming 错误 - ", err.Error())
 		return nil, err
 	}
+	println("callModel: ChatWithStreaming 返回成功")
 
 	outputCh := make(chan query.QueryOutput, 256)
 	go func() {
