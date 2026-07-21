@@ -57,6 +57,7 @@ function App() {
   const [ollamaHealth, setOllamaHealth] = useState<OllamaHealth | null>(null);
   const [loadingModels, setLoadingModels] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
+  const [healthCheckResult, setHealthCheckResult] = useState<string | null>(null);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -112,12 +113,30 @@ function App() {
   };
 
   const checkHealth = async () => {
+    console.log("checkHealth: 开始检查连接...");
+    setHealthCheckResult("正在检查连接...");
     try {
       const health = await CheckOllamaHealth();
+      console.log("checkHealth: 收到结果", health);
       if (health) {
         setOllamaHealth(health);
+        if (health.connected) {
+          const msg = `✓ 已连接到 ${health.base_url}，发现 ${health.available_models || 0} 个模型`;
+          console.log(`checkHealth: ${msg}`);
+          setHealthCheckResult(msg);
+        } else {
+          const msg = `✗ 连接失败: ${health.error || "未知错误"}`;
+          console.log(`checkHealth: ${msg}`);
+          setHealthCheckResult(msg);
+        }
+      } else {
+        console.error("checkHealth: 返回结果为空");
+        setHealthCheckResult("✗ 检查失败: 返回结果为空");
       }
-    } catch {}
+    } catch (err) {
+      console.error("checkHealth: 检查失败", err);
+      setHealthCheckResult(`✗ 检查失败: ${String(err)}`);
+    }
   };
 
   const saveConfig = async () => {
@@ -451,18 +470,29 @@ function App() {
             {/* 保存按钮 */}
             <div className="flex gap-2">
               <button
+                type="button"
                 onClick={saveConfig}
                 className="bg-[#1a4a80] text-[#e0e0e0] px-4 py-2 rounded hover:bg-[#2a5a90] text-sm"
               >
                 保存配置
               </button>
               <button
-                onClick={checkHealth}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  console.log("测试连接按钮被点击");
+                  checkHealth();
+                }}
                 className="bg-[#0f3460] text-[#6cb6ff] px-4 py-2 rounded hover:bg-[#1a4a80] text-sm"
               >
                 测试连接
               </button>
             </div>
+            {healthCheckResult && (
+              <div className={`text-sm mt-2 ${healthCheckResult.includes("✓") ? "text-green-400" : "text-red-400"}`}>
+                {healthCheckResult}
+              </div>
+            )}
           </div>
         </div>
       )}

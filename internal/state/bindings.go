@@ -381,11 +381,12 @@ func (b *WailsBindings) ListAvailableModels() ListModelsResponse {
 
 // OllamaHealthResponse 表示健康检查响应
 type OllamaHealthResponse struct {
-	Connected bool   `json:"connected"`
-	Error     string `json:"error,omitempty"`
-	IsLocal   bool   `json:"is_local"`
-	BaseURL   string `json:"base_url"`
-	Model     string `json:"model"`
+	Connected       bool   `json:"connected"`
+	Error           string `json:"error,omitempty"`
+	IsLocal         bool   `json:"is_local"`
+	BaseURL         string `json:"base_url"`
+	Model           string `json:"model"`
+	AvailableModels int    `json:"available_models"`
 }
 
 // CheckOllamaHealth 检查 Ollama 服务健康状态
@@ -396,11 +397,12 @@ func (b *WailsBindings) CheckOllamaHealth() OllamaHealthResponse {
 
 	status := client.CheckHealth(b.ctx)
 	return OllamaHealthResponse{
-		Connected: status.Connected,
-		Error:     status.Error,
-		IsLocal:   status.IsLocal,
-		BaseURL:   config.BaseURL,
-		Model:     config.Model,
+		Connected:       status.Connected,
+		Error:           status.Error,
+		IsLocal:         status.IsLocal,
+		BaseURL:         config.BaseURL,
+		Model:           config.Model,
+		AvailableModels: status.AvailableModels,
 	}
 }
 

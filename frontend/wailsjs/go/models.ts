@@ -284,6 +284,7 @@ export namespace state {
 	    is_local: boolean;
 	    base_url: string;
 	    model: string;
+	    available_models: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new OllamaHealthResponse(source);
@@ -296,6 +297,7 @@ export namespace state {
 	        this.is_local = source["is_local"];
 	        this.base_url = source["base_url"];
 	        this.model = source["model"];
+	        this.available_models = source["available_models"];
 	    }
 	}
 	export class RegisterToolRequest {
