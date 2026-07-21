@@ -1,69 +1,40 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import type {
-  Message,
-  ContentBlock,
-  AppStateSnapshot,
-  SDKMessage,
-  StateChangeEvent,
-} from "./bindings/types";
+// 导入 Wails 生成的绑定函数和类型
+import {
+  SendMessage,
+  Interrupt,
+  GetMessages,
+  GetAppState,
+  SetOllamaConfig,
+  GetOllamaConfig,
+  ListAvailableModels,
+  CheckOllamaHealth,
+} from "../wailsjs/go/state/WailsBindings";
+import { state, types } from "../wailsjs/go/models";
 
-// 扩展 window 类型
-declare global {
-  interface Window {
-    go: {
-      main: {
-        state: {
-          WailsBindings: {
-            SendMessage: (req: string) => Promise<string>;
-            Interrupt: () => void;
-            GetMessages: () => Promise<string>;
-            GetAppState: () => Promise<string>;
-            SetModel: (req: string) => void;
-            SetPermissionMode: (req: string) => void;
-            SetThinking: (req: string) => void;
-            SetFastMode: (req: string) => void;
-            GetAvailableTools: () => Promise<string>;
-            GetSessionID: () => Promise<string>;
-            RefreshContext: () => Promise<void>;
-            AddTodo: (req: string) => void;
-            UpdateTodoStatus: (id: string, status: string) => void;
-            GetMCPStatus: () => Promise<string>;
-            SetOllamaConfig: (req: string) => void;
-            GetOllamaConfig: () => Promise<string>;
-            ListAvailableModels: () => Promise<string>;
-            CheckOllamaHealth: () => Promise<string>;
-          };
-        };
-      };
-    };
-    runtime: {
-      EventsOn: (event: string, callback: (...args: unknown[]) => void) => void;
-      EventsOff: (event: string) => void;
-    };
-  }
+// 导入 Wails 运行时
+import { EventsOn, EventsOff } from "../wailsjs/runtime/runtime";
+
+// 本地类型别名
+type Message = types.Message;
+type ContentBlock = types.ContentBlock;
+type AppStateSnapshot = state.AppStateSnapshot;
+type OllamaConfig = state.OllamaConfigRequest;
+type OllamaHealth = state.OllamaHealthResponse;
+type ModelInfo = state.ModelInfoUI;
+
+interface SDKMessage {
+  type: string;
+  subtype?: string;
+  message?: Message;
+  session_id?: string;
+  data?: unknown;
 }
 
-// 类型定义
-interface ModelInfo {
-  name: string;
-  size?: string;
-  family?: string;
-  parameter_size?: string;
-  quantization?: string;
-}
-
-interface OllamaConfig {
-  base_url: string;
-  api_key: string;
-  model: string;
-}
-
-interface OllamaHealth {
-  connected: boolean;
-  error?: string;
-  is_local: boolean;
-  base_url: string;
-  model: string;
+interface StateChangeEvent {
+  type: string;
+  key?: string;
+  value?: unknown;
 }
 
 function App() {
@@ -104,28 +75,27 @@ function App() {
 
   // 加载配置和模型列表
   const loadConfig = async () => {
-    if (!window.go?.main?.state?.WailsBindings) return;
     try {
-      const configStr = await window.go.main.state.WailsBindings.GetOllamaConfig();
-      if (configStr) {
-        const config = JSON.parse(configStr);
+      const config = await GetOllamaConfig();
+      if (config) {
         setOllamaConfig(config);
       }
     } catch {}
   };
 
   const loadModels = async () => {
-    if (!window.go?.main?.state?.WailsBindings) return;
     setLoadingModels(true);
     setModelsError(null);
     try {
-      const modelsStr = await window.go.main.state.WailsBindings.ListAvailableModels();
-      if (modelsStr) {
-        const result = JSON.parse(modelsStr);
+      const result = await ListAvailableModels();
+      console.log("ListAvailableModels result:", result);
+      if (result) {
         if (result.models && result.models.length > 0) {
+          console.log("Found models:", result.models);
           setModels(result.models);
           setModelsError(null);
         } else if (result.error) {
+          console.log("Error from backend:", result.error);
           setModelsError(result.error);
           setModels([]);
         } else {
@@ -134,6 +104,7 @@ function App() {
         }
       }
     } catch (err) {
+      console.error("loadModels error:", err);
       setModelsError("加载模型列表失败: " + String(err));
       setModels([]);
     }
@@ -141,80 +112,73 @@ function App() {
   };
 
   const checkHealth = async () => {
-    if (!window.go?.main?.state?.WailsBindings) return;
     try {
-      const healthStr = await window.go.main.state.WailsBindings.CheckOllamaHealth();
-      if (healthStr) {
-        setOllamaHealth(JSON.parse(healthStr));
+      const health = await CheckOllamaHealth();
+      if (health) {
+        setOllamaHealth(health);
       }
     } catch {}
   };
 
   const saveConfig = async () => {
-    if (!window.go?.main?.state?.WailsBindings) return;
     try {
-      await window.go.main.state.WailsBindings.SetOllamaConfig(JSON.stringify(ollamaConfig));
+      await SetOllamaConfig(ollamaConfig);
       await checkHealth();
       await loadModels();
     } catch {}
   };
 
   useEffect(() => {
-    if (window.runtime) {
-      window.runtime.EventsOn("state:change", (data: unknown) => {
-        try {
-          const event: StateChangeEvent =
-            typeof data === "string" ? JSON.parse(data) : (data as StateChangeEvent);
-          if (event.type === "status_update") {
-            setStatusText(event.value as string);
-          }
-          if (event.type === "processing_update") {
-            setIsLoading(event.value as boolean);
-          }
-        } catch {}
-      });
+    EventsOn("state:change", (data: unknown) => {
+      try {
+        const event: StateChangeEvent =
+          typeof data === "string" ? JSON.parse(data) : (data as StateChangeEvent);
+        if (event.type === "status_update") {
+          setStatusText(event.value as string);
+        }
+        if (event.type === "processing_update") {
+          setIsLoading(event.value as boolean);
+        }
+      } catch {}
+    });
 
-      window.runtime.EventsOn("query:message", (data: unknown) => {
-        try {
-          const msg: SDKMessage =
-            typeof data === "string" ? JSON.parse(data) : (data as SDKMessage);
-          if (msg.message) {
-            setMessages((prev) => {
-              const exists = prev.some((m) => m.id === msg.message!.id);
-              if (exists) return prev;
-              return [...prev, msg.message!];
-            });
-          }
-          if (msg.type === "result") {
-            setIsLoading(false);
-          }
-          if (msg.type === "error") {
-            setIsLoading(false);
-          }
-        } catch {}
-      });
-    }
+    EventsOn("query:message", (data: unknown) => {
+      try {
+        const msg: SDKMessage =
+          typeof data === "string" ? JSON.parse(data) : (data as SDKMessage);
+        if (msg.message) {
+          setMessages((prev) => {
+            const exists = prev.some((m) => m.id === msg.message!.id);
+            if (exists) return prev;
+            return [...prev, msg.message!];
+          });
+        }
+        if (msg.type === "result") {
+          setIsLoading(false);
+        }
+        if (msg.type === "error") {
+          setIsLoading(false);
+        }
+      } catch {}
+    });
 
     loadInitialState();
 
     return () => {
-      if (window.runtime) {
-        window.runtime.EventsOff("state:change");
-        window.runtime.EventsOff("query:message");
-      }
+      EventsOff("state:change");
+      EventsOff("query:message");
     };
   }, []);
 
   const loadInitialState = async () => {
     try {
-      if (!window.go?.main?.state?.WailsBindings) return;
-      const stateStr = await window.go.main.state.WailsBindings.GetAppState();
-      if (stateStr) {
-        setAppState(JSON.parse(stateStr));
+      const state = await GetAppState();
+      if (state) {
+        setAppState(state);
       }
-      const msgsStr = await window.go.main.state.WailsBindings.GetMessages();
-      if (msgsStr) {
-        setMessages(JSON.parse(msgsStr));
+      const msgs = await GetMessages();
+      if (msgs) {
+        setMessages(msgs.messages || []);
       }
       await loadConfig();
       await checkHealth();
@@ -224,30 +188,20 @@ function App() {
 
   const handleSubmit = async () => {
     if (!input.trim() || isLoading) return;
-    if (!window.go?.main?.state?.WailsBindings) return;
 
-    const userMsg: Message = {
-      id: `user-${Date.now()}`,
-      role: "user",
-      content: [{ type: "text", text: input }],
-      timestamp: Date.now(),
-    };
-    setMessages((prev) => [...prev, userMsg]);
+    // 用户消息会通过事件从后端返回，这里不需要手动添加
     setInput("");
     setIsLoading(true);
 
     try {
-      const req = JSON.stringify({ prompt: input });
-      await window.go.main.state.WailsBindings.SendMessage(req);
+      await SendMessage({ prompt: input });
     } catch (err) {
       setIsLoading(false);
     }
   };
 
   const handleInterrupt = () => {
-    if (window.go?.main?.state?.WailsBindings) {
-      window.go.main.state.WailsBindings.Interrupt();
-    }
+    Interrupt();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -335,7 +289,10 @@ function App() {
         <div className="text-[11px] text-[#888] mb-1 font-bold uppercase">
           {msg.role}
         </div>
-        {msg.content.map((block, i) => renderContentBlock(block, i))}
+        {/* 渲染 content_blocks 或 content */}
+        {msg.content_blocks && msg.content_blocks.length > 0
+          ? msg.content_blocks.map((block, i) => renderContentBlock(block, i))
+          : <pre className="whitespace-pre-wrap break-words text-sm">{msg.content}</pre>}
       </div>
     );
   };
@@ -456,9 +413,15 @@ function App() {
                   ))}
                 </select>
                 <button
-                  onClick={loadModels}
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log("Refresh button clicked");
+                    loadModels();
+                  }}
                   disabled={loadingModels}
-                  className="bg-[#0f3460] text-[#6cb6ff] px-3 py-2 rounded hover:bg-[#1a4a80] disabled:opacity-50 text-sm"
+                  className="bg-[#0f3460] text-[#6cb6ff] px-3 py-2 rounded hover:bg-[#1a4a80] disabled:opacity-50 text-sm cursor-pointer"
                 >
                   {loadingModels ? "加载中..." : "刷新"}
                 </button>

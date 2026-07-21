@@ -99,3 +99,26 @@ export interface StateChangeEvent {
   key?: string;
   value?: unknown;
 }
+
+// Ollama 配置相关类型
+export interface OllamaConfig {
+  base_url: string;
+  api_key: string;
+  model: string;
+}
+
+export interface OllamaHealth {
+  connected: boolean;
+  error?: string;
+  is_local: boolean;
+  base_url: string;
+  model: string;
+}
+
+export interface ModelInfo {
+  name: string;
+  size?: string;
+  family?: string;
+  parameter_size?: string;
+  quantization?: string;
+}

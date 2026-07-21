@@ -1,6 +1,9 @@
 package state
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/auto-code/auto-code/internal/types"
@@ -9,14 +12,15 @@ import (
 type StateChangeListener func(event StateChangeEvent)
 
 type StateChangeEvent struct {
-	Type     string `json:"type"`
-	Key      string `json:"key,omitempty"`
-	Value    any    `json:"value,omitempty"`
+	Type  string `json:"type"`
+	Key   string `json:"key,omitempty"`
+	Value any    `json:"value,omitempty"`
 }
 
 type AppState struct {
-	mu          sync.RWMutex
-	listeners   []StateChangeListener
+	mu         sync.RWMutex
+	listeners  []StateChangeListener
+	configPath string // 配置文件路径
 
 	Settings                map[string]any
 	Verbose                 bool
@@ -86,9 +90,9 @@ type MCPServerState struct {
 }
 
 type PluginsState struct {
-	Enabled  []any              `json:"enabled"`
-	Disabled []any              `json:"disabled"`
-	Commands []any              `json:"commands"`
+	Enabled  []any               `json:"enabled"`
+	Disabled []any               `json:"disabled"`
+	Commands []any               `json:"commands"`
 	Errors   []types.PluginError `json:"errors"`
 }
 
@@ -98,7 +102,14 @@ type NotificationsState struct {
 }
 
 func NewAppState() *AppState {
-	return &AppState{
+	// 获取用户配置目录
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		configDir = "."
+	}
+	configPath := filepath.Join(configDir, "auto-code", "config.json")
+
+	s := &AppState{
 		Settings:               make(map[string]any),
 		ToolPermissionCtx:      types.EmptyToolPermissionContext(),
 		RemoteConnectionStatus: "connecting",
@@ -113,7 +124,71 @@ func NewAppState() *AppState {
 		Notifications: NotificationsState{Queue: make([]any, 0)},
 		Messages:      make([]types.Message, 0),
 		FileHistory:   make(map[string][]string),
+		configPath:    configPath,
 	}
+
+	// 加载已保存的配置
+	s.loadConfig()
+
+	return s
+}
+
+// loadConfig 从磁盘加载配置
+func (s *AppState) loadConfig() {
+	data, err := os.ReadFile(s.configPath)
+	if err != nil {
+		return // 配置文件不存在，使用默认值
+	}
+
+	var config struct {
+		Settings        map[string]any     `json:"settings"`
+		MainLoopModel   types.ModelSetting `json:"main_loop_model"`
+		ThinkingEnabled bool               `json:"thinking_enabled"`
+		FastMode        bool               `json:"fast_mode"`
+	}
+
+	if err := json.Unmarshal(data, &config); err != nil {
+		return // 配置文件格式错误，使用默认值
+	}
+
+	if config.Settings != nil {
+		s.Settings = config.Settings
+	}
+	if config.MainLoopModel != "" {
+		s.MainLoopModel = config.MainLoopModel
+	}
+	s.ThinkingEnabled = config.ThinkingEnabled
+	s.FastMode = config.FastMode
+}
+
+// saveConfig 将配置保存到磁盘
+func (s *AppState) saveConfig() error {
+	s.mu.RLock()
+	config := struct {
+		Settings        map[string]any     `json:"settings"`
+		MainLoopModel   types.ModelSetting `json:"main_loop_model"`
+		ThinkingEnabled bool               `json:"thinking_enabled"`
+		FastMode        bool               `json:"fast_mode"`
+	}{
+		Settings:        s.Settings,
+		MainLoopModel:   s.MainLoopModel,
+		ThinkingEnabled: s.ThinkingEnabled,
+		FastMode:        s.FastMode,
+	}
+	s.mu.RUnlock()
+
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	// 确保目录存在
+	dir := filepath.Dir(s.configPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	return os.WriteFile(s.configPath, data, 0644)
 }
 
 func (s *AppState) AddListener(listener StateChangeListener) {
@@ -198,8 +273,12 @@ func (s *AppState) GetMainLoopModel() types.ModelSetting {
 
 func (s *AppState) SetMainLoopModel(model types.ModelSetting) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.MainLoopModel = model
+	s.mu.Unlock()
+
+	// 保存配置到磁盘
+	s.saveConfig()
+
 	s.emit(StateChangeEvent{Type: "model_update", Key: "mainLoopModel", Value: model})
 }
 
@@ -341,8 +420,12 @@ func (s *AppState) SetMCPState(mcp MCPState) {
 
 func (s *AppState) SetSetting(key string, value any) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.Settings[key] = value
+	s.mu.Unlock()
+
+	// 保存配置到磁盘
+	s.saveConfig()
+
 	s.emit(StateChangeEvent{Type: "setting_update", Key: key, Value: value})
 }
 
