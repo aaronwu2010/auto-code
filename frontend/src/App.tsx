@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-// 导入 Wails 生成的绑定函数和类型
 import {
   SendMessage,
   Interrupt,
@@ -14,10 +13,8 @@ import {
 } from "../wailsjs/go/state/WailsBindings";
 import { state, types } from "../wailsjs/go/models";
 
-// 导入 Wails 运行时
 import { EventsOn, EventsOff } from "../wailsjs/runtime/runtime";
 
-// 本地类型别名
 type Message = types.Message;
 type ContentBlock = types.ContentBlock;
 type AppStateSnapshot = state.AppStateSnapshot;
@@ -49,7 +46,6 @@ function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // 设置面板状态
   const [showSettings, setShowSettings] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [ollamaConfig, setOllamaConfig] = useState<OllamaConfig>({
@@ -62,23 +58,10 @@ function App() {
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [healthCheckResult, setHealthCheckResult] = useState<string | null>(null);
 
-  // 文件资源管理器状态
   const [projectDir, setProjectDir] = useState<string>("");
   const [files, setFiles] = useState<FileInfo[]>([]);
   const [selectedFile, setSelectedFile] = useState<string>("");
   const [loadingFiles, setLoadingFiles] = useState(false);
-
-  // 日志面板状态
-  const [logs, setLogs] = useState<string[]>([]);
-  const [showLogs, setShowLogs] = useState(true);
-
-  // 添加日志的辅助函数
-  const addLog = (message: string) => {
-    const timestamp = new Date().toLocaleTimeString();
-    const logLine = `[${timestamp}] ${message}`;
-    console.log(logLine);
-    setLogs((prev) => [...prev.slice(-99), logLine]); // 保留最后100条
-  };
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -88,14 +71,12 @@ function App() {
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
-  // 当打开设置面板时自动加载模型列表
   useEffect(() => {
     if (showSettings && models.length === 0 && !loadingModels) {
       loadModels();
     }
   }, [showSettings]);
 
-  // 加载配置和模型列表
   const loadConfig = async () => {
     try {
       const config = await GetOllamaConfig();
@@ -110,14 +91,11 @@ function App() {
     setModelsError(null);
     try {
       const result = await ListAvailableModels();
-      console.log("ListAvailableModels result:", result);
       if (result) {
         if (result.models && result.models.length > 0) {
-          console.log("Found models:", result.models);
           setModels(result.models);
           setModelsError(null);
         } else if (result.error) {
-          console.log("Error from backend:", result.error);
           setModelsError(result.error);
           setModels([]);
         } else {
@@ -126,7 +104,6 @@ function App() {
         }
       }
     } catch (err) {
-      console.error("loadModels error:", err);
       setModelsError("加载模型列表失败: " + String(err));
       setModels([]);
     }
@@ -134,28 +111,20 @@ function App() {
   };
 
   const checkHealth = async () => {
-    console.log("checkHealth: 开始检查连接...");
     setHealthCheckResult("正在检查连接...");
     try {
       const health = await CheckOllamaHealth();
-      console.log("checkHealth: 收到结果", health);
       if (health) {
         setOllamaHealth(health);
         if (health.connected) {
-          const msg = `✓ 已连接到 ${health.base_url}，发现 ${health.available_models || 0} 个模型`;
-          console.log(`checkHealth: ${msg}`);
-          setHealthCheckResult(msg);
+          setHealthCheckResult(`✓ 已连接到 ${health.base_url}，发现 ${health.available_models || 0} 个模型`);
         } else {
-          const msg = `✗ 连接失败: ${health.error || "未知错误"}`;
-          console.log(`checkHealth: ${msg}`);
-          setHealthCheckResult(msg);
+          setHealthCheckResult(`✗ 连接失败: ${health.error || "未知错误"}`);
         }
       } else {
-        console.error("checkHealth: 返回结果为空");
         setHealthCheckResult("✗ 检查失败: 返回结果为空");
       }
     } catch (err) {
-      console.error("checkHealth: 检查失败", err);
       setHealthCheckResult(`✗ 检查失败: ${String(err)}`);
     }
   };
@@ -168,7 +137,6 @@ function App() {
     } catch {}
   };
 
-  // 选择项目目录
   const handleSelectDirectory = async () => {
     try {
       const dir = await SelectProjectDirectory();
@@ -176,155 +144,93 @@ function App() {
         setProjectDir(dir);
         await loadFiles(dir);
       }
-    } catch (err) {
-      console.error("选择目录失败:", err);
-    }
+    } catch {}
   };
 
-  // 加载文件列表
   const loadFiles = async (dir: string) => {
     if (!dir) return;
     setLoadingFiles(true);
     try {
       const fileList = await ListDirectoryContents(dir);
       setFiles(fileList || []);
-    } catch (err) {
-      console.error("加载文件列表失败:", err);
+    } catch {
       setFiles([]);
     }
     setLoadingFiles(false);
   };
 
-  // 点击目录项
   const handleFileClick = (file: FileInfo) => {
     if (file.is_dir) {
-      // 如果是目录，进入该目录
       setProjectDir(file.path);
       loadFiles(file.path);
     } else {
-      // 如果是文件，选中它
       setSelectedFile(file.path);
     }
   };
 
   useEffect(() => {
-    addLog("App: 初始化事件监听器");
-    
     EventsOn("state:change", (data: unknown) => {
-      addLog("事件 state:change: " + JSON.stringify(data));
       try {
         const event: StateChangeEvent =
           typeof data === "string" ? JSON.parse(data) : (data as StateChangeEvent);
         if (event.type === "status_update") {
-          addLog("状态更新: " + String(event.value));
           setStatusText(event.value as string);
         }
         if (event.type === "processing_update") {
-          addLog("处理状态更新: " + String(event.value));
           setIsLoading(event.value as boolean);
         }
-      } catch (err) {
-        addLog("ERROR: 处理 state:change 事件失败: " + String(err));
-      }
+      } catch {}
     });
 
     EventsOn("query:message", (data: unknown) => {
-      addLog("事件 query:message: " + JSON.stringify(data));
       try {
         const msg: SDKMessage =
           typeof data === "string" ? JSON.parse(data) : (data as SDKMessage);
-        addLog("解析后的消息: type=" + msg.type + (msg.message ? ", id=" + msg.message.id : ""));
         if (msg.message) {
           setMessages((prev) => {
             const exists = prev.some((m) => m.id === msg.message!.id);
-            if (exists) {
-              addLog("消息已存在，跳过: " + msg.message!.id);
-              return prev;
-            }
-            addLog("添加新消息: " + msg.message!.id);
+            if (exists) return prev;
             return [...prev, msg.message!];
           });
         }
-        if (msg.type === "result") {
-          addLog("收到 result 类型消息，设置 isLoading=false");
+        if (msg.type === "result" || msg.type === "error") {
           setIsLoading(false);
         }
-        if (msg.type === "error") {
-          addLog("收到 error 类型消息，设置 isLoading=false");
-          setIsLoading(false);
-        }
-      } catch (err) {
-        addLog("ERROR: 处理 query:message 事件失败: " + String(err));
-      }
+      } catch {}
     });
 
     loadInitialState();
 
     return () => {
-      addLog("App: 清理事件监听器");
       EventsOff("state:change");
       EventsOff("query:message");
     };
   }, []);
 
   const loadInitialState = async () => {
-    addLog("loadInitialState: 开始加载初始状态");
     try {
-      addLog("loadInitialState: 获取 AppState...");
       const state = await GetAppState();
-      addLog("loadInitialState: AppState=" + JSON.stringify(state));
-      if (state) {
-        setAppState(state);
-      }
-      
-      addLog("loadInitialState: 获取 Messages...");
+      if (state) setAppState(state);
+
       const msgs = await GetMessages();
-      addLog("loadInitialState: Messages count=" + (msgs?.messages?.length || 0));
-      if (msgs) {
-        setMessages(msgs.messages || []);
-      }
-      
-      addLog("loadInitialState: 加载配置...");
+      if (msgs) setMessages(msgs.messages || []);
+
       await loadConfig();
-      
-      addLog("loadInitialState: 检查健康状态...");
       await checkHealth();
-      
-      addLog("loadInitialState: 加载模型列表...");
       await loadModels();
-      
-      addLog("loadInitialState: 初始化完成");
-    } catch (err) {
-      addLog("ERROR: loadInitialState 加载失败: " + String(err));
-    }
+    } catch {}
   };
 
   const handleSubmit = async () => {
-    addLog("handleSubmit: 开始处理, input=" + input + ", isLoading=" + isLoading);
-    
-    if (!input.trim()) {
-      addLog("handleSubmit: 输入为空，退出");
-      return;
-    }
-    
-    if (isLoading) {
-      addLog("handleSubmit: 正在加载中，退出");
-      return;
-    }
+    if (!input.trim() || isLoading) return;
 
     const currentInput = input;
-    addLog("handleSubmit: 准备发送消息: " + currentInput);
-    
     setInput("");
     setIsLoading(true);
-    addLog("handleSubmit: 已设置 isLoading=true，输入已清空");
 
     try {
-      addLog("handleSubmit: 调用 SendMessage API...");
-      const result = await SendMessage({ prompt: currentInput });
-      addLog("handleSubmit: SendMessage 返回结果: success=" + result.success + ", session_id=" + result.session_id + ", error=" + (result.error || "无"));
-    } catch (err) {
-      addLog("ERROR: handleSubmit SendMessage 调用失败: " + String(err));
+      await SendMessage({ prompt: currentInput });
+    } catch {
       setIsLoading(false);
     }
   };
@@ -344,7 +250,7 @@ function App() {
     switch (block.type) {
       case "text":
         return (
-          <pre key={idx} className="whitespace-pre-wrap break-words text-sm">
+          <pre key={idx} className="whitespace-pre-wrap break-words text-sm leading-relaxed">
             {block.text}
           </pre>
         );
@@ -352,13 +258,13 @@ function App() {
         return (
           <div
             key={idx}
-            className="bg-[#1e3a5f] border border-[#2a4a6f] rounded px-3 py-2 my-1 text-sm"
+            className="bg-[#1c2d44] border border-[#2a4a6f]/60 rounded-lg px-3 py-2 my-1.5 text-sm"
           >
-            <span className="text-[#6cb6ff] font-bold">
+            <span className="text-[#6cb6ff] font-semibold text-xs tracking-wide">
               {block.tool_name}
             </span>
             {block.tool_input && (
-              <pre className="text-xs text-[#888] mt-1 overflow-x-auto">
+              <pre className="text-xs text-[#7a8a9a] mt-1.5 overflow-x-auto">
                 {typeof block.tool_input === "string"
                   ? block.tool_input
                   : JSON.stringify(block.tool_input, null, 2)}
@@ -370,10 +276,10 @@ function App() {
         return (
           <div
             key={idx}
-            className={`rounded px-3 py-2 my-1 text-sm ${
+            className={`rounded-lg px-3 py-2 my-1.5 text-sm ${
               block.is_error
-                ? "bg-[#3d1c1c] border border-[#5a2a2a]"
-                : "bg-[#1a2e1a] border border-[#2a4a2a]"
+                ? "bg-[#2d1a1a] border border-[#5a2a2a]/60"
+                : "bg-[#1a2d1a] border border-[#2a4a2a]/60"
             }`}
           >
             <pre className="whitespace-pre-wrap break-words">
@@ -385,12 +291,12 @@ function App() {
         return (
           <details
             key={idx}
-            className="bg-[#1a1a2e] border border-[#2a2a4a] rounded px-3 py-2 my-1"
+            className="bg-[#1a1a2e]/60 border border-[#2a2a4a]/50 rounded-lg px-3 py-2 my-1.5"
           >
-            <summary className="text-xs text-[#888] cursor-pointer">
+            <summary className="text-xs text-[#6a6a8a] cursor-pointer hover:text-[#8a8aaa] transition-colors">
               Thinking...
             </summary>
-            <pre className="whitespace-pre-wrap break-words text-xs text-[#666] mt-2">
+            <pre className="whitespace-pre-wrap break-words text-xs text-[#5a5a7a] mt-2">
               {block.thinking}
             </pre>
           </details>
@@ -407,72 +313,70 @@ function App() {
     return (
       <div
         key={msg.id}
-        className={`mb-3 px-3 py-2 rounded-lg max-w-[90%] ${
+        className={`mb-3 px-4 py-3 rounded-xl max-w-[92%] ${
           isUser
-            ? "bg-[#16213e] ml-auto"
+            ? "bg-[#1e3a5f]/70 ml-auto border border-[#2a5a8f]/30"
             : isSystem
-            ? "bg-[#2a1a2e] border border-[#3a2a4a]"
-            : "bg-[#0f3460]"
+            ? "bg-[#2a1a3e]/50 border border-[#3a2a5a]/30"
+            : "bg-[#162440]/60 border border-[#2a3a5a]/30"
         }`}
       >
-        <div className="text-[11px] text-[#888] mb-1 font-bold uppercase">
+        <div className="text-[10px] text-[#6a7a8a] mb-1.5 font-semibold uppercase tracking-wider">
           {msg.role}
         </div>
-        {/* 渲染 content_blocks 或 content */}
         {msg.content_blocks && msg.content_blocks.length > 0
           ? msg.content_blocks.map((block, i) => renderContentBlock(block, i))
-          : <pre className="whitespace-pre-wrap break-words text-sm">{msg.content}</pre>}
+          : <pre className="whitespace-pre-wrap break-words text-sm leading-relaxed">{msg.content}</pre>}
       </div>
     );
   };
 
   return (
-    <div className="flex flex-col h-screen bg-[#1a1a2e] text-[#e0e0e0] font-mono">
+    <div className="flex flex-col h-screen bg-[#0e1525] text-[#d0d8e8] font-mono">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-[#2a2a4a] bg-[#16213e]">
+      <div className="flex items-center justify-between px-5 py-2.5 border-b border-[#1e2d44] bg-[#111b2e]">
         <div className="flex items-center gap-3">
-          <span className="text-sm font-bold text-[#6cb6ff]">Auto Code</span>
+          <span className="text-sm font-bold text-[#6cb6ff] tracking-wide">Auto Code</span>
           {appState?.mainLoopModel && (
-            <span className="text-xs text-[#888] bg-[#0f3460] px-2 py-0.5 rounded">
+            <span className="text-[11px] text-[#8a9ab0] bg-[#1a2a40] px-2.5 py-0.5 rounded-md border border-[#2a3a50]/50">
               {appState.mainLoopModel}
             </span>
           )}
           {ollamaHealth && (
-            <span className={`text-xs px-2 py-0.5 rounded ${
+            <span className={`text-[11px] px-2.5 py-0.5 rounded-md border ${
               ollamaHealth.connected
-                ? "bg-[#1a2e1a] text-[#6bff6b]"
-                : "bg-[#3d1c1c] text-[#ff6b6b]"
+                ? "bg-[#1a2e1a]/60 text-[#6bff6b] border-[#2a4a2a]/50"
+                : "bg-[#2d1a1a]/60 text-[#ff6b6b] border-[#4a2a2a]/50"
             }`}>
               {ollamaHealth.connected ? "已连接" : "未连接"}
-              {ollamaHealth.is_local ? " (本地)" : " (云端)"}
+              {ollamaHealth.is_local ? " · 本地" : " · 云端"}
             </span>
           )}
           {appState?.thinkingEnabled && (
-            <span className="text-xs text-[#a78bfa] bg-[#2a1a3e] px-2 py-0.5 rounded">
+            <span className="text-[11px] text-[#a78bfa] bg-[#1e1530] px-2.5 py-0.5 rounded-md border border-[#2e2550]/50">
               Thinking
             </span>
           )}
           {appState?.fastMode && (
-            <span className="text-xs text-[#fbbf24] bg-[#3a2a0a] px-2 py-0.5 rounded">
+            <span className="text-[11px] text-[#fbbf24] bg-[#2a2010] px-2.5 py-0.5 rounded-md border border-[#3a3020]/50">
               Fast
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          {/* 设置按钮 */}
+        <div className="flex items-center gap-3">
           <button
             onClick={() => setShowSettings(!showSettings)}
-            className="text-xs bg-[#0f3460] text-[#6cb6ff] px-3 py-1 rounded hover:bg-[#1a4a80]"
+            className="text-xs bg-[#1a2a40] text-[#6cb6ff] px-3 py-1.5 rounded-md hover:bg-[#243550] border border-[#2a3a50]/50 transition-colors"
           >
-            ⚙️ 设置
+            设置
           </button>
           {statusText && (
-            <span className="text-xs text-[#888]">{statusText}</span>
+            <span className="text-[11px] text-[#6a7a8a]">{statusText}</span>
           )}
           {isLoading && (
             <button
               onClick={handleInterrupt}
-              className="text-xs bg-[#5a2a2a] text-[#ff6b6b] px-2 py-1 rounded hover:bg-[#6a3a3a]"
+              className="text-xs bg-[#3a1a1a] text-[#ff6b6b] px-3 py-1.5 rounded-md hover:bg-[#4a2a2a] border border-[#5a2a2a]/50 transition-colors"
             >
               Stop
             </button>
@@ -482,16 +386,15 @@ function App() {
 
       {/* 设置面板 */}
       {showSettings && (
-        <div className="border-b border-[#2a2a4a] bg-[#16213e] p-4">
+        <div className="border-b border-[#1e2d44] bg-[#111b2e] p-5">
           <div className="max-w-2xl mx-auto space-y-4">
-            <h2 className="text-sm font-bold text-[#6cb6ff] mb-3">Ollama 配置</h2>
+            <h2 className="text-sm font-bold text-[#6cb6ff] tracking-wide">Ollama 配置</h2>
 
-            {/* 连接状态 */}
             {ollamaHealth && (
-              <div className={`text-xs p-2 rounded ${
+              <div className={`text-xs p-2.5 rounded-lg border ${
                 ollamaHealth.connected
-                  ? "bg-[#1a2e1a] text-[#6bff6b]"
-                  : "bg-[#3d1c1c] text-[#ff6b6b]"
+                  ? "bg-[#1a2e1a]/40 text-[#6bff6b] border-[#2a4a2a]/50"
+                  : "bg-[#2d1a1a]/40 text-[#ff6b6b] border-[#4a2a2a]/50"
               }`}>
                 {ollamaHealth.connected
                   ? `✓ 已连接到 ${ollamaHealth.base_url}`
@@ -500,39 +403,36 @@ function App() {
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Ollama URL */}
               <div>
-                <label className="text-xs text-[#888] block mb-1">Ollama URL</label>
+                <label className="text-[11px] text-[#6a7a8a] block mb-1.5">Ollama URL</label>
                 <input
                   type="text"
                   value={ollamaConfig.base_url}
                   onChange={(e) => setOllamaConfig({ ...ollamaConfig, base_url: e.target.value })}
                   placeholder="http://localhost:11434/api"
-                  className="w-full bg-[#0f3460] text-[#e0e0e0] border border-[#2a4a6f] rounded px-3 py-2 text-sm outline-none focus:border-[#4a6a9a]"
+                  className="w-full bg-[#0e1525] text-[#d0d8e8] border border-[#1e2d44] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#3a5a8a] transition-colors placeholder-[#3a4a5a]"
                 />
               </div>
 
-              {/* API Key */}
               <div>
-                <label className="text-xs text-[#888] block mb-1">API Key (可选，用于 Ollama Cloud)</label>
+                <label className="text-[11px] text-[#6a7a8a] block mb-1.5">API Key（可选）</label>
                 <input
                   type="password"
                   value={ollamaConfig.api_key}
                   onChange={(e) => setOllamaConfig({ ...ollamaConfig, api_key: e.target.value })}
                   placeholder="留空使用本地模式"
-                  className="w-full bg-[#0f3460] text-[#e0e0e0] border border-[#2a4a6f] rounded px-3 py-2 text-sm outline-none focus:border-[#4a6a9a]"
+                  className="w-full bg-[#0e1525] text-[#d0d8e8] border border-[#1e2d44] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#3a5a8a] transition-colors placeholder-[#3a4a5a]"
                 />
               </div>
             </div>
 
-            {/* 模型选择 */}
             <div>
-              <label className="text-xs text-[#888] block mb-1">选择模型</label>
+              <label className="text-[11px] text-[#6a7a8a] block mb-1.5">选择模型</label>
               <div className="flex gap-2">
                 <select
                   value={ollamaConfig.model}
                   onChange={(e) => setOllamaConfig({ ...ollamaConfig, model: e.target.value })}
-                  className="flex-1 bg-[#0f3460] text-[#e0e0e0] border border-[#2a4a6f] rounded px-3 py-2 text-sm outline-none focus:border-[#4a6a9a]"
+                  className="flex-1 bg-[#0e1525] text-[#d0d8e8] border border-[#1e2d44] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#3a5a8a] transition-colors"
                 >
                   <option value="">选择模型...</option>
                   {models.map((m) => (
@@ -546,43 +446,40 @@ function App() {
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    console.log("Refresh button clicked");
                     loadModels();
                   }}
                   disabled={loadingModels}
-                  className="bg-[#0f3460] text-[#6cb6ff] px-3 py-2 rounded hover:bg-[#1a4a80] disabled:opacity-50 text-sm cursor-pointer"
+                  className="bg-[#1a2a40] text-[#6cb6ff] px-4 py-2 rounded-lg hover:bg-[#243550] disabled:opacity-50 text-sm cursor-pointer border border-[#2a3a50]/50 transition-colors"
                 >
-                  {loadingModels ? "加载中..." : "刷新"}
+                  {loadingModels ? "..." : "刷新"}
                 </button>
               </div>
               {modelsError && (
-                <p className="text-xs text-[#ff6b6b] mt-1">{modelsError}</p>
+                <p className="text-xs text-[#ff6b6b] mt-1.5">{modelsError}</p>
               )}
               {models.length === 0 && !loadingModels && !modelsError && (
-                <p className="text-xs text-[#888] mt-1">
+                <p className="text-[11px] text-[#4a5a6a] mt-1.5">
                   未找到模型，请确保 Ollama 服务正在运行，或手动输入模型名称
                 </p>
               )}
             </div>
 
-            {/* 手动输入模型 */}
             <div>
-              <label className="text-xs text-[#888] block mb-1">或手动输入模型名称</label>
+              <label className="text-[11px] text-[#6a7a8a] block mb-1.5">或手动输入模型名称</label>
               <input
                 type="text"
                 value={ollamaConfig.model}
                 onChange={(e) => setOllamaConfig({ ...ollamaConfig, model: e.target.value })}
                 placeholder="例如: llama3.2, qwen2.5, deepseek-coder"
-                className="w-full bg-[#0f3460] text-[#e0e0e0] border border-[#2a4a6f] rounded px-3 py-2 text-sm outline-none focus:border-[#4a6a9a]"
+                className="w-full bg-[#0e1525] text-[#d0d8e8] border border-[#1e2d44] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#3a5a8a] transition-colors placeholder-[#3a4a5a]"
               />
             </div>
 
-            {/* 保存按钮 */}
-            <div className="flex gap-2">
+            <div className="flex gap-2 pt-1">
               <button
                 type="button"
                 onClick={saveConfig}
-                className="bg-[#1a4a80] text-[#e0e0e0] px-4 py-2 rounded hover:bg-[#2a5a90] text-sm"
+                className="bg-[#1a3a60] text-[#d0d8e8] px-5 py-2 rounded-lg hover:bg-[#244a70] text-sm border border-[#2a4a70]/50 transition-colors"
               >
                 保存配置
               </button>
@@ -590,16 +487,15 @@ function App() {
                 type="button"
                 onClick={(e) => {
                   e.preventDefault();
-                  console.log("测试连接按钮被点击");
                   checkHealth();
                 }}
-                className="bg-[#0f3460] text-[#6cb6ff] px-4 py-2 rounded hover:bg-[#1a4a80] text-sm"
+                className="bg-[#1a2a40] text-[#6cb6ff] px-5 py-2 rounded-lg hover:bg-[#243550] text-sm border border-[#2a3a50]/50 transition-colors"
               >
                 测试连接
               </button>
             </div>
             {healthCheckResult && (
-              <div className={`text-sm mt-2 ${healthCheckResult.includes("✓") ? "text-green-400" : "text-red-400"}`}>
+              <div className={`text-sm mt-1 ${healthCheckResult.includes("✓") ? "text-[#6bff6b]" : "text-[#ff6b6b]"}`}>
                 {healthCheckResult}
               </div>
             )}
@@ -607,120 +503,115 @@ function App() {
         </div>
       )}
 
-      {/* 主内容区域 - 左侧对话，右侧文件资源管理器 */}
+      {/* 主内容区域 */}
       <div className="flex flex-1 overflow-hidden">
         {/* 左侧对话区域 */}
-        <div className="flex flex-col flex-1 border-r border-[#2a2a4a]">
+        <div className="flex flex-col flex-1">
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-4 py-3">
+          <div className="flex-1 overflow-y-auto px-6 py-4">
             {messages.length === 0 && (
-              <div className="text-center text-[#555] mt-20">
-                <div className="text-4xl mb-4">Auto Code</div>
+              <div className="text-center text-[#3a4a5a] mt-24">
+                <div className="text-3xl font-bold text-[#2a3a5a] mb-3 tracking-wide">Auto Code</div>
                 <div className="text-sm">
-                  Type a message to start a conversation
+                  输入消息开始对话
                 </div>
               </div>
             )}
             {messages.map(renderMessage)}
             {isLoading && (
-              <div className="text-[#888] text-sm px-3 py-2 animate-pulse">
-                Processing...
+              <div className="text-[#6a7a8a] text-sm px-4 py-2 animate-pulse">
+                处理中...
               </div>
             )}
             <div ref={messagesEndRef} />
           </div>
 
           {/* Input */}
-          <div className="px-4 py-3 border-t border-[#2a2a4a]">
-            {/* 项目目录选择 */}
-            <div className="flex items-center gap-2 mb-2">
-              <button
-                type="button"
-                onClick={handleSelectDirectory}
-                className="text-xs bg-[#0f3460] text-[#6cb6ff] px-3 py-1 rounded hover:bg-[#1a4a80]"
-              >
-                📁 选择目录
-              </button>
-              {projectDir && (
-                <span className="text-xs text-[#888] truncate">{projectDir}</span>
-              )}
-            </div>
-
-            <div className="flex gap-2">
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Type your message... (Enter to send, Shift+Enter for newline)"
-                rows={4}
-                className="flex-1 bg-[#16213e] text-[#e0e0e0] border border-[#2a2a4a] rounded-lg px-3 py-2 font-mono text-sm resize-none outline-none focus:border-[#4a6a9a] placeholder-[#555]"
-              />
-              <div className="flex flex-col gap-1">
+          <div className="px-5 py-4 border-t border-[#1e2d44] bg-[#0c1320]">
+            {projectDir && (
+              <div className="flex items-center gap-2 mb-2.5 text-[11px] text-[#4a5a6a]">
+                <span className="text-[#6a7a8a]">{projectDir}</span>
+              </div>
+            )}
+            <div className="flex gap-3">
+              <div className="flex-1 relative">
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
+                  rows={3}
+                  className="w-full bg-[#111b2e] text-[#d0d8e8] border border-[#1e2d44] rounded-xl px-4 py-3 font-mono text-sm resize-none outline-none focus:border-[#3a5a8a] transition-colors placeholder-[#3a4a5a]"
+                />
+              </div>
+              <div className="flex flex-col gap-2 justify-end">
                 <button
                   type="button"
-                  onClick={(e) => {
-                    addLog("Send 按钮被点击, isLoading=" + isLoading + ", input=" + input.trim());
-                    e.preventDefault();
-                    handleSubmit();
-                  }}
+                  onClick={() => handleSubmit()}
                   disabled={isLoading || !input.trim()}
-                  className="bg-[#0f3460] text-[#e0e0e0] border-none rounded-lg px-4 py-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[#1a4a80] text-sm"
+                  className="bg-[#1a3a60] text-[#d0d8e8] rounded-xl px-5 py-2.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#244a70] text-sm border border-[#2a4a70]/50 transition-colors"
                 >
-                  Send
+                  发送
                 </button>
                 {isLoading && (
                   <button
                     onClick={handleInterrupt}
-                    className="bg-[#5a2a2a] text-[#ff6b6b] border-none rounded-lg px-4 py-1 cursor-pointer hover:bg-[#6a3a3a] text-xs"
+                    className="bg-[#3a1a1a] text-[#ff6b6b] rounded-xl px-5 py-2 cursor-pointer hover:bg-[#4a2a2a] text-xs border border-[#5a2a2a]/50 transition-colors"
                   >
-                    Cancel
+                    取消
                   </button>
                 )}
               </div>
             </div>
+            <div className="flex items-center gap-2 mt-2.5">
+              <button
+                type="button"
+                onClick={handleSelectDirectory}
+                className="text-[11px] bg-[#1a2a40] text-[#6a8aaa] px-3 py-1 rounded-md hover:bg-[#243550] border border-[#2a3a50]/50 transition-colors"
+              >
+                选择目录
+              </button>
+              {!projectDir && (
+                <span className="text-[11px] text-[#3a4a5a]">未选择项目目录</span>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* 右侧面板：文件资源管理器 + 日志 */}
-        <div className="w-72 flex flex-col bg-[#16213e] overflow-hidden border-l border-[#2a2a4a]">
-          {/* 文件资源管理器 */}
+        {/* 右侧面板：文件资源管理器 */}
+        <div className="w-64 flex flex-col bg-[#0c1320] overflow-hidden border-l border-[#1e2d44]">
           <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="px-3 py-2 border-b border-[#2a2a4a] text-xs font-bold text-[#6cb6ff] flex justify-between items-center">
-              <span>文件资源管理器</span>
-              <button
-                type="button"
-                onClick={() => setShowLogs(!showLogs)}
-                className="text-[10px] bg-[#0f3460] px-2 py-0.5 rounded hover:bg-[#1a4a80]"
-              >
-                {showLogs ? "隐藏日志" : "显示日志"}
-              </button>
+            <div className="px-4 py-3 border-b border-[#1e2d44] text-[11px] font-semibold text-[#6a8aaa] tracking-wide uppercase">
+              文件资源管理器
             </div>
             <div className="flex-1 overflow-y-auto">
               {loadingFiles ? (
-                <div className="text-xs text-[#888] p-2">加载中...</div>
+                <div className="text-[11px] text-[#4a5a6a] p-3">加载中...</div>
               ) : !projectDir ? (
-                <div className="text-xs text-[#555] p-2">请选择项目目录</div>
+                <div className="text-[11px] text-[#3a4a5a] p-3">请选择项目目录</div>
               ) : files.length === 0 ? (
-                <div className="text-xs text-[#555] p-2">目录为空</div>
+                <div className="text-[11px] text-[#3a4a5a] p-3">目录为空</div>
               ) : (
-                <div className="text-xs">
+                <div className="text-[11px] py-1">
                   {files.map((file, i) => (
                     <div
                       key={i}
                       onClick={() => handleFileClick(file)}
-                      className={`px-2 py-1 cursor-pointer flex items-center gap-1 hover:bg-[#0f3460] ${
-                        selectedFile === file.path ? "bg-[#0f3460]" : ""
+                      className={`px-3 py-1.5 cursor-pointer flex items-center gap-2 transition-colors ${
+                        selectedFile === file.path
+                          ? "bg-[#1a2a40] text-[#6cb6ff]"
+                          : "text-[#8a9ab0] hover:bg-[#111b2e]"
                       }`}
                     >
-                      <span>{file.is_dir ? "📁" : "📄"}</span>
-                      <span className="truncate">{file.name}</span>
+                      <span className="text-[#4a5a6a]">{file.is_dir ? "▸" : "·"}</span>
+                      <span className="truncate flex-1">{file.name}</span>
                       {!file.is_dir && file.size > 0 && (
-                        <span className="text-[10px] text-[#555] ml-auto">
+                        <span className="text-[9px] text-[#3a4a5a]">
                           {file.size > 1024 * 1024
-                            ? `${(file.size / 1024 / 1024).toFixed(1)}MB`
+                            ? `${(file.size / 1024 / 1024).toFixed(1)}M`
                             : file.size > 1024
-                            ? `${(file.size / 1024).toFixed(1)}KB`
+                            ? `${(file.size / 1024).toFixed(1)}K`
                             : `${file.size}B`}
                         </span>
                       )}
@@ -730,44 +621,6 @@ function App() {
               )}
             </div>
           </div>
-
-          {/* 日志面板 */}
-          {showLogs && (
-            <div className="h-48 flex flex-col border-t border-[#2a2a4a]">
-              <div className="px-3 py-1 border-b border-[#2a2a4a] text-xs font-bold text-[#fbbf24] flex justify-between items-center">
-                <span>📋 调试日志</span>
-                <button
-                  type="button"
-                  onClick={() => setLogs([])}
-                  className="text-[10px] bg-[#3a2a0a] px-2 py-0.5 rounded hover:bg-[#4a3a1a]"
-                >
-                  清除
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto bg-[#0a0a1a] p-2 font-mono text-[10px]">
-                {logs.length === 0 ? (
-                  <div className="text-[#555]">暂无日志</div>
-                ) : (
-                  logs.map((log, i) => (
-                    <div
-                      key={i}
-                      className={`${
-                        log.includes("ERROR") || log.includes("error")
-                          ? "text-red-400"
-                          : log.includes("事件") || log.includes("收到")
-                          ? "text-green-400"
-                          : log.includes("handleSubmit") || log.includes("SendMessage")
-                          ? "text-blue-400"
-                          : "text-[#888]"
-                      }`}
-                    >
-                      {log}
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>
