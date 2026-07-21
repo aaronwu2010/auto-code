@@ -9,10 +9,11 @@ type MicrocompactResult struct {
 	MessagesAfter  int
 	TokensSaved    int
 	DidCompact     bool
+	Summary        string
 }
 
 type PendingCacheEdits struct {
-	Edits map[string]string
+	Edits  map[string]string
 	Pinned bool
 }
 
@@ -62,7 +63,7 @@ func MicrocompactMessages(messages []CompactMessage) MicrocompactResult {
 		tokens := EstimateMessageTokens(msg.Content)
 		totalBefore += tokens
 
-		if msg.Role == "system" || msg.Role == "user" && msg.IsLatest {
+		if msg.Role == "system" || (msg.Role == "user" && msg.IsLatest) {
 			kept = append(kept, msg)
 			totalAfter += tokens
 		} else if strings.TrimSpace(msg.Content) != "" {
@@ -104,4 +105,59 @@ func FormatCompactSummary(summary string) string {
 		return ""
 	}
 	return "<compact_summary>\n" + summary + "\n</compact_summary>"
+}
+
+type SummarizeFunc func(ctx any, messages []CompactMessage, prompt string) (string, error)
+
+var summarizeFn SummarizeFunc
+
+func SetSummarizeFunc(fn SummarizeFunc) {
+	summarizeFn = fn
+}
+
+func CompactWithSummary(messages []CompactMessage, windowSize, currentTokens int) *CompactionResult {
+	if !ShouldAutoCompact(currentTokens, windowSize) {
+		return nil
+	}
+
+	if summarizeFn != nil {
+		var olderMessages []CompactMessage
+		keepCount := len(messages) / 2
+		if keepCount < 2 {
+			keepCount = 2
+		}
+		olderMessages = messages[:len(messages)-keepCount]
+
+		if len(olderMessages) > 0 {
+			summary, err := summarizeFn(nil, olderMessages, GetCompactPrompt())
+			if err == nil && summary != "" {
+				kept := messages[len(messages)-keepCount:]
+				summaryMsg := CompactMessage{
+					Role:    "system",
+					Content: FormatCompactSummary(summary),
+				}
+				result := []CompactMessage{summaryMsg}
+				result = append(result, kept...)
+
+				return &CompactionResult{
+					TotalTokensBefore: currentTokens,
+					TotalTokensAfter:  EstimateTokensForMessages(result),
+					MessagesRemoved:   len(olderMessages),
+					MessagesKept:      len(result),
+					Summary:           summary,
+					WasPartial:        false,
+				}
+			}
+		}
+	}
+
+	return CompactConversation(messages, windowSize, currentTokens)
+}
+
+func EstimateTokensForMessages(messages []CompactMessage) int {
+	total := 0
+	for _, msg := range messages {
+		total += EstimateMessageTokens(msg.Content)
+	}
+	return total
 }

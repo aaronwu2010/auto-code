@@ -1,8 +1,12 @@
 ﻿package repl
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"os/exec"
+	"runtime"
+	"time"
 
 	"github.com/auto-code/auto-code/internal/tools"
 	"github.com/auto-code/auto-code/internal/types"
@@ -12,6 +16,7 @@ const (
 	toolName        = "REPL"
 	maxResultChars  = 100000
 	descriptionText = "Run code in an interactive REPL session."
+	defaultTimeout  = 30 * time.Second
 )
 
 type REPLInput struct {
@@ -113,11 +118,59 @@ func executeREPL(ctx context.Context, language, code string) (string, error) {
 }
 
 func executePython(ctx context.Context, code string) (string, error) {
-	return "", fmt.Errorf("Python REPL not yet implemented: requires python runtime")
+	pythonCmd := "python3"
+	if runtime.GOOS == "windows" {
+		pythonCmd = "python"
+	}
+
+	if _, err := exec.LookPath(pythonCmd); err != nil {
+		return "", fmt.Errorf("Python runtime not found: %v", err)
+	}
+
+	execCtx, cancel := context.WithTimeout(ctx, defaultTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(execCtx, pythonCmd, "-c", code)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	output := stdout.String()
+	if stderr.Len() > 0 {
+		if output != "" {
+			output += "\n"
+		}
+		output += stderr.String()
+	}
+
+	return output, err
 }
 
 func executeNode(ctx context.Context, code string) (string, error) {
-	return "", fmt.Errorf("Node REPL not yet implemented: requires node runtime")
+	nodeCmd := "node"
+	if _, err := exec.LookPath(nodeCmd); err != nil {
+		return "", fmt.Errorf("Node.js runtime not found: %v", err)
+	}
+
+	execCtx, cancel := context.WithTimeout(ctx, defaultTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(execCtx, nodeCmd, "-e", code)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	output := stdout.String()
+	if stderr.Len() > 0 {
+		if output != "" {
+			output += "\n"
+		}
+		output += stderr.String()
+	}
+
+	return output, err
 }
 
 func ParseREPLInput(raw map[string]any) (REPLInput, error) {

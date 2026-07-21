@@ -1,11 +1,13 @@
 ﻿package worktree
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"os/exec"
 
 	"github.com/auto-code/auto-code/internal/tools"
-	)
+)
 
 const (
 	maxResultChars = 100000
@@ -13,6 +15,12 @@ const (
 
 type WorktreeInput struct {
 	Path string `json:"path,omitempty"`
+}
+
+type WorktreeOutput struct {
+	Action  string `json:"action"`
+	Path    string `json:"path,omitempty"`
+	Message string `json:"message"`
 }
 
 type WorktreeTool struct {
@@ -55,15 +63,51 @@ func NewExitWorktreeTool() *WorktreeTool {
 }
 
 func (t *WorktreeTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	action := "exited"
 	if t.isEnter {
-		action = "entered"
 		inp, ok := input.(WorktreeInput)
-		if ok && inp.Path != "" {
-			return &tools.ToolResult{Data: fmt.Sprintf("Worktree %s at %s", action, inp.Path)}, nil
+		if !ok {
+			return nil, fmt.Errorf("invalid input type")
 		}
+		if inp.Path == "" {
+			return &tools.ToolResult{Data: WorktreeOutput{Action: "enter", Message: "path is required"}}, nil
+		}
+
+		cmd := exec.CommandContext(ctx, "git", "worktree", "add", inp.Path)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		if err := cmd.Run(); err != nil {
+			return &tools.ToolResult{Data: WorktreeOutput{
+				Action:  "enter",
+				Path:    inp.Path,
+				Message: stderr.String(),
+			}}, nil
+		}
+
+		return &tools.ToolResult{Data: WorktreeOutput{
+			Action:  "entered",
+			Path:    inp.Path,
+			Message: stdout.String(),
+		}}, nil
 	}
-	return &tools.ToolResult{Data: fmt.Sprintf("Worktree %s", action)}, nil
+
+	cmd := exec.CommandContext(ctx, "git", "worktree", "remove", ".")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return &tools.ToolResult{Data: WorktreeOutput{
+			Action:  "exit",
+			Message: fmt.Sprintf("Note: %s", stderr.String()),
+		}}, nil
+	}
+
+	return &tools.ToolResult{Data: WorktreeOutput{
+		Action:  "exited",
+		Message: stdout.String(),
+	}}, nil
 }
 
 func (t *WorktreeTool) Prompt(_ context.Context, _ tools.PromptOptions) (string, error) {

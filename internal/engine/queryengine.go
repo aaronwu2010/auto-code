@@ -16,17 +16,21 @@ import (
 )
 
 type QueryEngine struct {
-	appState      *state.AppState
-	toolReg       *registry.ToolRegistry
-	apiClient     *api.Client
-	messages      []types.Message
-	mu            sync.RWMutex
-	ctx           context.Context
-	cancel        context.CancelFunc
-	sessionID     types.SessionID
-	config        *QueryEngineConfig
-	usage         api.Usage
-	readFileState tools.FileStateCache
+	appState        *state.AppState
+	toolReg         *registry.ToolRegistry
+	apiClient       *api.Client
+	messages        []types.Message
+	mu              sync.RWMutex
+	ctx             context.Context
+	cancel          context.CancelFunc
+	sessionID       types.SessionID
+	config          *QueryEngineConfig
+	usage           api.Usage
+	readFileState   tools.FileStateCache
+	streamContent   string
+	streamThinking  string
+	streamToolCalls []types.ToolCall
+	streamMsgID     string
 }
 
 type QueryEngineConfig struct {
@@ -234,7 +238,9 @@ func (qe *QueryEngine) RegisterTool(tool tools.Tool) {
 }
 
 func (qe *QueryEngine) GetTotalCost() float64 {
-	return 0
+	qe.mu.RLock()
+	defer qe.mu.RUnlock()
+	return qe.usage.TotalCost
 }
 
 func (qe *QueryEngine) CheckHealth(ctx context.Context) *api.HealthStatus {
@@ -328,9 +334,14 @@ func (qe *QueryEngine) processQueryOutput(output query.QueryOutput) *SDKMessage 
 	switch output.Type {
 	case "assistant":
 		if output.Message != nil {
-			qe.mu.Lock()
-			qe.messages = append(qe.messages, *output.Message)
-			qe.mu.Unlock()
+			if qe.streamMsgID == "" {
+				qe.streamMsgID = generateMessageID()
+			}
+			qe.streamContent += output.Message.Content
+			qe.streamThinking += output.Message.Thinking
+			if len(output.Message.ToolCalls) > 0 {
+				qe.streamToolCalls = append(qe.streamToolCalls, output.Message.ToolCalls...)
+			}
 			return &SDKMessage{Type: "assistant", Message: output.Message, SessionID: qe.sessionID}
 		}
 	case "user":
@@ -347,12 +358,34 @@ func (qe *QueryEngine) processQueryOutput(output query.QueryOutput) *SDKMessage 
 	case "stream_event":
 		return &SDKMessage{Type: "stream_event", Data: output.Data, SessionID: qe.sessionID}
 	case "terminal":
+		if qe.streamContent != "" || qe.streamThinking != "" || len(qe.streamToolCalls) > 0 {
+			completeMsg := types.Message{
+				ID:        qe.streamMsgID,
+				Role:      types.RoleAssistant,
+				Content:   qe.streamContent,
+				Thinking:  qe.streamThinking,
+				ToolCalls: qe.streamToolCalls,
+				Model:     output.Message.Model,
+				Timestamp: time.Now().Unix(),
+			}
+			qe.mu.Lock()
+			qe.messages = append(qe.messages, completeMsg)
+			qe.mu.Unlock()
+		}
+		qe.streamContent = ""
+		qe.streamThinking = ""
+		qe.streamToolCalls = nil
+		qe.streamMsgID = ""
 		reason := "completed"
 		if t, ok := output.Data.(*query.Terminal); ok {
 			reason = t.Reason
 		}
 		return &SDKMessage{Type: "result", Subtype: reason, SessionID: qe.sessionID}
 	case "error":
+		qe.streamContent = ""
+		qe.streamThinking = ""
+		qe.streamToolCalls = nil
+		qe.streamMsgID = ""
 		return &SDKMessage{
 			Type:      "error",
 			Subtype:   "api_error",
@@ -360,6 +393,10 @@ func (qe *QueryEngine) processQueryOutput(output query.QueryOutput) *SDKMessage 
 			SessionID: qe.sessionID,
 		}
 	case "interrupted":
+		qe.streamContent = ""
+		qe.streamThinking = ""
+		qe.streamToolCalls = nil
+		qe.streamMsgID = ""
 		return &SDKMessage{Type: "result", Subtype: "interrupted", SessionID: qe.sessionID}
 	}
 	return nil

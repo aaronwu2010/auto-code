@@ -2,10 +2,12 @@
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/auto-code/auto-code/internal/tools"
-	)
+)
 
 const (
 	toolName        = "NotebookEdit"
@@ -14,18 +16,39 @@ const (
 )
 
 type NotebookEditInput struct {
-	FilePath    string `json:"file_path"`
-	CellNumber  int    `json:"cell_number"`
-	NewSource   string `json:"new_source"`
-	CellType    string `json:"cell_type,omitempty"`
+	FilePath   string `json:"file_path"`
+	CellNumber int    `json:"cell_number"`
+	NewSource  string `json:"new_source"`
+	CellType   string `json:"cell_type,omitempty"`
 }
 
-type NotebookEditTool struct {
+type NotebookEditOutput struct {
+	FilePath   string `json:"file_path"`
+	CellNumber int    `json:"cell_number"`
+	Status     string `json:"status"`
+}
+
+type NotebookCell struct {
+	CellType string `json:"cell_type"`
+	Source   any    `json:"source"`
+	Metadata any    `json:"metadata,omitempty"`
+	Outputs  []any  `json:"outputs,omitempty"`
+	ID       string `json:"id,omitempty"`
+}
+
+type Notebook struct {
+	Cells    []NotebookCell `json:"cells"`
+	Metadata any            `json:"metadata"`
+	NBFormat int            `json:"nbformat"`
+	NBFormatMinor int       `json:"nbformat_minor"`
+}
+
+type NotebookTool struct {
 	*tools.BaseTool
 }
 
-func NewNotebookEditTool() *NotebookEditTool {
-	t := &NotebookEditTool{BaseTool: tools.NewBaseTool(toolName, descriptionText, false)}
+func NewNotebookEditTool() *NotebookTool {
+	t := &NotebookTool{BaseTool: tools.NewBaseTool(toolName, descriptionText, false)}
 	t.BaseTool.ToolIsDestructive = true
 	t.BaseTool.ToolIsConcurrencySafe = false
 	t.BaseTool.ToolMaxResultSize = maxResultChars
@@ -43,15 +66,85 @@ func NewNotebookEditTool() *NotebookEditTool {
 	return t
 }
 
-func (t *NotebookEditTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
+func (t *NotebookTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
 	inp, ok := input.(NotebookEditInput)
 	if !ok {
 		return nil, fmt.Errorf("invalid input type")
 	}
-	return &tools.ToolResult{Data: fmt.Sprintf("Notebook cell %d updated in %s", inp.CellNumber, inp.FilePath)}, nil
+
+	data, err := os.ReadFile(inp.FilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return t.createNewNotebook(inp)
+		}
+		return nil, fmt.Errorf("failed to read notebook: %w", err)
+	}
+
+	var nb Notebook
+	if err := json.Unmarshal(data, &nb); err != nil {
+		return nil, fmt.Errorf("failed to parse notebook JSON: %w", err)
+	}
+
+	if inp.CellNumber < 0 || inp.CellNumber >= len(nb.Cells) {
+		return nil, fmt.Errorf("cell number %d out of range (0-%d)", inp.CellNumber, len(nb.Cells)-1)
+	}
+
+	nb.Cells[inp.CellNumber].Source = inp.NewSource
+	if inp.CellType != "" {
+		nb.Cells[inp.CellNumber].CellType = inp.CellType
+	}
+
+	updated, err := json.MarshalIndent(nb, "", " ")
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal notebook: %w", err)
+	}
+
+	if err := os.WriteFile(inp.FilePath, updated, 0o644); err != nil {
+		return nil, fmt.Errorf("failed to write notebook: %w", err)
+	}
+
+	return &tools.ToolResult{Data: NotebookEditOutput{
+		FilePath:   inp.FilePath,
+		CellNumber: inp.CellNumber,
+		Status:     "updated",
+	}}, nil
 }
 
-func (t *NotebookEditTool) Prompt(_ context.Context, _ tools.PromptOptions) (string, error) {
+func (t *NotebookTool) createNewNotebook(inp NotebookEditInput) (*tools.ToolResult, error) {
+	cellType := inp.CellType
+	if cellType == "" {
+		cellType = "code"
+	}
+
+	nb := Notebook{
+		Cells: []NotebookCell{
+			{
+				CellType: cellType,
+				Source:   inp.NewSource,
+			},
+		},
+		Metadata:      map[string]any{},
+		NBFormat:      4,
+		NBFormatMinor: 5,
+	}
+
+	data, err := json.MarshalIndent(nb, "", " ")
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal notebook: %w", err)
+	}
+
+	if err := os.WriteFile(inp.FilePath, data, 0o644); err != nil {
+		return nil, fmt.Errorf("failed to write notebook: %w", err)
+	}
+
+	return &tools.ToolResult{Data: NotebookEditOutput{
+		FilePath:   inp.FilePath,
+		CellNumber: 0,
+		Status:     "created",
+	}}, nil
+}
+
+func (t *NotebookTool) Prompt(_ context.Context, _ tools.PromptOptions) (string, error) {
 	return `Edit Jupyter notebook cells. Use this tool instead of FileEdit for .ipynb files.
 - The cell_number is 0-indexed
 - The new_source replaces the entire cell content

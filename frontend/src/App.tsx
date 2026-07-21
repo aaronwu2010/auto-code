@@ -182,11 +182,32 @@ function App() {
       } catch {}
     });
 
+    let currentAssistantId: string | null = null;
+
     EventsOn("query:message", (data: unknown) => {
       try {
         const msg: SDKMessage =
           typeof data === "string" ? JSON.parse(data) : (data as SDKMessage);
-        if (msg.message) {
+        if (msg.type === "assistant" && msg.message) {
+          setMessages((prev) => {
+            if (currentAssistantId && msg.message!.role === "assistant") {
+              const idx = prev.findIndex((m) => m.id === currentAssistantId);
+              if (idx !== -1) {
+                const updated = [...prev];
+                updated[idx] = {
+                  ...updated[idx],
+                  content: (updated[idx].content || "") + (msg.message!.content || ""),
+                };
+                return updated;
+              }
+            }
+            const newId = msg.message!.id || `stream-${Date.now()}`;
+            if (!currentAssistantId) {
+              currentAssistantId = newId;
+            }
+            return [...prev, { ...msg.message!, id: newId }];
+          });
+        } else if (msg.message) {
           setMessages((prev) => {
             const exists = prev.some((m) => m.id === msg.message!.id);
             if (exists) return prev;
@@ -194,6 +215,7 @@ function App() {
           });
         }
         if (msg.type === "result" || msg.type === "error") {
+          currentAssistantId = null;
           setIsLoading(false);
         }
       } catch {}

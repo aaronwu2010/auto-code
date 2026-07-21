@@ -44,7 +44,9 @@ func (t *BriefTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseC
 	}
 	if toolCtx != nil && toolCtx.SetAppState != nil {
 		toolCtx.SetAppState(func(prev *types.ToolPermissionContext) *types.ToolPermissionContext {
-			return prev
+			updated := *prev
+			updated.BriefMode = inp.Enabled
+			return &updated
 		})
 	}
 	status := "disabled"

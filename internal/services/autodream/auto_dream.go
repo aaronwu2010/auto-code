@@ -27,12 +27,12 @@ func DefaultAutoDreamConfig() AutoDreamConfig {
 }
 
 type AutoDream struct {
-	mu             sync.Mutex
-	config         AutoDreamConfig
-	paths          *memdir.Paths
-	lastScanTime   time.Time
-	inProgress     bool
-	lockFile       string
+	mu           sync.Mutex
+	config       AutoDreamConfig
+	paths        *memdir.Paths
+	lastScanTime time.Time
+	inProgress   bool
+	lockFile     string
 }
 
 func NewAutoDream(paths *memdir.Paths) *AutoDream {
@@ -217,7 +217,7 @@ func (d *AutoDream) rollbackConsolidationLock() {
 }
 
 func IsAutoDreamEnabled() bool {
-	return memdir.IsAutoMemoryEnabled() && os.Getenv("CLAUDE_CODE_DISABLE_AUTO_DREAM") == ""
+	return memdir.IsAutoMemoryEnabled() && os.Getenv("AUTO_CODE_DISABLE_AUTO_DREAM") == ""
 }
 
 func (d *AutoDream) SetConfig(config AutoDreamConfig) {

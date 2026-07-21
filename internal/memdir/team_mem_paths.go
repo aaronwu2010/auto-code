@@ -18,11 +18,11 @@ func (e *PathTraversalError) Error() string {
 }
 
 func IsTeamMemoryEnabled() bool {
-	return os.Getenv("CLAUDE_CODE_TEAM_MEMORY") != "" || os.Getenv("CLAUDE_CODE_TEAM_MEMORY_ENABLED") != ""
+	return os.Getenv("AUTO_CODE_TEAM_MEMORY") != "" || os.Getenv("AUTO_CODE_TEAM_MEMORY_ENABLED") != ""
 }
 
 func GetTeamMemPath() string {
-	if envDir := os.Getenv("CLAUDE_TEAM_MEMORY_DIR"); envDir != "" {
+	if envDir := os.Getenv("AUTO_CODE_TEAM_MEMORY_DIR"); envDir != "" {
 		return envDir
 	}
 	return filepath.Join(GetMemoryBaseDir(), "team-memory")

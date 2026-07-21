@@ -460,3 +460,54 @@
 | types/ | - | 5 | ~70% |
 | bridge/ | - | 1 | ~30% |
 | coordinator/ | - | 1 | ~40% |
+
+---
+
+## 未实现模块审计报告（2026-07-21）
+
+### 高优先级（影响核心功能可用性）
+
+| 模块 | 文件 | 问题 | 影响 |
+|------|------|------|------|
+| auth/types.go | `internal/auth/types.go` | `currentTimestampMs()` 返回 0 | token 永远被认为已过期，OAuth 认证失效 |
+| AskTool | `internal/tools/ask/ask.go` | 无处理器，返回占位字符串 | AI 无法向用户提问交互 |
+| SkillTool | `internal/tools/skill/skill.go` | skillHandlers 为空，永远 "not found" | AI 无法调用任何技能 |
+| CronTool | `internal/tools/cron/cron.go` | 仅存 sync.Map，无调度器 goroutine | 定时任务完全不工作 |
+| REPL 工具 | `internal/tools/repl/repl.go` | Python/Node 执行均返回 "not yet implemented" | AI 无法执行代码片段验证 |
+| compact 压缩 | `internal/compact/` | 无 LLM 摘要，仅过滤空消息/截断 | 长对话无法智能压缩，上下文窗口浪费 |
+
+### 中优先级（影响扩展功能）
+
+| 模块 | 文件 | 问题 | 影响 |
+|------|------|------|------|
+| LSPTool | `internal/tools/lsp/lsp.go` | 不连接 LSP 服务器 | AI 无法做定义跳转/引用查找 |
+| McpAuthTool | `internal/tools/mcpauth/mcpauth.go` | 假 OAuth 流程 | MCP 服务器认证不可用 |
+| McpResourceTool | `internal/tools/mcpresource/mcpresource.go` | 不读取 MCP 资源 | MCP 资源发现不可用 |
+| MCP InProcessTransport | `internal/mcp/transport.go` | 回环 mock，不与真实服务器通信 | MCP 协议端到端不可用 |
+| AgentTool | `internal/tools/agent/agent.go` | 不启动子代理 | 多代理协作不可用 |
+| MonitorTool | `internal/tools/monitor/monitor.go` | 不监控进程 | 无法追踪长时间运行任务 |
+| WebBrowserTool | `internal/tools/webbrowser/webbrowser.go` | 不打开浏览器 | AI 无法访问网页 |
+| WorktreeTool | `internal/tools/worktree/worktree.go` | 不操作 git worktree | 并行开发工作流不可用 |
+| NotebookEditTool | `internal/tools/notebook/notebook.go` | 不修改 .ipynb | Jupyter 工作流不可用 |
+| BriefTool | `internal/tools/brief/brief.go` | SetAppState 返回未修改的 prev | brief 模式切换无效 |
+| commands/ 28个 | `internal/commands/` | 大部分为 stub | CLI 命令几乎不可用 |
+| hooks/remote/ | `internal/hooks/remote/` | SSH/Remote 连接为 mock | 远程开发不可用 |
+
+### 低优先级（辅助功能/体验优化）
+
+| 模块 | 文件 | 问题 | 影响 |
+|------|------|------|------|
+| SnipTool | `internal/tools/snip/snip.go` | 不持久化代码片段 | 代码片段管理不可用 |
+| Voice/STT | `internal/voice/stt.go` | 全部 mock，不发送音频 | 语音模式不可用 |
+| Bridge.GetWork() | `internal/bridge/bridge.go` | 始终返回错误 | 远程任务分配不可用 |
+| GetTotalCost() | `internal/engine/queryengine.go` | 始终返回 0 | 无法追踪 API 费用 |
+| fmtRemoteID() | `internal/remote/websocket.go` | 返回空字符串 | 远程会话 ID 显示为空 |
+| analytics/ | `internal/analytics/` | 无实际上报 | 无使用统计 |
+| 前端 16 个空目录 | `frontend/src/components/` 等 | 无文件 | UI 不可扩展 |
+| plugins/loader | `internal/plugins/loader.go` | LoadAllPluginsCacheOnly 返回 nil | 插件加载不可用 |
+| skills/loader | `internal/skills/loader.go` | LoadSkillDirSkills 返回空切片 | 自定义技能目录加载不可用 |
+| migrations 2/6 | `internal/migrations/migrations.go` | 空实现 | 旧配置迁移可能缺失 |
+
+### 实施顺序
+
+1. `auth/types.go 时间戳 bug` → 2. `AskTool 处理器` → 3. `SkillTool 注册` → 4. `compact LLM 摘要` → 5. `REPL 执行` → 6. `CronTool 调度器` → 7-16. 中优先级 → 17-26. 低优先级

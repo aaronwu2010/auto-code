@@ -1,12 +1,13 @@
 ﻿package task
 
 import (
-	"time"
 	"context"
 	"fmt"
 	"sync"
-		"github.com/auto-code/auto-code/internal/tools"
-	)
+	"time"
+
+	"github.com/auto-code/auto-code/internal/tools"
+)
 
 const (
 	toolNameCreate = "TaskCreate"
@@ -282,4 +283,16 @@ func (t *TaskUpdateTool) Call(ctx context.Context, input any, toolCtx *tools.Too
 
 func (t *TaskUpdateTool) Prompt(_ context.Context, _ tools.PromptOptions) (string, error) {
 	return "Update a task's title, description, or status.", nil
+}
+
+func GetTask(taskID string) *TaskData {
+	val, ok := taskStore.Load(taskID)
+	if !ok {
+		return nil
+	}
+	t, ok := val.(*TaskData)
+	if !ok {
+		return nil
+	}
+	return t
 }

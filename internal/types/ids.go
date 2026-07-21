@@ -7,9 +7,7 @@ type TaskID = string
 type ModelSetting = string
 
 type ThinkingConfig struct {
-	Enabled     bool   `json:"enabled"`
-	Type        string `json:"type,omitempty"`
-	BudgetToken int    `json:"budget_token,omitempty"`
+	Enabled bool `json:"enabled"`
 }
 
 type EffortValue struct {

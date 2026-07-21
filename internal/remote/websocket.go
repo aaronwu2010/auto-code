@@ -3,8 +3,8 @@ package remote
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
-
 )
 
 type RemotePermissionResponse struct {
@@ -150,8 +150,8 @@ func CreateSyntheticAssistantMessage(content string) SDKMessage {
 
 func CreateToolStub(toolName, toolID string) SDKMessage {
 	return SDKMessage{
-		Type: "tool_use",
-		Role: "assistant",
+		Type:    "tool_use",
+		Role:    "assistant",
 		Content: json.RawMessage(`{"name":"` + toolName + `","id":"` + toolID + `"}`),
 	}
 }
@@ -164,7 +164,7 @@ func fmtRemoteSessionID() string {
 }
 
 func fmtRemoteID(n int64) string {
-	return ""
+	return fmt.Sprintf("remote-%d", n)
 }
 
 type Error string

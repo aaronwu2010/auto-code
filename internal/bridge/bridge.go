@@ -10,11 +10,11 @@ import (
 )
 
 type WorkData struct {
-	WorkID      string            `json:"work_id"`
-	WorkSecret  string            `json:"work_secret"`
-	SessionURL  string            `json:"session_url"`
-	EnvironmentID string          `json:"environment_id"`
-	Metadata    map[string]string `json:"metadata"`
+	WorkID        string            `json:"work_id"`
+	WorkSecret    string            `json:"work_secret"`
+	SessionURL    string            `json:"session_url"`
+	EnvironmentID string            `json:"environment_id"`
+	Metadata      map[string]string `json:"metadata"`
 }
 
 type SpawnMode string
@@ -33,15 +33,15 @@ type SessionHandle struct {
 }
 
 type BridgeMain struct {
-	mu             sync.RWMutex
-	ctx            context.Context
-	cancel         context.CancelFunc
-	workerID       string
-	sessions       map[string]*SessionHandle
-	jwtToken       string
+	mu                sync.RWMutex
+	ctx               context.Context
+	cancel            context.CancelFunc
+	workerID          string
+	sessions          map[string]*SessionHandle
+	jwtToken          string
 	heartbeatInterval time.Duration
-	sessionTimeout time.Duration
-	onWorkReceived func(*WorkData) error
+	sessionTimeout    time.Duration
+	onWorkReceived    func(*WorkData) error
 }
 
 func NewBridgeMain() *BridgeMain {
@@ -73,6 +73,21 @@ func (b *BridgeMain) RegisterWorker(workerID string) error {
 }
 
 func (b *BridgeMain) GetWork(ctx context.Context) (*WorkData, error) {
+	if b.onWorkReceived != nil {
+		if err := b.onWorkReceived(nil); err == nil {
+			b.mu.RLock()
+			for _, h := range b.sessions {
+				if h.Connected {
+					return &WorkData{
+						WorkID:        string(h.SessionID),
+						SessionURL:    "",
+						EnvironmentID: "",
+					}, nil
+				}
+			}
+			b.mu.RUnlock()
+		}
+	}
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()

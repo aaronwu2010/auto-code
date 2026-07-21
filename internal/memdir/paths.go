@@ -25,10 +25,10 @@ func NewPaths(projectRoot string) *Paths {
 }
 
 func IsAutoMemoryEnabled() bool {
-	if os.Getenv("CLAUDE_CODE_DISABLE_AUTO_MEMORY") != "" {
+	if os.Getenv("AUTO_CODE_DISABLE_AUTO_MEMORY") != "" {
 		return false
 	}
-	if os.Getenv("CLAUDE_CODE_SIMPLE") != "" {
+	if os.Getenv("AUTO_CODE_SIMPLE") != "" {
 		return false
 	}
 	return true
@@ -39,7 +39,7 @@ func IsExtractModeActive() bool {
 }
 
 func GetMemoryBaseDir() string {
-	if envDir := os.Getenv("CLAUDE_CONFIG_HOME"); envDir != "" {
+	if envDir := os.Getenv("AUTO_CODE_CONFIG_HOME"); envDir != "" {
 		return filepath.Join(envDir, ".claude")
 	}
 	homeDir, _ := os.UserHomeDir()
@@ -61,7 +61,7 @@ func (p *Paths) GetAutoMemPath() string {
 		return p.cachedPath
 	}
 
-	if override := os.Getenv("CLAUDE_COWORK_MEMORY_PATH_OVERRIDE"); override != "" {
+	if override := os.Getenv("AUTO_CODE_COWORK_MEMORY_PATH_OVERRIDE"); override != "" {
 		if validated, err := validateMemoryPath(override); err == nil {
 			p.cachedPath = validated
 			p.cached = true
@@ -101,7 +101,7 @@ func (p *Paths) IsAutoMemPath(absolutePath string) string {
 }
 
 func (p *Paths) HasAutoMemPathOverride() bool {
-	return os.Getenv("CLAUDE_COWORK_MEMORY_PATH_OVERRIDE") != ""
+	return os.Getenv("AUTO_CODE_COWORK_MEMORY_PATH_OVERRIDE") != ""
 }
 
 func validateMemoryPath(p string) (string, error) {

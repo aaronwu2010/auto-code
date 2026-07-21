@@ -3,9 +3,10 @@
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/auto-code/auto-code/internal/tools"
-	)
+)
 
 const (
 	toolName        = "AskUserQuestion"
@@ -27,11 +28,14 @@ type AskOutput struct {
 type AskTool struct {
 	*tools.BaseTool
 	askHandler func(question string, options []string) (string, error)
+	pending    chan string
+	mu         sync.RWMutex
 }
 
 func NewAskTool() *AskTool {
 	t := &AskTool{
 		BaseTool: tools.NewBaseTool(toolName, descriptionText, false),
+		pending:  make(chan string, 1),
 	}
 	t.BaseTool.ToolIsReadOnly = true
 	t.BaseTool.ToolIsConcurrencySafe = false
@@ -50,7 +54,16 @@ func NewAskTool() *AskTool {
 }
 
 func (t *AskTool) SetAskHandler(handler func(question string, options []string) (string, error)) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.askHandler = handler
+}
+
+func (t *AskTool) SubmitAnswer(answer string) {
+	select {
+	case t.pending <- answer:
+	default:
+	}
 }
 
 func (t *AskTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
@@ -58,14 +71,25 @@ func (t *AskTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseCon
 	if !ok {
 		return nil, fmt.Errorf("invalid input type")
 	}
-	if t.askHandler != nil {
-		answer, err := t.askHandler(inp.Question, inp.Options)
+
+	t.mu.RLock()
+	handler := t.askHandler
+	t.mu.RUnlock()
+
+	if handler != nil {
+		answer, err := handler(inp.Question, inp.Options)
 		if err != nil {
 			return nil, err
 		}
 		return &tools.ToolResult{Data: AskOutput{Question: inp.Question, Answer: answer}}, nil
 	}
-	return &tools.ToolResult{Data: AskOutput{Question: inp.Question, Answer: "User input required (no handler configured)"}}, nil
+
+	select {
+	case answer := <-t.pending:
+		return &tools.ToolResult{Data: AskOutput{Question: inp.Question, Answer: answer}}, nil
+	case <-ctx.Done():
+		return &tools.ToolResult{Data: AskOutput{Question: inp.Question, Answer: "cancelled"}}, nil
+	}
 }
 
 func (t *AskTool) Prompt(_ context.Context, _ tools.PromptOptions) (string, error) {

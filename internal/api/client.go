@@ -25,14 +25,15 @@ type StreamMessage struct {
 }
 
 type Usage struct {
-	InputTokens        int64 `json:"input_tokens"`
-	OutputTokens       int64 `json:"output_tokens"`
-	PromptEvalCount    int   `json:"prompt_eval_count,omitempty"`
-	EvalCount          int   `json:"eval_count,omitempty"`
-	TotalDuration      int64 `json:"total_duration,omitempty"`
-	LoadDuration       int64 `json:"load_duration,omitempty"`
-	PromptEvalDuration int64 `json:"prompt_eval_duration,omitempty"`
-	EvalDuration       int64 `json:"eval_duration,omitempty"`
+	InputTokens        int64   `json:"input_tokens"`
+	OutputTokens       int64   `json:"output_tokens"`
+	PromptEvalCount    int     `json:"prompt_eval_count,omitempty"`
+	EvalCount          int     `json:"eval_count,omitempty"`
+	TotalDuration      int64   `json:"total_duration,omitempty"`
+	LoadDuration       int64   `json:"load_duration,omitempty"`
+	PromptEvalDuration int64   `json:"prompt_eval_duration,omitempty"`
+	EvalDuration       int64   `json:"eval_duration,omitempty"`
+	TotalCost          float64 `json:"total_cost,omitempty"`
 }
 
 type APIError struct {
@@ -92,7 +93,7 @@ type OllamaChatRequest struct {
 	Format    any             `json:"format,omitempty"`
 	Options   *ModelOptions   `json:"options,omitempty"`
 	Stream    bool            `json:"stream"`
-	Think     any             `json:"think,omitempty"`
+	Think     bool            `json:"think,omitempty"`
 	KeepAlive string          `json:"keep_alive,omitempty"`
 }
 

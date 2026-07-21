@@ -2,10 +2,15 @@
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
 
 	"github.com/auto-code/auto-code/internal/tools"
-	)
+)
 
 const (
 	toolName        = "Snip"
@@ -18,12 +23,32 @@ type SnipInput struct {
 	Category string `json:"category,omitempty"`
 }
 
+type SnipOutput struct {
+	ID        string `json:"id"`
+	Category  string `json:"category"`
+	ByteCount int    `json:"byte_count"`
+	Saved     bool   `json:"saved"`
+}
+
+type SnippetEntry struct {
+	ID        string    `json:"id"`
+	Content   string    `json:"content"`
+	Category  string    `json:"category"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type SnipTool struct {
 	*tools.BaseTool
+	snippets map[string][]SnippetEntry
+	mu       sync.RWMutex
+	filePath string
 }
 
 func NewSnipTool() *SnipTool {
-	t := &SnipTool{BaseTool: tools.NewBaseTool(toolName, descriptionText, false)}
+	t := &SnipTool{
+		BaseTool: tools.NewBaseTool(toolName, descriptionText, false),
+		snippets: make(map[string][]SnippetEntry),
+	}
 	t.BaseTool.ToolIsReadOnly = false
 	t.BaseTool.ToolIsConcurrencySafe = true
 	t.BaseTool.ToolMaxResultSize = maxResultChars
@@ -36,6 +61,13 @@ func NewSnipTool() *SnipTool {
 		"required":             []string{"content"},
 		"additionalProperties": false,
 	}
+
+	configDir, _ := os.UserConfigDir()
+	if configDir != "" {
+		t.filePath = filepath.Join(configDir, "auto-code", "snippets.json")
+		t.loadFromFile()
+	}
+
 	return t
 }
 
@@ -44,7 +76,74 @@ func (t *SnipTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseCo
 	if !ok {
 		return nil, fmt.Errorf("invalid input type")
 	}
-	return &tools.ToolResult{Data: fmt.Sprintf("Snippet captured (%d bytes)", len(inp.Content))}, nil
+
+	category := inp.Category
+	if category == "" {
+		category = "default"
+	}
+
+	id := fmt.Sprintf("snip_%d", time.Now().UnixNano())
+	entry := SnippetEntry{
+		ID:        id,
+		Content:   inp.Content,
+		Category:  category,
+		CreatedAt: time.Now(),
+	}
+
+	t.mu.Lock()
+	t.snippets[category] = append(t.snippets[category], entry)
+	t.mu.Unlock()
+
+	saved := t.saveToFile()
+
+	return &tools.ToolResult{Data: SnipOutput{
+		ID:        id,
+		Category:  category,
+		ByteCount: len(inp.Content),
+		Saved:     saved,
+	}}, nil
+}
+
+func (t *SnipTool) GetSnippets(category string) []SnippetEntry {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if category == "" {
+		var all []SnippetEntry
+		for _, entries := range t.snippets {
+			all = append(all, entries...)
+		}
+		return all
+	}
+	return t.snippets[category]
+}
+
+func (t *SnipTool) loadFromFile() {
+	if t.filePath == "" {
+		return
+	}
+	data, err := os.ReadFile(t.filePath)
+	if err != nil {
+		return
+	}
+	var snippets map[string][]SnippetEntry
+	if err := json.Unmarshal(data, &snippets); err != nil {
+		return
+	}
+	t.snippets = snippets
+}
+
+func (t *SnipTool) saveToFile() bool {
+	if t.filePath == "" {
+		return false
+	}
+	t.mu.RLock()
+	data, err := json.MarshalIndent(t.snippets, "", "  ")
+	t.mu.RUnlock()
+	if err != nil {
+		return false
+	}
+	os.MkdirAll(filepath.Dir(t.filePath), 0o755)
+	return os.WriteFile(t.filePath, data, 0o644) == nil
 }
 
 func (t *SnipTool) Prompt(_ context.Context, _ tools.PromptOptions) (string, error) {

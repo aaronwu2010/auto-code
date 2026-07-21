@@ -3,9 +3,11 @@
 import (
 	"context"
 	"fmt"
+	"os/exec"
+	"runtime"
 
 	"github.com/auto-code/auto-code/internal/tools"
-	)
+)
 
 const (
 	toolName        = "WebBrowser"
@@ -15,6 +17,12 @@ const (
 
 type WebBrowserInput struct {
 	URL string `json:"url"`
+}
+
+type WebBrowserOutput struct {
+	URL    string `json:"url"`
+	Opened bool   `json:"opened"`
+	Error  string `json:"error,omitempty"`
 }
 
 type WebBrowserTool struct {
@@ -42,9 +50,29 @@ func (t *WebBrowserTool) Call(ctx context.Context, input any, toolCtx *tools.Too
 	if !ok {
 		return nil, fmt.Errorf("invalid input type")
 	}
-	return &tools.ToolResult{Data: fmt.Sprintf("Browser opened: %s", inp.URL)}, nil
+
+	if inp.URL == "" {
+		return &tools.ToolResult{Data: WebBrowserOutput{URL: inp.URL, Error: "URL is empty"}}, nil
+	}
+
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", inp.URL)
+	case "darwin":
+		cmd = exec.Command("open", inp.URL)
+	default:
+		cmd = exec.Command("xdg-open", inp.URL)
+	}
+
+	err := cmd.Start()
+	if err != nil {
+		return &tools.ToolResult{Data: WebBrowserOutput{URL: inp.URL, Error: err.Error()}}, nil
+	}
+
+	return &tools.ToolResult{Data: WebBrowserOutput{URL: inp.URL, Opened: true}}, nil
 }
 
 func (t *WebBrowserTool) Prompt(_ context.Context, _ tools.PromptOptions) (string, error) {
-	return "Open a URL in the built-in browser. Use this when the user wants to open a web page.", nil
+	return "Open a URL in the system browser. Use this when the user wants to open a web page.", nil
 }

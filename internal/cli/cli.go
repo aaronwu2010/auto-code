@@ -1,7 +1,6 @@
 package cli
 
 import (
-
 	"os"
 	"strings"
 
@@ -24,8 +23,6 @@ import (
 	"github.com/auto-code/auto-code/internal/commands/help"
 	"github.com/auto-code/auto-code/internal/commands/hooks"
 	"github.com/auto-code/auto-code/internal/commands/initcmd"
-	"github.com/auto-code/auto-code/internal/commands/login"
-	"github.com/auto-code/auto-code/internal/commands/logout"
 	"github.com/auto-code/auto-code/internal/commands/mcp"
 	"github.com/auto-code/auto-code/internal/commands/memory"
 	"github.com/auto-code/auto-code/internal/commands/model"
@@ -58,8 +55,7 @@ func NewDefaultCommandRegistry() *clitypes.CommandRegistry {
 	r.Register(config.NewConfigCommand())
 	r.Register(permissions.NewPermissionsCommand())
 	r.Register(model.NewModelCommand())
-	r.Register(login.NewLoginCommand())
-	r.Register(logout.NewLogoutCommand())
+
 	r.Register(plan.NewPlanCommand())
 	r.Register(compact.NewCompactCommand())
 	r.Register(commit.NewCommitCommand())

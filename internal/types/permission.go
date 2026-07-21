@@ -3,10 +3,10 @@ package types
 type PermissionMode string
 
 const (
-	PermissionDefault   PermissionMode = "default"
-	PermissionPlan      PermissionMode = "plan"
-	PermissionAuto      PermissionMode = "auto"
-	PermissionBypass    PermissionMode = "bypass"
+	PermissionDefault PermissionMode = "default"
+	PermissionPlan    PermissionMode = "plan"
+	PermissionAuto    PermissionMode = "auto"
+	PermissionBypass  PermissionMode = "bypass"
 )
 
 type PermissionDecision string
@@ -32,7 +32,8 @@ type ToolPermissionRule struct {
 type ToolPermissionRulesBySource map[string][]ToolPermissionRule
 
 type ToolPermissionContext struct {
-	Mode                         PermissionMode             `json:"mode"`
+	Mode                         PermissionMode              `json:"mode"`
+	BriefMode                    bool                        `json:"brief_mode"`
 	AdditionalWorkingDirectories map[string]string           `json:"additional_working_directories"`
 	AlwaysAllowRules             ToolPermissionRulesBySource `json:"always_allow_rules"`
 	AlwaysDenyRules              ToolPermissionRulesBySource `json:"always_deny_rules"`
