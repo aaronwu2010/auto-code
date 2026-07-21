@@ -1,4 +1,4 @@
-﻿package fileedit
+package fileedit
 
 import (
 	"context"
@@ -84,22 +84,11 @@ func (t *FileEditTool) UserFacingName(input any) string {
 }
 
 func (t *FileEditTool) CheckPermissions(_ context.Context, input any, toolCtx *tools.ToolUseContext) (types.PermissionResult, error) {
-	inp, ok := input.(FileEditInput)
-	if !ok {
-		return types.PermissionResult{Behavior: types.DecisionAllow}, nil
+	// 使用通用的权限检查函数
+	result := tools.CheckToolPermission(t, toolCtx)
+	if result.Behavior == types.DecisionDeny {
+		return result, nil
 	}
-	if toolCtx == nil || toolCtx.GetAppState == nil {
-		return types.PermissionResult{Behavior: types.DecisionAllow}, nil
-	}
-	appState := toolCtx.GetAppState()
-	for _, ruleList := range appState.AlwaysDenyRules {
-		for _, rule := range ruleList {
-			if tools.ToolMatchesName(t, rule.ToolName) {
-				return types.PermissionResult{Behavior: types.DecisionDeny, Message: "File is in a directory that is denied by your permission settings."}, nil
-			}
-		}
-	}
-	_ = inp.FilePath
 	return types.PermissionResult{Behavior: types.DecisionAllow}, nil
 }
 

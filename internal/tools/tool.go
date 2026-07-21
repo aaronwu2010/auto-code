@@ -12,8 +12,8 @@ type ValidationResult struct {
 }
 
 type ToolResult struct {
-	Data            any           `json:"data"`
-	NewMessages     []types.Message `json:"new_messages,omitempty"`
+	Data            any                   `json:"data"`
+	NewMessages     []types.Message       `json:"new_messages,omitempty"`
 	ContextModifier func(*ToolUseContext) `json:"-"`
 }
 
@@ -45,8 +45,8 @@ type PromptOptions struct {
 }
 
 type AgentDefinition struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
 	AllowedTools []string `json:"allowed_tools,omitempty"`
 }
 
@@ -62,20 +62,20 @@ type ToolUseContext struct {
 }
 
 type ToolUseOptions struct {
-	Commands               []types.Command
-	Debug                  bool
-	MainLoopModel          string
-	Tools                  []Tool
-	Verbose                bool
-	ThinkingConfig         types.ThinkingConfig
-	MCPClients             []MCPServerConnection
-	MCPResources           map[string][]ServerResource
+	Commands                []types.Command
+	Debug                   bool
+	MainLoopModel           string
+	Tools                   []Tool
+	Verbose                 bool
+	ThinkingConfig          types.ThinkingConfig
+	MCPClients              []MCPServerConnection
+	MCPResources            map[string][]ServerResource
 	IsNonInteractiveSession bool
-	AgentDefinitions       []AgentDefinition
-	MaxBudgetUsd           float64
-	CustomSystemPrompt     string
-	AppendSystemPrompt     string
-	RefreshTools           func() []Tool
+	AgentDefinitions        []AgentDefinition
+	MaxBudgetUsd            float64
+	CustomSystemPrompt      string
+	AppendSystemPrompt      string
+	RefreshTools            func() []Tool
 }
 
 type FileStateCache map[string]string
@@ -87,9 +87,9 @@ type MCPServerConnection struct {
 }
 
 type ServerResource struct {
-	URI       string `json:"uri"`
-	Name      string `json:"name"`
-	MimeType  string `json:"mime_type,omitempty"`
+	URI      string `json:"uri"`
+	Name     string `json:"name"`
+	MimeType string `json:"mime_type,omitempty"`
 }
 
 type BaseTool struct {
@@ -107,19 +107,21 @@ type BaseTool struct {
 	ToolIsConcurrencySafe bool
 }
 
-func (t *BaseTool) Name() string                { return t.ToolName }
-func (t *BaseTool) Aliases() []string           { return t.ToolAliases }
-func (t *BaseTool) Description(_ context.Context, _ any) (string, error) { return t.ToolDescription, nil }
-func (t *BaseTool) InputSchema() any            { return t.ToolSchema }
-func (t *BaseTool) MaxResultSizeChars() int      { return t.ToolMaxResultSize }
-func (t *BaseTool) ShouldDefer() bool            { return t.ToolShouldDefer }
-func (t *BaseTool) AlwaysLoad() bool             { return t.ToolAlwaysLoad }
-func (t *BaseTool) IsMCP() bool                  { return t.ToolIsMCP }
-func (t *BaseTool) IsEnabled() bool              { return t.ToolIsEnabled }
-func (t *BaseTool) IsReadOnly(any) bool          { return t.ToolIsReadOnly }
-func (t *BaseTool) IsDestructive(any) bool       { return t.ToolIsDestructive }
-func (t *BaseTool) IsConcurrencySafe(any) bool   { return t.ToolIsConcurrencySafe }
-func (t *BaseTool) UserFacingName(any) string    { return t.ToolName }
+func (t *BaseTool) Name() string      { return t.ToolName }
+func (t *BaseTool) Aliases() []string { return t.ToolAliases }
+func (t *BaseTool) Description(_ context.Context, _ any) (string, error) {
+	return t.ToolDescription, nil
+}
+func (t *BaseTool) InputSchema() any           { return t.ToolSchema }
+func (t *BaseTool) MaxResultSizeChars() int    { return t.ToolMaxResultSize }
+func (t *BaseTool) ShouldDefer() bool          { return t.ToolShouldDefer }
+func (t *BaseTool) AlwaysLoad() bool           { return t.ToolAlwaysLoad }
+func (t *BaseTool) IsMCP() bool                { return t.ToolIsMCP }
+func (t *BaseTool) IsEnabled() bool            { return t.ToolIsEnabled }
+func (t *BaseTool) IsReadOnly(any) bool        { return t.ToolIsReadOnly }
+func (t *BaseTool) IsDestructive(any) bool     { return t.ToolIsDestructive }
+func (t *BaseTool) IsConcurrencySafe(any) bool { return t.ToolIsConcurrencySafe }
+func (t *BaseTool) UserFacingName(any) string  { return t.ToolName }
 
 func (t *BaseTool) CheckPermissions(_ context.Context, _ any, _ *ToolUseContext) (types.PermissionResult, error) {
 	return types.PermissionResult{Behavior: types.DecisionAllow}, nil
@@ -170,4 +172,30 @@ func ToolMatchesName(tool Tool, name string) bool {
 		}
 	}
 	return false
+}
+
+// CheckToolPermission 检查工具是否被权限规则拒绝
+// 这是一个通用的权限检查辅助函数，用于避免在各工具中重复实现相同的逻辑
+func CheckToolPermission(tool Tool, toolCtx *ToolUseContext) types.PermissionResult {
+	if toolCtx == nil || toolCtx.GetAppState == nil {
+		return types.PermissionResult{Behavior: types.DecisionAllow}
+	}
+
+	appState := toolCtx.GetAppState()
+	if appState == nil {
+		return types.PermissionResult{Behavior: types.DecisionAllow}
+	}
+
+	for _, ruleList := range appState.AlwaysDenyRules {
+		for _, rule := range ruleList {
+			if ToolMatchesName(tool, rule.ToolName) {
+				return types.PermissionResult{
+					Behavior: types.DecisionDeny,
+					Message:  "Tool is denied by your permission settings.",
+				}
+			}
+		}
+	}
+
+	return types.PermissionResult{Behavior: types.DecisionAllow}
 }

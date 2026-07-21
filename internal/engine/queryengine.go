@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/auto-code/auto-code/internal/api"
+	"github.com/auto-code/auto-code/internal/compact"
 	"github.com/auto-code/auto-code/internal/engine/query"
 	"github.com/auto-code/auto-code/internal/state"
 	"github.com/auto-code/auto-code/internal/tools"
@@ -375,11 +376,116 @@ func (qe *QueryEngine) getConfig() *QueryEngineConfig {
 }
 
 func (qe *QueryEngine) microcompact(messages []types.Message) []types.Message {
-	return messages
+	if len(messages) <= 2 {
+		return messages
+	}
+
+	// 保留系统消息和最后的用户消息
+	var kept []types.Message
+	var hasSystem bool
+
+	// 识别并保留系统消息
+	for i := range messages {
+		if messages[i].Role == types.RoleSystem {
+			kept = append(kept, messages[i])
+			hasSystem = true
+			break
+		}
+	}
+
+	// 计算需要保留的消息数量（从末尾开始）
+	keepFromIndex := len(messages) - 10 // 保留最后10条消息
+	if keepFromIndex < 0 {
+		keepFromIndex = 0
+	}
+	if hasSystem && keepFromIndex == 0 {
+		keepFromIndex = 1 // 跳过系统消息
+	}
+
+	// 添加保留的消息
+	for i := keepFromIndex; i < len(messages); i++ {
+		kept = append(kept, messages[i])
+	}
+
+	// 如果压缩后的消息数量没有减少，返回原始消息
+	if len(kept) >= len(messages) {
+		return messages
+	}
+
+	return kept
 }
 
 func (qe *QueryEngine) autoCompact(messages []types.Message) (*query.CompactionResult, error) {
-	return nil, fmt.Errorf("auto compact not implemented")
+	if len(messages) <= 4 {
+		return nil, nil // 不需要压缩
+	}
+
+	// 计算当前 token 数量（简单估算）
+	totalTokens := 0
+	for _, msg := range messages {
+		totalTokens += len(msg.Content) / 4 // 粗略估算：每4个字符约1个token
+	}
+
+	windowSize := 200000 // 默认上下文窗口大小
+	if !ShouldAutoCompact(totalTokens, windowSize) {
+		return nil, nil
+	}
+
+	// 执行压缩
+	compactMessages := make([]compact.CompactMessage, len(messages))
+	for i, msg := range messages {
+		compactMessages[i] = compact.CompactMessage{
+			Role:     string(msg.Role),
+			Content:  msg.Content,
+			IsLatest: i == len(messages)-1,
+		}
+	}
+
+	result := compact.MicrocompactMessages(compactMessages)
+
+	// 转换回 types.Message
+	var compactedTypes []types.Message
+	for _, cm := range compactMessages[:result.MessagesAfter] {
+		// 找到原始消息的索引
+		origIdx := -1
+		for j := range messages {
+			if messages[j].Content == cm.Content && string(messages[j].Role) == cm.Role {
+				origIdx = j
+				break
+			}
+		}
+		if origIdx >= 0 {
+			compactedTypes = append(compactedTypes, messages[origIdx])
+		} else {
+			// 创建新消息
+			compactedTypes = append(compactedTypes, types.Message{
+				ID:        generateMessageID(),
+				Role:      types.MessageRole(cm.Role),
+				Content:   cm.Content,
+				Timestamp: time.Now().Unix(),
+			})
+		}
+	}
+
+	// 生成压缩摘要
+	summary := ""
+	if result.DidCompact {
+		summary = fmt.Sprintf("Compacted %d messages, saved ~%d tokens", result.MessagesBefore-result.MessagesAfter, result.TokensSaved)
+	}
+
+	return &query.CompactionResult{
+		Messages:       compactedTypes,
+		BoundaryMarker: "auto_compact",
+		Summary:        summary,
+	}, nil
+}
+
+func ShouldAutoCompact(currentTokens, windowSize int) bool {
+	if windowSize <= 0 {
+		windowSize = 200000
+	}
+	threshold := windowSize - 10000 // AutoCompactBufferTokens
+	return currentTokens >= threshold
 }
 
 func generateSessionID() types.SessionID {

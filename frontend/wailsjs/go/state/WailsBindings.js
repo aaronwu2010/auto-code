@@ -6,6 +6,10 @@ export function AddTodo(arg1) {
   return window['go']['state']['WailsBindings']['AddTodo'](arg1);
 }
 
+export function CheckOllamaHealth() {
+  return window['go']['state']['WailsBindings']['CheckOllamaHealth']();
+}
+
 export function GetAppState() {
   return window['go']['state']['WailsBindings']['GetAppState']();
 }
@@ -22,12 +26,20 @@ export function GetMessages() {
   return window['go']['state']['WailsBindings']['GetMessages']();
 }
 
+export function GetOllamaConfig() {
+  return window['go']['state']['WailsBindings']['GetOllamaConfig']();
+}
+
 export function GetSessionID() {
   return window['go']['state']['WailsBindings']['GetSessionID']();
 }
 
 export function Interrupt() {
   return window['go']['state']['WailsBindings']['Interrupt']();
+}
+
+export function ListAvailableModels() {
+  return window['go']['state']['WailsBindings']['ListAvailableModels']();
 }
 
 export function RefreshContext() {
@@ -52,6 +64,10 @@ export function SetFastMode(arg1) {
 
 export function SetModel(arg1) {
   return window['go']['state']['WailsBindings']['SetModel'](arg1);
+}
+
+export function SetOllamaConfig(arg1) {
+  return window['go']['state']['WailsBindings']['SetOllamaConfig'](arg1);
 }
 
 export function SetPermissionMode(arg1) {

@@ -7,11 +7,11 @@ import (
 )
 
 type AnalyticsEvent struct {
-	Name      string                 `json:"name"`
+	Name       string                 `json:"name"`
 	Properties map[string]interface{} `json:"properties,omitempty"`
-	Timestamp time.Time              `json:"timestamp"`
-	SessionID string                 `json:"sessionId,omitempty"`
-	UserID    string                 `json:"userId,omitempty"`
+	Timestamp  time.Time              `json:"timestamp"`
+	SessionID  string                 `json:"sessionId,omitempty"`
+	UserID     string                 `json:"userId,omitempty"`
 }
 
 type AnalyticsSink interface {
@@ -20,13 +20,39 @@ type AnalyticsSink interface {
 	Close()
 }
 
-type ConsoleSink struct{}
+type ConsoleSink struct {
+	mu     sync.Mutex
+	buffer []AnalyticsEvent
+}
 
-func NewConsoleSink() *ConsoleSink { return &ConsoleSink{} }
+func NewConsoleSink() *ConsoleSink { return &ConsoleSink{buffer: make([]AnalyticsEvent, 0)} }
 
-func (s *ConsoleSink) LogEvent(event AnalyticsEvent) {}
-func (s *ConsoleSink) Flush()                        {}
-func (s *ConsoleSink) Close()                        {}
+func (s *ConsoleSink) LogEvent(event AnalyticsEvent) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.buffer = append(s.buffer, event)
+	// 简单的控制台输出（仅用于调试模式）
+	// fmt.Printf("[Analytics] %s: %v\n", event.Name, event.Properties)
+}
+
+func (s *ConsoleSink) Flush() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// 可以在这里添加批量上传逻辑
+	s.buffer = s.buffer[:0]
+}
+
+func (s *ConsoleSink) Close() {
+	s.Flush()
+}
+
+func (s *ConsoleSink) GetBufferedEvents() []AnalyticsEvent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make([]AnalyticsEvent, len(s.buffer))
+	copy(result, s.buffer)
+	return result
+}
 
 type EventSamplingConfig struct {
 	SampleRate float64 `json:"sampleRate"`
@@ -34,13 +60,13 @@ type EventSamplingConfig struct {
 }
 
 type AnalyticsService struct {
-	mu          sync.RWMutex
-	sinks       []AnalyticsSink
-	disabled    bool
-	eventCount  int64
-	sampling    EventSamplingConfig
-	sessionID   string
-	userID      string
+	mu         sync.RWMutex
+	sinks      []AnalyticsSink
+	disabled   bool
+	eventCount int64
+	sampling   EventSamplingConfig
+	sessionID  string
+	userID     string
 }
 
 func NewAnalyticsService(sessionID, userID string) *AnalyticsService {

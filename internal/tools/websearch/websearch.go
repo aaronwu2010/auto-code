@@ -2,7 +2,12 @@
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/auto-code/auto-code/internal/tools"
@@ -26,10 +31,10 @@ type WebSearchResult struct {
 }
 
 type WebSearchOutput struct {
-	Query       string            `json:"query"`
-	DurationMs  int64             `json:"durationMs"`
-	NumResults  int               `json:"numResults"`
-	Results     []WebSearchResult `json:"results"`
+	Query      string            `json:"query"`
+	DurationMs int64             `json:"durationMs"`
+	NumResults int               `json:"numResults"`
+	Results    []WebSearchResult `json:"results"`
 }
 
 type WebSearchTool struct {
@@ -98,13 +103,104 @@ func (t *WebSearchTool) Prompt(_ context.Context, _ tools.PromptOptions) (string
 }
 
 func performWebSearch(ctx context.Context, query string) ([]WebSearchResult, error) {
-	return []WebSearchResult{
-		{
-			Title:   fmt.Sprintf("Search results for: %s", query),
-			URL:     fmt.Sprintf("https://search.example.com/?q=%s", query),
-			Snippet: "Web search requires a configured search API endpoint. Please configure a search provider to enable this tool.",
-		},
-	}, nil
+	// 使用 DuckDuckGo Instant Answer API 进行搜索
+	// 这是一个免费的搜索 API，不需要 API Key
+	client := &http.Client{Timeout: 15 * time.Second}
+
+	// DuckDuckGo Instant Answer API
+	apiURL := fmt.Sprintf("https://api.duckduckgo.com/?q=%s&format=json&no_html=1&skip_disambig=1", url.QueryEscape(query))
+
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "AutoCode/1.0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("search request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("search API returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	var ddgResp duckDuckGoResponse
+	if err := json.Unmarshal(body, &ddgResp); err != nil {
+		return nil, fmt.Errorf("parse response: %w", err)
+	}
+
+	var results []WebSearchResult
+
+	// 添加抽象结果（如果有）
+	if ddgResp.Abstract != "" {
+		results = append(results, WebSearchResult{
+			Title:   ddgResp.AbstractSource,
+			URL:     ddgResp.AbstractURL,
+			Snippet: ddgResp.Abstract,
+		})
+	}
+
+	// 添加相关主题
+	for _, topic := range ddgResp.RelatedTopics {
+		if topic.Text != "" && topic.FirstURL != "" {
+			results = append(results, WebSearchResult{
+				Title:   extractTitleFromURL(topic.FirstURL),
+				URL:     topic.FirstURL,
+				Snippet: topic.Text,
+			})
+		}
+		if len(results) >= 10 {
+			break
+		}
+	}
+
+	// 如果没有结果，返回提示信息
+	if len(results) == 0 {
+		results = append(results, WebSearchResult{
+			Title:   "No results found",
+			URL:     fmt.Sprintf("https://duckduckgo.com/?q=%s", url.QueryEscape(query)),
+			Snippet: fmt.Sprintf("No instant answers found for query: %s. Try a different search term.", query),
+		})
+	}
+
+	return results, nil
+}
+
+type duckDuckGoResponse struct {
+	Abstract       string `json:"Abstract"`
+	AbstractSource string `json:"AbstractSource"`
+	AbstractURL    string `json:"AbstractURL"`
+	RelatedTopics  []struct {
+		Text     string `json:"Text"`
+		FirstURL string `json:"FirstURL"`
+	} `json:"RelatedTopics"`
+}
+
+func extractTitleFromURL(urlStr string) string {
+	// 从 URL 提取简单的标题
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return "Search Result"
+	}
+
+	// 从路径中提取标题
+	parts := strings.Split(u.Path, "/")
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parts[i] != "" {
+			title := strings.ReplaceAll(parts[i], "_", " ")
+			title = strings.ReplaceAll(title, "-", " ")
+			return strings.Title(title)
+		}
+	}
+
+	return u.Hostname()
 }
 
 func ParseWebSearchInput(raw map[string]any) (WebSearchInput, error) {

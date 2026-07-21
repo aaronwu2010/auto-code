@@ -7,6 +7,7 @@ import type {
   StateChangeEvent,
 } from "./bindings/types";
 
+// 扩展 window 类型
 declare global {
   interface Window {
     go: {
@@ -27,6 +28,10 @@ declare global {
             AddTodo: (req: string) => void;
             UpdateTodoStatus: (id: string, status: string) => void;
             GetMCPStatus: () => Promise<string>;
+            SetOllamaConfig: (req: string) => void;
+            GetOllamaConfig: () => Promise<string>;
+            ListAvailableModels: () => Promise<string>;
+            CheckOllamaHealth: () => Promise<string>;
           };
         };
       };
@@ -38,6 +43,29 @@ declare global {
   }
 }
 
+// 类型定义
+interface ModelInfo {
+  name: string;
+  size?: string;
+  family?: string;
+  parameter_size?: string;
+  quantization?: string;
+}
+
+interface OllamaConfig {
+  base_url: string;
+  api_key: string;
+  model: string;
+}
+
+interface OllamaHealth {
+  connected: boolean;
+  error?: string;
+  is_local: boolean;
+  base_url: string;
+  model: string;
+}
+
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -47,6 +75,18 @@ function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // 设置面板状态
+  const [showSettings, setShowSettings] = useState(false);
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [ollamaConfig, setOllamaConfig] = useState<OllamaConfig>({
+    base_url: "http://localhost:11434/api",
+    api_key: "",
+    model: "",
+  });
+  const [ollamaHealth, setOllamaHealth] = useState<OllamaHealth | null>(null);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
@@ -54,6 +94,70 @@ function App() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
+
+  // 当打开设置面板时自动加载模型列表
+  useEffect(() => {
+    if (showSettings && models.length === 0 && !loadingModels) {
+      loadModels();
+    }
+  }, [showSettings]);
+
+  // 加载配置和模型列表
+  const loadConfig = async () => {
+    if (!window.go?.main?.state?.WailsBindings) return;
+    try {
+      const configStr = await window.go.main.state.WailsBindings.GetOllamaConfig();
+      if (configStr) {
+        const config = JSON.parse(configStr);
+        setOllamaConfig(config);
+      }
+    } catch {}
+  };
+
+  const loadModels = async () => {
+    if (!window.go?.main?.state?.WailsBindings) return;
+    setLoadingModels(true);
+    setModelsError(null);
+    try {
+      const modelsStr = await window.go.main.state.WailsBindings.ListAvailableModels();
+      if (modelsStr) {
+        const result = JSON.parse(modelsStr);
+        if (result.models && result.models.length > 0) {
+          setModels(result.models);
+          setModelsError(null);
+        } else if (result.error) {
+          setModelsError(result.error);
+          setModels([]);
+        } else {
+          setModelsError("未找到模型，请确保 Ollama 服务正在运行并已下载模型");
+          setModels([]);
+        }
+      }
+    } catch (err) {
+      setModelsError("加载模型列表失败: " + String(err));
+      setModels([]);
+    }
+    setLoadingModels(false);
+  };
+
+  const checkHealth = async () => {
+    if (!window.go?.main?.state?.WailsBindings) return;
+    try {
+      const healthStr = await window.go.main.state.WailsBindings.CheckOllamaHealth();
+      if (healthStr) {
+        setOllamaHealth(JSON.parse(healthStr));
+      }
+    } catch {}
+  };
+
+  const saveConfig = async () => {
+    if (!window.go?.main?.state?.WailsBindings) return;
+    try {
+      await window.go.main.state.WailsBindings.SetOllamaConfig(JSON.stringify(ollamaConfig));
+      await checkHealth();
+      await loadModels();
+    } catch {}
+  };
 
   useEffect(() => {
     if (window.runtime) {
@@ -112,6 +216,9 @@ function App() {
       if (msgsStr) {
         setMessages(JSON.parse(msgsStr));
       }
+      await loadConfig();
+      await checkHealth();
+      await loadModels();
     } catch {}
   };
 
@@ -244,6 +351,16 @@ function App() {
               {appState.mainLoopModel}
             </span>
           )}
+          {ollamaHealth && (
+            <span className={`text-xs px-2 py-0.5 rounded ${
+              ollamaHealth.connected
+                ? "bg-[#1a2e1a] text-[#6bff6b]"
+                : "bg-[#3d1c1c] text-[#ff6b6b]"
+            }`}>
+              {ollamaHealth.connected ? "已连接" : "未连接"}
+              {ollamaHealth.is_local ? " (本地)" : " (云端)"}
+            </span>
+          )}
           {appState?.thinkingEnabled && (
             <span className="text-xs text-[#a78bfa] bg-[#2a1a3e] px-2 py-0.5 rounded">
               Thinking
@@ -256,6 +373,13 @@ function App() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          {/* 设置按钮 */}
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className="text-xs bg-[#0f3460] text-[#6cb6ff] px-3 py-1 rounded hover:bg-[#1a4a80]"
+          >
+            ⚙️ 设置
+          </button>
           {statusText && (
             <span className="text-xs text-[#888]">{statusText}</span>
           )}
@@ -269,6 +393,116 @@ function App() {
           )}
         </div>
       </div>
+
+      {/* 设置面板 */}
+      {showSettings && (
+        <div className="border-b border-[#2a2a4a] bg-[#16213e] p-4">
+          <div className="max-w-2xl mx-auto space-y-4">
+            <h2 className="text-sm font-bold text-[#6cb6ff] mb-3">Ollama 配置</h2>
+
+            {/* 连接状态 */}
+            {ollamaHealth && (
+              <div className={`text-xs p-2 rounded ${
+                ollamaHealth.connected
+                  ? "bg-[#1a2e1a] text-[#6bff6b]"
+                  : "bg-[#3d1c1c] text-[#ff6b6b]"
+              }`}>
+                {ollamaHealth.connected
+                  ? `✓ 已连接到 ${ollamaHealth.base_url}`
+                  : `✗ 连接失败: ${ollamaHealth.error || "未知错误"}`}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Ollama URL */}
+              <div>
+                <label className="text-xs text-[#888] block mb-1">Ollama URL</label>
+                <input
+                  type="text"
+                  value={ollamaConfig.base_url}
+                  onChange={(e) => setOllamaConfig({ ...ollamaConfig, base_url: e.target.value })}
+                  placeholder="http://localhost:11434/api"
+                  className="w-full bg-[#0f3460] text-[#e0e0e0] border border-[#2a4a6f] rounded px-3 py-2 text-sm outline-none focus:border-[#4a6a9a]"
+                />
+              </div>
+
+              {/* API Key */}
+              <div>
+                <label className="text-xs text-[#888] block mb-1">API Key (可选，用于 Ollama Cloud)</label>
+                <input
+                  type="password"
+                  value={ollamaConfig.api_key}
+                  onChange={(e) => setOllamaConfig({ ...ollamaConfig, api_key: e.target.value })}
+                  placeholder="留空使用本地模式"
+                  className="w-full bg-[#0f3460] text-[#e0e0e0] border border-[#2a4a6f] rounded px-3 py-2 text-sm outline-none focus:border-[#4a6a9a]"
+                />
+              </div>
+            </div>
+
+            {/* 模型选择 */}
+            <div>
+              <label className="text-xs text-[#888] block mb-1">选择模型</label>
+              <div className="flex gap-2">
+                <select
+                  value={ollamaConfig.model}
+                  onChange={(e) => setOllamaConfig({ ...ollamaConfig, model: e.target.value })}
+                  className="flex-1 bg-[#0f3460] text-[#e0e0e0] border border-[#2a4a6f] rounded px-3 py-2 text-sm outline-none focus:border-[#4a6a9a]"
+                >
+                  <option value="">选择模型...</option>
+                  {models.map((m) => (
+                    <option key={m.name} value={m.name}>
+                      {m.name} {m.size && `(${m.size})`} {m.parameter_size && `- ${m.parameter_size}`}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={loadModels}
+                  disabled={loadingModels}
+                  className="bg-[#0f3460] text-[#6cb6ff] px-3 py-2 rounded hover:bg-[#1a4a80] disabled:opacity-50 text-sm"
+                >
+                  {loadingModels ? "加载中..." : "刷新"}
+                </button>
+              </div>
+              {modelsError && (
+                <p className="text-xs text-[#ff6b6b] mt-1">{modelsError}</p>
+              )}
+              {models.length === 0 && !loadingModels && !modelsError && (
+                <p className="text-xs text-[#888] mt-1">
+                  未找到模型，请确保 Ollama 服务正在运行，或手动输入模型名称
+                </p>
+              )}
+            </div>
+
+            {/* 手动输入模型 */}
+            <div>
+              <label className="text-xs text-[#888] block mb-1">或手动输入模型名称</label>
+              <input
+                type="text"
+                value={ollamaConfig.model}
+                onChange={(e) => setOllamaConfig({ ...ollamaConfig, model: e.target.value })}
+                placeholder="例如: llama3.2, qwen2.5, deepseek-coder"
+                className="w-full bg-[#0f3460] text-[#e0e0e0] border border-[#2a4a6f] rounded px-3 py-2 text-sm outline-none focus:border-[#4a6a9a]"
+              />
+            </div>
+
+            {/* 保存按钮 */}
+            <div className="flex gap-2">
+              <button
+                onClick={saveConfig}
+                className="bg-[#1a4a80] text-[#e0e0e0] px-4 py-2 rounded hover:bg-[#2a5a90] text-sm"
+              >
+                保存配置
+              </button>
+              <button
+                onClick={checkHealth}
+                className="bg-[#0f3460] text-[#6cb6ff] px-4 py-2 rounded hover:bg-[#1a4a80] text-sm"
+              >
+                测试连接
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-3">
@@ -298,7 +532,7 @@ function App() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Type your message... (Enter to send, Shift+Enter for newline)"
-            rows={2}
+            rows={4}
             className="flex-1 bg-[#16213e] text-[#e0e0e0] border border-[#2a2a4a] rounded-lg px-3 py-2 font-mono text-sm resize-none outline-none focus:border-[#4a6a9a] placeholder-[#555]"
           />
           <div className="flex flex-col gap-1">

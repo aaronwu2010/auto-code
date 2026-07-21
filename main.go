@@ -60,10 +60,10 @@ func main() {
 	_ = bootstrap
 
 	err := wails.Run(&options.App{
-		Title:    "Auto Code",
-		Width:    1200,
-		Height:   800,
-		MinWidth: 800,
+		Title:     "Auto Code",
+		Width:     1200,
+		Height:    800,
+		MinWidth:  800,
 		MinHeight: 600,
 		AssetServer: &assetserver.Options{
 			Assets: assets,

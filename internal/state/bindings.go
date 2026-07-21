@@ -3,10 +3,12 @@ package state
 import (
 	stdctx "context"
 	"encoding/json"
+	"fmt"
 	"sync"
 
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"github.com/auto-code/auto-code/internal/api"
 	engctx "github.com/auto-code/auto-code/internal/engine/context"
 	"github.com/auto-code/auto-code/internal/tools"
 	"github.com/auto-code/auto-code/internal/tools/registry"
@@ -22,11 +24,11 @@ type MessageSubmitter interface {
 }
 
 type SDKMessage struct {
-	Type      string         `json:"type"`
-	Subtype   string         `json:"subtype,omitempty"`
-	Message   *types.Message `json:"message,omitempty"`
+	Type      string          `json:"type"`
+	Subtype   string          `json:"subtype,omitempty"`
+	Message   *types.Message  `json:"message,omitempty"`
 	SessionID types.SessionID `json:"session_id,omitempty"`
-	Data      any            `json:"data,omitempty"`
+	Data      any             `json:"data,omitempty"`
 }
 
 type WailsBindings struct {
@@ -300,4 +302,148 @@ func (b *WailsBindings) RegisterMCPTool(request RegisterToolRequest) error {
 	}
 
 	return nil
+}
+
+// OllamaConfig 表示 Ollama 配置
+type OllamaConfigRequest struct {
+	BaseURL string `json:"base_url"`
+	APIKey  string `json:"api_key"`
+	Model   string `json:"model"`
+}
+
+// SetOllamaConfig 设置 Ollama 配置
+func (b *WailsBindings) SetOllamaConfig(request OllamaConfigRequest) error {
+	b.appState.SetSetting("ollama_base_url", request.BaseURL)
+	b.appState.SetSetting("ollama_api_key", request.APIKey)
+	b.appState.SetSetting("ollama_model", request.Model)
+
+	if request.Model != "" {
+		b.appState.SetMainLoopModel(types.ModelSetting(request.Model))
+	}
+
+	return nil
+}
+
+// GetOllamaConfig 获取 Ollama 配置
+func (b *WailsBindings) GetOllamaConfig() OllamaConfigRequest {
+	baseURL, _ := b.appState.GetSetting("ollama_base_url")
+	apiKey, _ := b.appState.GetSetting("ollama_api_key")
+	model := string(b.appState.GetMainLoopModel())
+
+	return OllamaConfigRequest{
+		BaseURL: toString(baseURL, "http://localhost:11434/api"),
+		APIKey:  toString(apiKey, ""),
+		Model:   model,
+	}
+}
+
+// ListModelsResponse 表示模型列表响应
+type ListModelsResponse struct {
+	Models []ModelInfoUI `json:"models"`
+	Error  string        `json:"error,omitempty"`
+}
+
+// ModelInfoUI 表示前端显示的模型信息
+type ModelInfoUI struct {
+	Name          string `json:"name"`
+	Size          string `json:"size,omitempty"`
+	Family        string `json:"family,omitempty"`
+	ParameterSize string `json:"parameter_size,omitempty"`
+	Quantization  string `json:"quantization,omitempty"`
+}
+
+// ListAvailableModels 获取可用模型列表
+func (b *WailsBindings) ListAvailableModels() ListModelsResponse {
+	config := b.GetOllamaConfig()
+
+	client := b.createOllamaClient(config)
+
+	models, err := client.ListModels(b.ctx)
+	if err != nil {
+		return ListModelsResponse{
+			Error: err.Error(),
+		}
+	}
+
+	result := make([]ModelInfoUI, 0, len(models))
+	for _, m := range models {
+		result = append(result, ModelInfoUI{
+			Name:          m.Name,
+			Size:          formatSize(m.Size),
+			Family:        m.Details.Family,
+			ParameterSize: m.Details.ParameterSize,
+			Quantization:  m.Details.QuantizationLevel,
+		})
+	}
+
+	return ListModelsResponse{Models: result}
+}
+
+// OllamaHealthResponse 表示健康检查响应
+type OllamaHealthResponse struct {
+	Connected bool   `json:"connected"`
+	Error     string `json:"error,omitempty"`
+	IsLocal   bool   `json:"is_local"`
+	BaseURL   string `json:"base_url"`
+	Model     string `json:"model"`
+}
+
+// CheckOllamaHealth 检查 Ollama 服务健康状态
+func (b *WailsBindings) CheckOllamaHealth() OllamaHealthResponse {
+	config := b.GetOllamaConfig()
+
+	client := b.createOllamaClient(config)
+
+	status := client.CheckHealth(b.ctx)
+	return OllamaHealthResponse{
+		Connected: status.Connected,
+		Error:     status.Error,
+		IsLocal:   status.IsLocal,
+		BaseURL:   config.BaseURL,
+		Model:     config.Model,
+	}
+}
+
+func (b *WailsBindings) createOllamaClient(config OllamaConfigRequest) *api.Client {
+	ollamaConfig := api.DefaultOllamaConfig()
+	if config.BaseURL != "" {
+		ollamaConfig.BaseURL = config.BaseURL
+	}
+	if config.APIKey != "" {
+		ollamaConfig.APIKey = config.APIKey
+		ollamaConfig.IsLocal = false
+	}
+	if config.Model != "" {
+		ollamaConfig.Model = config.Model
+	}
+	return api.NewClient(ollamaConfig)
+}
+
+func toString(v any, def string) string {
+	if v == nil {
+		return def
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return def
+}
+
+func formatSize(size int64) string {
+	const (
+		KB = 1024
+		MB = KB * 1024
+		GB = MB * 1024
+	)
+
+	switch {
+	case size >= GB:
+		return fmt.Sprintf("%.1f GB", float64(size)/float64(GB))
+	case size >= MB:
+		return fmt.Sprintf("%.1f MB", float64(size)/float64(MB))
+	case size >= KB:
+		return fmt.Sprintf("%.1f KB", float64(size)/float64(KB))
+	default:
+		return fmt.Sprintf("%d B", size)
+	}
 }

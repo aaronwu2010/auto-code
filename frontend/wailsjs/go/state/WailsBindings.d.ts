@@ -6,6 +6,8 @@ import {context} from '../models';
 
 export function AddTodo(arg1:state.TodoRequest):Promise<void>;
 
+export function CheckOllamaHealth():Promise<state.OllamaHealthResponse>;
+
 export function GetAppState():Promise<state.AppStateSnapshot>;
 
 export function GetAvailableTools():Promise<Array<state.ToolInfo>>;
@@ -14,9 +16,13 @@ export function GetMCPStatus():Promise<state.MCPState>;
 
 export function GetMessages():Promise<state.GetMessagesResponse>;
 
+export function GetOllamaConfig():Promise<state.OllamaConfigRequest>;
+
 export function GetSessionID():Promise<string>;
 
 export function Interrupt():Promise<void>;
+
+export function ListAvailableModels():Promise<state.ListModelsResponse>;
 
 export function RefreshContext():Promise<void>;
 
@@ -29,6 +35,8 @@ export function SetEngine(arg1:state.MessageSubmitter):Promise<void>;
 export function SetFastMode(arg1:state.SetFastModeRequest):Promise<void>;
 
 export function SetModel(arg1:state.SetModelRequest):Promise<void>;
+
+export function SetOllamaConfig(arg1:state.OllamaConfigRequest):Promise<void>;
 
 export function SetPermissionMode(arg1:state.SetPermissionModeRequest):Promise<void>;
 

@@ -25,14 +25,14 @@ type StreamMessage struct {
 }
 
 type Usage struct {
-	InputTokens       int64 `json:"input_tokens"`
-	OutputTokens      int64 `json:"output_tokens"`
-	PromptEvalCount   int   `json:"prompt_eval_count,omitempty"`
-	EvalCount         int   `json:"eval_count,omitempty"`
-	TotalDuration     int64 `json:"total_duration,omitempty"`
-	LoadDuration      int64 `json:"load_duration,omitempty"`
+	InputTokens        int64 `json:"input_tokens"`
+	OutputTokens       int64 `json:"output_tokens"`
+	PromptEvalCount    int   `json:"prompt_eval_count,omitempty"`
+	EvalCount          int   `json:"eval_count,omitempty"`
+	TotalDuration      int64 `json:"total_duration,omitempty"`
+	LoadDuration       int64 `json:"load_duration,omitempty"`
 	PromptEvalDuration int64 `json:"prompt_eval_duration,omitempty"`
-	EvalDuration      int64 `json:"eval_duration,omitempty"`
+	EvalDuration       int64 `json:"eval_duration,omitempty"`
 }
 
 type APIError struct {
@@ -47,12 +47,12 @@ func (e *APIError) Error() string {
 }
 
 type OllamaConfig struct {
-	BaseURL     string
-	APIKey      string
-	Model       string
-	Timeout     time.Duration
-	IsLocal     bool
-	KeepAlive   string
+	BaseURL   string
+	APIKey    string
+	Model     string
+	Timeout   time.Duration
+	IsLocal   bool
+	KeepAlive string
 }
 
 func DefaultOllamaConfig() OllamaConfig {
@@ -86,21 +86,21 @@ type ModelOptions struct {
 }
 
 type OllamaChatRequest struct {
-	Model     string           `json:"model"`
-	Messages  []OllamaMessage  `json:"messages"`
-	Tools     []OllamaToolDef  `json:"tools,omitempty"`
-	Format    any              `json:"format,omitempty"`
-	Options   *ModelOptions    `json:"options,omitempty"`
-	Stream    bool             `json:"stream"`
-	Think     any              `json:"think,omitempty"`
-	KeepAlive string           `json:"keep_alive,omitempty"`
+	Model     string          `json:"model"`
+	Messages  []OllamaMessage `json:"messages"`
+	Tools     []OllamaToolDef `json:"tools,omitempty"`
+	Format    any             `json:"format,omitempty"`
+	Options   *ModelOptions   `json:"options,omitempty"`
+	Stream    bool            `json:"stream"`
+	Think     any             `json:"think,omitempty"`
+	KeepAlive string          `json:"keep_alive,omitempty"`
 }
 
 type OllamaMessage struct {
-	Role      string              `json:"role"`
-	Content   string              `json:"content"`
-	Images    []string            `json:"images,omitempty"`
-	ToolCalls []types.ToolCall    `json:"tool_calls,omitempty"`
+	Role      string           `json:"role"`
+	Content   string           `json:"content"`
+	Images    []string         `json:"images,omitempty"`
+	ToolCalls []types.ToolCall `json:"tool_calls,omitempty"`
 }
 
 type OllamaToolDef struct {
@@ -109,9 +109,9 @@ type OllamaToolDef struct {
 }
 
 type ToolFunction struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Parameters  any            `json:"parameters"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Parameters  any    `json:"parameters"`
 }
 
 type OllamaChatStreamEvent struct {
@@ -305,8 +305,8 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 
 	var (
-		usage       Usage
-		stopReason  string
+		usage        Usage
+		stopReason   string
 		toolCallsAcc []types.ToolCall
 	)
 
@@ -528,4 +528,25 @@ func ConvertToolsToOllama(toolDefs []ToolFunction) []OllamaToolDef {
 
 func CalculateCost(usage Usage, model string) float64 {
 	return 0.0
+}
+
+// SetBaseURL 设置 API 基础 URL
+func (c *Client) SetBaseURL(baseURL string) {
+	c.config.BaseURL = baseURL
+}
+
+// SetAPIKey 设置 API Key
+func (c *Client) SetAPIKey(apiKey string) {
+	c.config.APIKey = apiKey
+	if apiKey != "" {
+		c.config.IsLocal = false
+	} else {
+		c.config.IsLocal = strings.HasPrefix(c.config.BaseURL, "localhost") ||
+			strings.HasPrefix(c.config.BaseURL, "127.0.0.1")
+	}
+}
+
+// SetModel 设置默认模型
+func (c *Client) SetModel(model string) {
+	c.config.Model = model
 }
