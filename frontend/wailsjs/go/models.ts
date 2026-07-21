@@ -177,6 +177,26 @@ export namespace state {
 		    return a;
 		}
 	}
+	export class FileInfo {
+	    name: string;
+	    path: string;
+	    is_dir: boolean;
+	    size: number;
+	    mod_time: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.is_dir = source["is_dir"];
+	        this.size = source["size"];
+	        this.mod_time = source["mod_time"];
+	    }
+	}
 	export class GetMessagesResponse {
 	    messages: types.Message[];
 	

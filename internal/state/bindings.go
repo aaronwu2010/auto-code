@@ -449,3 +449,45 @@ func formatSize(size int64) string {
 		return fmt.Sprintf("%d B", size)
 	}
 }
+
+// FileInfo 表示文件或目录信息
+type FileInfo struct {
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	IsDir   bool   `json:"is_dir"`
+	Size    int64  `json:"size"`
+	ModTime string `json:"mod_time"`
+}
+
+// SelectProjectDirectory 打开目录选择对话框
+func (b *WailsBindings) SelectProjectDirectory() (string, error) {
+	dir, err := wailsRuntime.OpenDirectoryDialog(b.ctx, wailsRuntime.OpenDialogOptions{
+		Title: "选择项目目录",
+	})
+	return dir, err
+}
+
+// ListDirectoryContents 列出目录内容
+func (b *WailsBindings) ListDirectoryContents(dirPath string) ([]FileInfo, error) {
+	if dirPath == "" {
+		return nil, fmt.Errorf("目录路径不能为空")
+	}
+
+	entries, err := tools.ListDirectory(dirPath)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]FileInfo, 0, len(entries))
+	for _, entry := range entries {
+		result = append(result, FileInfo{
+			Name:    entry.Name,
+			Path:    entry.Path,
+			IsDir:   entry.IsDir,
+			Size:    entry.Size,
+			ModTime: entry.ModTime,
+		})
+	}
+
+	return result, nil
+}

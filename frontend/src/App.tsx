@@ -9,6 +9,8 @@ import {
   GetOllamaConfig,
   ListAvailableModels,
   CheckOllamaHealth,
+  SelectProjectDirectory,
+  ListDirectoryContents,
 } from "../wailsjs/go/state/WailsBindings";
 import { state, types } from "../wailsjs/go/models";
 
@@ -22,6 +24,7 @@ type AppStateSnapshot = state.AppStateSnapshot;
 type OllamaConfig = state.OllamaConfigRequest;
 type OllamaHealth = state.OllamaHealthResponse;
 type ModelInfo = state.ModelInfoUI;
+type FileInfo = state.FileInfo;
 
 interface SDKMessage {
   type: string;
@@ -58,6 +61,12 @@ function App() {
   const [loadingModels, setLoadingModels] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [healthCheckResult, setHealthCheckResult] = useState<string | null>(null);
+
+  // 文件资源管理器状态
+  const [projectDir, setProjectDir] = useState<string>("");
+  const [files, setFiles] = useState<FileInfo[]>([]);
+  const [selectedFile, setSelectedFile] = useState<string>("");
+  const [loadingFiles, setLoadingFiles] = useState(false);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -145,6 +154,45 @@ function App() {
       await checkHealth();
       await loadModels();
     } catch {}
+  };
+
+  // 选择项目目录
+  const handleSelectDirectory = async () => {
+    try {
+      const dir = await SelectProjectDirectory();
+      if (dir) {
+        setProjectDir(dir);
+        await loadFiles(dir);
+      }
+    } catch (err) {
+      console.error("选择目录失败:", err);
+    }
+  };
+
+  // 加载文件列表
+  const loadFiles = async (dir: string) => {
+    if (!dir) return;
+    setLoadingFiles(true);
+    try {
+      const fileList = await ListDirectoryContents(dir);
+      setFiles(fileList || []);
+    } catch (err) {
+      console.error("加载文件列表失败:", err);
+      setFiles([]);
+    }
+    setLoadingFiles(false);
+  };
+
+  // 点击目录项
+  const handleFileClick = (file: FileInfo) => {
+    if (file.is_dir) {
+      // 如果是目录，进入该目录
+      setProjectDir(file.path);
+      loadFiles(file.path);
+    } else {
+      // 如果是文件，选中它
+      setSelectedFile(file.path);
+    }
   };
 
   useEffect(() => {
@@ -497,52 +545,112 @@ function App() {
         </div>
       )}
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-3">
-        {messages.length === 0 && (
-          <div className="text-center text-[#555] mt-20">
-            <div className="text-4xl mb-4">Auto Code</div>
-            <div className="text-sm">
-              Type a message to start a conversation
+      {/* 主内容区域 - 左侧对话，右侧文件资源管理器 */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* 左侧对话区域 */}
+        <div className="flex flex-col flex-1 border-r border-[#2a2a4a]">
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto px-4 py-3">
+            {messages.length === 0 && (
+              <div className="text-center text-[#555] mt-20">
+                <div className="text-4xl mb-4">Auto Code</div>
+                <div className="text-sm">
+                  Type a message to start a conversation
+                </div>
+              </div>
+            )}
+            {messages.map(renderMessage)}
+            {isLoading && (
+              <div className="text-[#888] text-sm px-3 py-2 animate-pulse">
+                Processing...
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Input */}
+          <div className="px-4 py-3 border-t border-[#2a2a4a]">
+            {/* 项目目录选择 */}
+            <div className="flex items-center gap-2 mb-2">
+              <button
+                type="button"
+                onClick={handleSelectDirectory}
+                className="text-xs bg-[#0f3460] text-[#6cb6ff] px-3 py-1 rounded hover:bg-[#1a4a80]"
+              >
+                📁 选择目录
+              </button>
+              {projectDir && (
+                <span className="text-xs text-[#888] truncate">{projectDir}</span>
+              )}
+            </div>
+
+            <div className="flex gap-2">
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Type your message... (Enter to send, Shift+Enter for newline)"
+                rows={4}
+                className="flex-1 bg-[#16213e] text-[#e0e0e0] border border-[#2a2a4a] rounded-lg px-3 py-2 font-mono text-sm resize-none outline-none focus:border-[#4a6a9a] placeholder-[#555]"
+              />
+              <div className="flex flex-col gap-1">
+                <button
+                  onClick={handleSubmit}
+                  disabled={isLoading || !input.trim()}
+                  className="bg-[#0f3460] text-[#e0e0e0] border-none rounded-lg px-4 py-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[#1a4a80] text-sm"
+                >
+                  Send
+                </button>
+                {isLoading && (
+                  <button
+                    onClick={handleInterrupt}
+                    className="bg-[#5a2a2a] text-[#ff6b6b] border-none rounded-lg px-4 py-1 cursor-pointer hover:bg-[#6a3a3a] text-xs"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
             </div>
           </div>
-        )}
-        {messages.map(renderMessage)}
-        {isLoading && (
-          <div className="text-[#888] text-sm px-3 py-2 animate-pulse">
-            Processing...
-          </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
+        </div>
 
-      {/* Input */}
-      <div className="px-4 py-3 border-t border-[#2a2a4a]">
-        <div className="flex gap-2">
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Type your message... (Enter to send, Shift+Enter for newline)"
-            rows={4}
-            className="flex-1 bg-[#16213e] text-[#e0e0e0] border border-[#2a2a4a] rounded-lg px-3 py-2 font-mono text-sm resize-none outline-none focus:border-[#4a6a9a] placeholder-[#555]"
-          />
-          <div className="flex flex-col gap-1">
-            <button
-              onClick={handleSubmit}
-              disabled={isLoading || !input.trim()}
-              className="bg-[#0f3460] text-[#e0e0e0] border-none rounded-lg px-4 py-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[#1a4a80] text-sm"
-            >
-              Send
-            </button>
-            {isLoading && (
-              <button
-                onClick={handleInterrupt}
-                className="bg-[#5a2a2a] text-[#ff6b6b] border-none rounded-lg px-4 py-1 cursor-pointer hover:bg-[#6a3a3a] text-xs"
-              >
-                Cancel
-              </button>
+        {/* 右侧文件资源管理器 */}
+        <div className="w-64 flex flex-col bg-[#16213e] overflow-hidden">
+          <div className="px-3 py-2 border-b border-[#2a2a4a] text-xs font-bold text-[#6cb6ff]">
+            文件资源管理器
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {loadingFiles ? (
+              <div className="text-xs text-[#888] p-2">加载中...</div>
+            ) : !projectDir ? (
+              <div className="text-xs text-[#555] p-2">请选择项目目录</div>
+            ) : files.length === 0 ? (
+              <div className="text-xs text-[#555] p-2">目录为空</div>
+            ) : (
+              <div className="text-xs">
+                {files.map((file, i) => (
+                  <div
+                    key={i}
+                    onClick={() => handleFileClick(file)}
+                    className={`px-2 py-1 cursor-pointer flex items-center gap-1 hover:bg-[#0f3460] ${
+                      selectedFile === file.path ? "bg-[#0f3460]" : ""
+                    }`}
+                  >
+                    <span>{file.is_dir ? "📁" : "📄"}</span>
+                    <span className="truncate">{file.name}</span>
+                    {!file.is_dir && file.size > 0 && (
+                      <span className="text-[10px] text-[#555] ml-auto">
+                        {file.size > 1024 * 1024
+                          ? `${(file.size / 1024 / 1024).toFixed(1)}MB`
+                          : file.size > 1024
+                          ? `${(file.size / 1024).toFixed(1)}KB`
+                          : `${file.size}B`}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </div>

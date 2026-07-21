@@ -42,12 +42,20 @@ export function ListAvailableModels() {
   return window['go']['state']['WailsBindings']['ListAvailableModels']();
 }
 
+export function ListDirectoryContents(arg1) {
+  return window['go']['state']['WailsBindings']['ListDirectoryContents'](arg1);
+}
+
 export function RefreshContext() {
   return window['go']['state']['WailsBindings']['RefreshContext']();
 }
 
 export function RegisterMCPTool(arg1) {
   return window['go']['state']['WailsBindings']['RegisterMCPTool'](arg1);
+}
+
+export function SelectProjectDirectory() {
+  return window['go']['state']['WailsBindings']['SelectProjectDirectory']();
 }
 
 export function SendMessage(arg1) {

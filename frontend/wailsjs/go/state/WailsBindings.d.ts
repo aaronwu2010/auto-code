@@ -24,9 +24,13 @@ export function Interrupt():Promise<void>;
 
 export function ListAvailableModels():Promise<state.ListModelsResponse>;
 
+export function ListDirectoryContents(arg1:string):Promise<Array<state.FileInfo>>;
+
 export function RefreshContext():Promise<void>;
 
 export function RegisterMCPTool(arg1:state.RegisterToolRequest):Promise<void>;
+
+export function SelectProjectDirectory():Promise<string>;
 
 export function SendMessage(arg1:state.SendMessageRequest):Promise<state.SendMessageResponse>;
 
