@@ -80,30 +80,42 @@ type SendMessageResponse struct {
 }
 
 func (b *WailsBindings) SendMessage(request SendMessageRequest) SendMessageResponse {
+	println("SendMessage: 收到请求, prompt=", request.Prompt)
+	
 	b.mu.RLock()
 	eng := b.engine
 	b.mu.RUnlock()
 
 	if eng == nil {
+		println("SendMessage: 错误 - engine 未初始化")
 		return SendMessageResponse{Success: false, Error: "engine not initialized"}
 	}
 
+	println("SendMessage: engine 已就绪，开始处理消息")
 	b.appState.SetIsProcessing(true)
 	defer b.appState.SetIsProcessing(false)
 
+	println("SendMessage: 调用 eng.SubmitMessage")
 	outputCh := eng.SubmitMessage(b.ctx, request.Prompt)
+	println("SendMessage: SubmitMessage 返回，启动消息监听 goroutine")
 
 	go func() {
+		msgCount := 0
 		for msg := range outputCh {
+			msgCount++
+			println("SendMessage: 收到消息 #", msgCount, ", type=", msg.Type)
 			data, _ := json.Marshal(msg)
 			wailsRuntime.EventsEmit(b.ctx, "query:message", string(data))
 
 			if msg.Type == "result" || msg.Type == "error" {
+				println("SendMessage: 消息处理完成，退出 goroutine")
 				return
 			}
 		}
+		println("SendMessage: 消息通道关闭，共处理", msgCount, "条消息")
 	}()
 
+	println("SendMessage: 返回响应给前端")
 	return SendMessageResponse{
 		Success:   true,
 		SessionID: string(eng.GetSessionID()),

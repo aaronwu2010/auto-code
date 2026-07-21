@@ -92,10 +92,12 @@ func (qe *QueryEngine) Shutdown(_ context.Context) {
 }
 
 func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan SDKMessage {
+	println("SubmitMessage: 开始处理, prompt=", prompt)
 	ch := make(chan SDKMessage, 256)
 
 	go func() {
 		defer close(ch)
+		println("SubmitMessage: goroutine 开始执行")
 
 		qe.mu.Lock()
 		userMsg := types.Message{
@@ -106,14 +108,18 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		}
 		qe.messages = append(qe.messages, userMsg)
 		qe.mu.Unlock()
+		println("SubmitMessage: 用户消息已添加")
 
 		ch <- SDKMessage{Type: "user", Message: &userMsg, SessionID: qe.sessionID}
+		println("SubmitMessage: 用户消息已发送到通道")
 
 		systemPrompt, err := qe.buildSystemPrompt(ctx)
 		if err != nil {
+			println("SubmitMessage: 构建系统提示失败 - ", err.Error())
 			ch <- SDKMessage{Type: "error", Subtype: "system_prompt_error", Message: api.GetAssistantMessageFromError(err), SessionID: qe.sessionID}
 			return
 		}
+		println("SubmitMessage: 系统提示构建完成")
 
 		permissionCtx := qe.appState.GetToolPermissionContext()
 		availableTools := qe.toolReg.GetTools(permissionCtx)

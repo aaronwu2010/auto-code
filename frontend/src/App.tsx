@@ -68,6 +68,18 @@ function App() {
   const [selectedFile, setSelectedFile] = useState<string>("");
   const [loadingFiles, setLoadingFiles] = useState(false);
 
+  // 日志面板状态
+  const [logs, setLogs] = useState<string[]>([]);
+  const [showLogs, setShowLogs] = useState(true);
+
+  // 添加日志的辅助函数
+  const addLog = (message: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    const logLine = `[${timestamp}] ${message}`;
+    console.log(logLine);
+    setLogs((prev) => [...prev.slice(-99), logLine]); // 保留最后100条
+  };
+
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
@@ -196,73 +208,123 @@ function App() {
   };
 
   useEffect(() => {
+    addLog("App: 初始化事件监听器");
+    
     EventsOn("state:change", (data: unknown) => {
+      addLog("事件 state:change: " + JSON.stringify(data));
       try {
         const event: StateChangeEvent =
           typeof data === "string" ? JSON.parse(data) : (data as StateChangeEvent);
         if (event.type === "status_update") {
+          addLog("状态更新: " + String(event.value));
           setStatusText(event.value as string);
         }
         if (event.type === "processing_update") {
+          addLog("处理状态更新: " + String(event.value));
           setIsLoading(event.value as boolean);
         }
-      } catch {}
+      } catch (err) {
+        addLog("ERROR: 处理 state:change 事件失败: " + String(err));
+      }
     });
 
     EventsOn("query:message", (data: unknown) => {
+      addLog("事件 query:message: " + JSON.stringify(data));
       try {
         const msg: SDKMessage =
           typeof data === "string" ? JSON.parse(data) : (data as SDKMessage);
+        addLog("解析后的消息: type=" + msg.type + (msg.message ? ", id=" + msg.message.id : ""));
         if (msg.message) {
           setMessages((prev) => {
             const exists = prev.some((m) => m.id === msg.message!.id);
-            if (exists) return prev;
+            if (exists) {
+              addLog("消息已存在，跳过: " + msg.message!.id);
+              return prev;
+            }
+            addLog("添加新消息: " + msg.message!.id);
             return [...prev, msg.message!];
           });
         }
         if (msg.type === "result") {
+          addLog("收到 result 类型消息，设置 isLoading=false");
           setIsLoading(false);
         }
         if (msg.type === "error") {
+          addLog("收到 error 类型消息，设置 isLoading=false");
           setIsLoading(false);
         }
-      } catch {}
+      } catch (err) {
+        addLog("ERROR: 处理 query:message 事件失败: " + String(err));
+      }
     });
 
     loadInitialState();
 
     return () => {
+      addLog("App: 清理事件监听器");
       EventsOff("state:change");
       EventsOff("query:message");
     };
   }, []);
 
   const loadInitialState = async () => {
+    addLog("loadInitialState: 开始加载初始状态");
     try {
+      addLog("loadInitialState: 获取 AppState...");
       const state = await GetAppState();
+      addLog("loadInitialState: AppState=" + JSON.stringify(state));
       if (state) {
         setAppState(state);
       }
+      
+      addLog("loadInitialState: 获取 Messages...");
       const msgs = await GetMessages();
+      addLog("loadInitialState: Messages count=" + (msgs?.messages?.length || 0));
       if (msgs) {
         setMessages(msgs.messages || []);
       }
+      
+      addLog("loadInitialState: 加载配置...");
       await loadConfig();
+      
+      addLog("loadInitialState: 检查健康状态...");
       await checkHealth();
+      
+      addLog("loadInitialState: 加载模型列表...");
       await loadModels();
-    } catch {}
+      
+      addLog("loadInitialState: 初始化完成");
+    } catch (err) {
+      addLog("ERROR: loadInitialState 加载失败: " + String(err));
+    }
   };
 
   const handleSubmit = async () => {
-    if (!input.trim() || isLoading) return;
+    addLog("handleSubmit: 开始处理, input=" + input + ", isLoading=" + isLoading);
+    
+    if (!input.trim()) {
+      addLog("handleSubmit: 输入为空，退出");
+      return;
+    }
+    
+    if (isLoading) {
+      addLog("handleSubmit: 正在加载中，退出");
+      return;
+    }
 
-    // 用户消息会通过事件从后端返回，这里不需要手动添加
+    const currentInput = input;
+    addLog("handleSubmit: 准备发送消息: " + currentInput);
+    
     setInput("");
     setIsLoading(true);
+    addLog("handleSubmit: 已设置 isLoading=true，输入已清空");
 
     try {
-      await SendMessage({ prompt: input });
+      addLog("handleSubmit: 调用 SendMessage API...");
+      const result = await SendMessage({ prompt: currentInput });
+      addLog("handleSubmit: SendMessage 返回结果: " + JSON.stringify(result));
     } catch (err) {
+      addLog("ERROR: handleSubmit SendMessage 调用失败: " + String(err));
       setIsLoading(false);
     }
   };
@@ -596,7 +658,12 @@ function App() {
               />
               <div className="flex flex-col gap-1">
                 <button
-                  onClick={handleSubmit}
+                  type="button"
+                  onClick={(e) => {
+                    addLog("Send 按钮被点击, isLoading=" + isLoading + ", input=" + input.trim());
+                    e.preventDefault();
+                    handleSubmit();
+                  }}
                   disabled={isLoading || !input.trim()}
                   className="bg-[#0f3460] text-[#e0e0e0] border-none rounded-lg px-4 py-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[#1a4a80] text-sm"
                 >
@@ -615,44 +682,92 @@ function App() {
           </div>
         </div>
 
-        {/* 右侧文件资源管理器 */}
-        <div className="w-64 flex flex-col bg-[#16213e] overflow-hidden">
-          <div className="px-3 py-2 border-b border-[#2a2a4a] text-xs font-bold text-[#6cb6ff]">
-            文件资源管理器
+        {/* 右侧面板：文件资源管理器 + 日志 */}
+        <div className="w-72 flex flex-col bg-[#16213e] overflow-hidden border-l border-[#2a2a4a]">
+          {/* 文件资源管理器 */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="px-3 py-2 border-b border-[#2a2a4a] text-xs font-bold text-[#6cb6ff] flex justify-between items-center">
+              <span>文件资源管理器</span>
+              <button
+                type="button"
+                onClick={() => setShowLogs(!showLogs)}
+                className="text-[10px] bg-[#0f3460] px-2 py-0.5 rounded hover:bg-[#1a4a80]"
+              >
+                {showLogs ? "隐藏日志" : "显示日志"}
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {loadingFiles ? (
+                <div className="text-xs text-[#888] p-2">加载中...</div>
+              ) : !projectDir ? (
+                <div className="text-xs text-[#555] p-2">请选择项目目录</div>
+              ) : files.length === 0 ? (
+                <div className="text-xs text-[#555] p-2">目录为空</div>
+              ) : (
+                <div className="text-xs">
+                  {files.map((file, i) => (
+                    <div
+                      key={i}
+                      onClick={() => handleFileClick(file)}
+                      className={`px-2 py-1 cursor-pointer flex items-center gap-1 hover:bg-[#0f3460] ${
+                        selectedFile === file.path ? "bg-[#0f3460]" : ""
+                      }`}
+                    >
+                      <span>{file.is_dir ? "📁" : "📄"}</span>
+                      <span className="truncate">{file.name}</span>
+                      {!file.is_dir && file.size > 0 && (
+                        <span className="text-[10px] text-[#555] ml-auto">
+                          {file.size > 1024 * 1024
+                            ? `${(file.size / 1024 / 1024).toFixed(1)}MB`
+                            : file.size > 1024
+                            ? `${(file.size / 1024).toFixed(1)}KB`
+                            : `${file.size}B`}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-          <div className="flex-1 overflow-y-auto">
-            {loadingFiles ? (
-              <div className="text-xs text-[#888] p-2">加载中...</div>
-            ) : !projectDir ? (
-              <div className="text-xs text-[#555] p-2">请选择项目目录</div>
-            ) : files.length === 0 ? (
-              <div className="text-xs text-[#555] p-2">目录为空</div>
-            ) : (
-              <div className="text-xs">
-                {files.map((file, i) => (
-                  <div
-                    key={i}
-                    onClick={() => handleFileClick(file)}
-                    className={`px-2 py-1 cursor-pointer flex items-center gap-1 hover:bg-[#0f3460] ${
-                      selectedFile === file.path ? "bg-[#0f3460]" : ""
-                    }`}
-                  >
-                    <span>{file.is_dir ? "📁" : "📄"}</span>
-                    <span className="truncate">{file.name}</span>
-                    {!file.is_dir && file.size > 0 && (
-                      <span className="text-[10px] text-[#555] ml-auto">
-                        {file.size > 1024 * 1024
-                          ? `${(file.size / 1024 / 1024).toFixed(1)}MB`
-                          : file.size > 1024
-                          ? `${(file.size / 1024).toFixed(1)}KB`
-                          : `${file.size}B`}
-                      </span>
-                    )}
-                  </div>
-                ))}
+
+          {/* 日志面板 */}
+          {showLogs && (
+            <div className="h-48 flex flex-col border-t border-[#2a2a4a]">
+              <div className="px-3 py-1 border-b border-[#2a2a4a] text-xs font-bold text-[#fbbf24] flex justify-between items-center">
+                <span>📋 调试日志</span>
+                <button
+                  type="button"
+                  onClick={() => setLogs([])}
+                  className="text-[10px] bg-[#3a2a0a] px-2 py-0.5 rounded hover:bg-[#4a3a1a]"
+                >
+                  清除
+                </button>
               </div>
-            )}
-          </div>
+              <div className="flex-1 overflow-y-auto bg-[#0a0a1a] p-2 font-mono text-[10px]">
+                {logs.length === 0 ? (
+                  <div className="text-[#555]">暂无日志</div>
+                ) : (
+                  logs.map((log, i) => (
+                    <div
+                      key={i}
+                      className={`${
+                        log.includes("ERROR") || log.includes("error")
+                          ? "text-red-400"
+                          : log.includes("事件") || log.includes("收到")
+                          ? "text-green-400"
+                          : log.includes("handleSubmit") || log.includes("SendMessage")
+                          ? "text-blue-400"
+                          : "text-[#888]"
+                      }`}
+                    >
+                      {log}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
