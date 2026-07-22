@@ -1,4 +1,4 @@
-﻿package powershell
+package powershell
 
 import (
 	"bufio"
@@ -79,9 +79,26 @@ func (t *PowerShellTool) CheckPermissions(_ context.Context, input any, toolCtx 
 }
 
 func (t *PowerShellTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(PowerShellInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type for PowerShellTool")
+	var inp PowerShellInput
+
+	// 处理不同类型的输入
+	switch v := input.(type) {
+	case PowerShellInput:
+		inp = v
+	case map[string]any:
+		if cmd, ok := v["command"].(string); ok {
+			inp.Command = cmd
+		}
+		if to, ok := v["timeout"].(float64); ok {
+			inp.Timeout = int(to)
+		} else if to, ok := v["timeout"].(int); ok {
+			inp.Timeout = to
+		}
+		if wd, ok := v["workdir"].(string); ok {
+			inp.WorkDir = wd
+		}
+	default:
+		return nil, fmt.Errorf("invalid input type for PowerShellTool: expected PowerShellInput or map[string]any, got %T", input)
 	}
 
 	if runtime.GOOS != "windows" {

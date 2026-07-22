@@ -30,6 +30,10 @@ export function GetOllamaConfig() {
   return window['go']['state']['WailsBindings']['GetOllamaConfig']();
 }
 
+export function GetProjectDirectory() {
+  return window['go']['state']['WailsBindings']['GetProjectDirectory']();
+}
+
 export function GetSessionID() {
   return window['go']['state']['WailsBindings']['GetSessionID']();
 }
@@ -80,6 +84,10 @@ export function SetOllamaConfig(arg1) {
 
 export function SetPermissionMode(arg1) {
   return window['go']['state']['WailsBindings']['SetPermissionMode'](arg1);
+}
+
+export function SetProjectDirectory(arg1) {
+  return window['go']['state']['WailsBindings']['SetProjectDirectory'](arg1);
 }
 
 export function SetThinking(arg1) {

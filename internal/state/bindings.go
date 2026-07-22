@@ -500,6 +500,25 @@ func (b *WailsBindings) SelectProjectDirectory() (string, error) {
 	return dir, err
 }
 
+// SetProjectDirectory 保存项目目录到配置文件
+func (b *WailsBindings) SetProjectDirectory(dir string) error {
+	if dir == "" {
+		return fmt.Errorf("目录路径不能为空")
+	}
+	b.appState.SetSetting("project_directory", dir)
+	return nil
+}
+
+// GetProjectDirectory 获取保存的项目目录
+func (b *WailsBindings) GetProjectDirectory() string {
+	if v, ok := b.appState.GetSetting("project_directory"); ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
 // ListDirectoryContents 列出目录内容
 func (b *WailsBindings) ListDirectoryContents(dirPath string) ([]FileInfo, error) {
 	if dirPath == "" {

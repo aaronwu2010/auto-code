@@ -9,6 +9,8 @@ import {
   ListAvailableModels,
   CheckOllamaHealth,
   SelectProjectDirectory,
+  SetProjectDirectory,
+  GetProjectDirectory,
   ListDirectoryContents,
 } from "../wailsjs/go/state/WailsBindings";
 import { state, types } from "../wailsjs/go/models";
@@ -142,7 +144,19 @@ function App() {
       const dir = await SelectProjectDirectory();
       if (dir) {
         setProjectDir(dir);
+        await SetProjectDirectory(dir);
         await loadFiles(dir);
+      }
+    } catch {}
+  };
+
+  // 加载保存的项目目录
+  const loadProjectDir = async () => {
+    try {
+      const savedDir = await GetProjectDirectory();
+      if (savedDir) {
+        setProjectDir(savedDir);
+        await loadFiles(savedDir);
       }
     } catch {}
   };
@@ -224,6 +238,7 @@ function App() {
       await loadConfig();
       await checkHealth();
       await loadModels();
+      await loadProjectDir();
     } catch {}
   };
 
@@ -576,7 +591,7 @@ function App() {
                 onClick={handleSelectDirectory}
                 className="text-[11px] bg-[#1a2a40] text-[#6a8aaa] px-3 py-1 rounded-md hover:bg-[#243550] border border-[#2a3a50]/50 transition-colors"
               >
-                选择目录
+                项目目录
               </button>
               {!projectDir && (
                 <span className="text-[11px] text-[#3a4a5a]">未选择项目目录</span>

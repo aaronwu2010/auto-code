@@ -79,12 +79,38 @@ func (t *FileWriteTool) CheckPermissions(_ context.Context, input any, toolCtx *
 }
 
 func (t *FileWriteTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(FileWriteInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type for FileWriteTool")
+	var inp FileWriteInput
+
+	// 处理不同类型的输入
+	switch v := input.(type) {
+	case FileWriteInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseFileWriteInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for FileWriteTool: expected FileWriteInput or map[string]any, got %T", input)
 	}
 
 	filePath := expandPath(inp.FilePath)
+
+	// 如果有项目目录，确保文件在项目目录下
+	if toolCtx != nil && toolCtx.ProjectDirectory != "" {
+		projectDir := filepath.Clean(toolCtx.ProjectDirectory)
+		absPath, err := filepath.Abs(filePath)
+		if err == nil {
+			// 检查路径是否在项目目录内
+			if !strings.HasPrefix(absPath, projectDir+string(filepath.Separator)) && absPath != projectDir {
+				// 文件不在项目目录内，将其重定向到项目目录
+				fileName := filepath.Base(filePath)
+				filePath = filepath.Join(projectDir, fileName)
+			}
+		}
+	}
+
 	content := inp.Content
 
 	if isUNCPath(filePath) {

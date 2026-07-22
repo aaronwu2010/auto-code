@@ -453,3 +453,15 @@ func (s *AppState) GetSetting(key string) (any, bool) {
 	v, ok := s.Settings[key]
 	return v, ok
 }
+
+// GetProjectDirectory 获取保存的项目目录
+func (s *AppState) GetProjectDirectory() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if v, ok := s.Settings["project_directory"]; ok {
+		if dir, ok := v.(string); ok {
+			return dir
+		}
+	}
+	return ""
+}

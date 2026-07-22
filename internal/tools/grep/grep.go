@@ -1,4 +1,4 @@
-﻿package grep
+package grep
 
 import (
 	"bufio"
@@ -101,9 +101,27 @@ func (t *GrepTool) CheckPermissions(_ context.Context, input any, toolCtx *tools
 }
 
 func (t *GrepTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(GrepInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type for GrepTool")
+	var inp GrepInput
+
+	// 处理不同类型的输入
+	switch v := input.(type) {
+	case GrepInput:
+		inp = v
+	case map[string]any:
+		if p, ok := v["pattern"].(string); ok {
+			inp.Pattern = p
+		}
+		if pt, ok := v["path"].(string); ok {
+			inp.Path = pt
+		}
+		if inc, ok := v["include"].(string); ok {
+			inp.Include = inc
+		}
+		if sln, ok := v["show_line_numbers"].(bool); ok {
+			inp.ShowLineNum = sln
+		}
+	default:
+		return nil, fmt.Errorf("invalid input type for GrepTool: expected GrepInput or map[string]any, got %T", input)
 	}
 
 	start := time.Now()

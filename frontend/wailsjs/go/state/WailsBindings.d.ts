@@ -18,6 +18,8 @@ export function GetMessages():Promise<state.GetMessagesResponse>;
 
 export function GetOllamaConfig():Promise<state.OllamaConfigRequest>;
 
+export function GetProjectDirectory():Promise<string>;
+
 export function GetSessionID():Promise<string>;
 
 export function Interrupt():Promise<void>;
@@ -43,6 +45,8 @@ export function SetModel(arg1:state.SetModelRequest):Promise<void>;
 export function SetOllamaConfig(arg1:state.OllamaConfigRequest):Promise<void>;
 
 export function SetPermissionMode(arg1:state.SetPermissionModeRequest):Promise<void>;
+
+export function SetProjectDirectory(arg1:string):Promise<void>;
 
 export function SetThinking(arg1:state.SetThinkingRequest):Promise<void>;
 

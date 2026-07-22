@@ -1,4 +1,4 @@
-﻿package fileread
+package fileread
 
 import (
 	"context"
@@ -118,9 +118,30 @@ func (t *FileReadTool) CheckPermissions(_ context.Context, input any, toolCtx *t
 }
 
 func (t *FileReadTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(FileReadInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type for FileReadTool")
+	var inp FileReadInput
+
+	// 处理不同类型的输入
+	switch v := input.(type) {
+	case FileReadInput:
+		inp = v
+	case map[string]any:
+		if fp, ok := v["file_path"].(string); ok {
+			inp.FilePath = fp
+		}
+		if off, ok := v["offset"].(float64); ok {
+			i := int(off)
+			inp.Offset = &i
+		} else if off, ok := v["offset"].(int); ok {
+			inp.Offset = &off
+		}
+		if lim, ok := v["limit"].(float64); ok {
+			i := int(lim)
+			inp.Limit = &i
+		} else if lim, ok := v["limit"].(int); ok {
+			inp.Limit = &lim
+		}
+	default:
+		return nil, fmt.Errorf("invalid input type for FileReadTool: expected FileReadInput or map[string]any, got %T", input)
 	}
 
 	filePath := expandPath(inp.FilePath)

@@ -1,4 +1,4 @@
-﻿package glob
+package glob
 
 import (
 	"context"
@@ -87,9 +87,21 @@ func (t *GlobTool) CheckPermissions(_ context.Context, input any, toolCtx *tools
 }
 
 func (t *GlobTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(GlobInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type for GlobTool")
+	var inp GlobInput
+
+	// 处理不同类型的输入
+	switch v := input.(type) {
+	case GlobInput:
+		inp = v
+	case map[string]any:
+		if p, ok := v["pattern"].(string); ok {
+			inp.Pattern = p
+		}
+		if pt, ok := v["path"].(string); ok {
+			inp.Path = pt
+		}
+	default:
+		return nil, fmt.Errorf("invalid input type for GlobTool: expected GlobInput or map[string]any, got %T", input)
 	}
 
 	start := time.Now()

@@ -59,6 +59,7 @@ type ToolUseContext struct {
 	HandleElicitation func(serverName string, params any) (any, error)
 	Messages          []types.Message
 	AgentID           types.AgentID
+	ProjectDirectory  string // 当前项目目录，用于文件操作的基准路径
 }
 
 type ToolUseOptions struct {

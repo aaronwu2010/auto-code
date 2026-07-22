@@ -93,9 +93,27 @@ func (t *FileEditTool) CheckPermissions(_ context.Context, input any, toolCtx *t
 }
 
 func (t *FileEditTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(FileEditInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type for FileEditTool")
+	var inp FileEditInput
+
+	// 处理不同类型的输入
+	switch v := input.(type) {
+	case FileEditInput:
+		inp = v
+	case map[string]any:
+		if fp, ok := v["file_path"].(string); ok {
+			inp.FilePath = fp
+		}
+		if os, ok := v["old_string"].(string); ok {
+			inp.OldString = os
+		}
+		if ns, ok := v["new_string"].(string); ok {
+			inp.NewString = ns
+		}
+		if ra, ok := v["replace_all"].(bool); ok {
+			inp.ReplaceAll = ra
+		}
+	default:
+		return nil, fmt.Errorf("invalid input type for FileEditTool: expected FileEditInput or map[string]any, got %T", input)
 	}
 
 	filePath := expandPath(inp.FilePath)

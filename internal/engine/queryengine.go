@@ -10,6 +10,7 @@ import (
 	"github.com/auto-code/auto-code/internal/api"
 	"github.com/auto-code/auto-code/internal/compact"
 	"github.com/auto-code/auto-code/internal/engine/query"
+	"github.com/auto-code/auto-code/internal/prompts"
 	"github.com/auto-code/auto-code/internal/state"
 	"github.com/auto-code/auto-code/internal/tools"
 	"github.com/auto-code/auto-code/internal/tools/registry"
@@ -77,7 +78,7 @@ func NewQueryEngine(appState *state.AppState, config *QueryEngineConfig) *QueryE
 
 	return &QueryEngine{
 		appState:      appState,
-		toolReg:       registry.NewToolRegistry(),
+		toolReg:       registry.NewDefaultToolRegistry(),
 		apiClient:     apiClient,
 		messages:      make([]types.Message, 0),
 		sessionID:     generateSessionID(),
@@ -154,9 +155,10 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 				Verbose:       qe.config.Verbose,
 				MCPClients:    qe.config.MCPClients,
 			},
-			AbortCtx:      ctx,
-			ReadFileState: qe.readFileState,
-			Messages:      qe.messages,
+			AbortCtx:         ctx,
+			ReadFileState:    qe.readFileState,
+			Messages:         qe.messages,
+			ProjectDirectory: qe.getProjectDirectory(),
 		}
 
 		queryParams := query.QueryParams{
@@ -422,20 +424,45 @@ func (qe *QueryEngine) processQueryOutput(output query.QueryOutput) []SDKMessage
 	return nil
 }
 
-func (qe *QueryEngine) buildSystemPrompt(_ context.Context) (*types.SystemPrompt, error) {
-	content := "You are an AI programming assistant.\n\n"
+func (qe *QueryEngine) buildSystemPrompt(ctx context.Context) (*types.SystemPrompt, error) {
+	// 构建完整的系统提示词
+	config := prompts.SystemPromptConfig{
+		LanguagePreference: "Chinese", // 使用中文响应
+	}
 
+	content := prompts.BuildSystemPrompt(ctx, config)
+
+	// 添加项目目录信息（关键：告诉 AI 使用这个目录）
+	projectDir := qe.config.CWD
+	if projectDir == "" {
+		projectDir = qe.appState.GetProjectDirectory()
+	}
+	if projectDir != "" {
+		content += fmt.Sprintf("\n\n# Project Directory\nThe current project directory is: %s\n\nIMPORTANT: When creating files, use this directory as the base path. For example, if the user asks to create 'hello.go', you should write to '%s/hello.go' (using the correct path separator for the operating system).", projectDir, projectDir)
+	}
+
+	// 添加自定义提示词
 	if qe.config.CustomSystemPrompt != "" {
-		content = qe.config.CustomSystemPrompt + "\n\n"
+		content = qe.config.CustomSystemPrompt + "\n\n" + content
 	}
 
 	if qe.config.AppendSystemPrompt != "" {
-		content += qe.config.AppendSystemPrompt + "\n\n"
+		content += "\n\n" + qe.config.AppendSystemPrompt
 	}
 
-	content += fmt.Sprintf("Current date: %s\n", time.Now().Format("2006-01-02"))
+	content += fmt.Sprintf("\n\nCurrent date: %s", time.Now().Format("2006-01-02"))
 
 	return &types.SystemPrompt{Content: content}, nil
+}
+
+// getProjectDirectory 获取项目目录
+func (qe *QueryEngine) getProjectDirectory() string {
+	// 优先使用 appState 中保存的项目目录（用户通过界面选择的）
+	if dir := qe.appState.GetProjectDirectory(); dir != "" {
+		return dir
+	}
+	// 然后使用配置中的 CWD
+	return qe.config.CWD
 }
 
 func (qe *QueryEngine) getMessagesAfterCompactBoundary() []types.Message {

@@ -1,4 +1,4 @@
-﻿package bash
+package bash
 
 import (
 	"bufio"
@@ -84,9 +84,26 @@ func (t *BashTool) CheckPermissions(_ context.Context, input any, toolCtx *tools
 }
 
 func (t *BashTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(BashInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type for BashTool")
+	var inp BashInput
+
+	// 处理不同类型的输入
+	switch v := input.(type) {
+	case BashInput:
+		inp = v
+	case map[string]any:
+		if cmd, ok := v["command"].(string); ok {
+			inp.Command = cmd
+		}
+		if to, ok := v["timeout"].(float64); ok {
+			inp.Timeout = int(to)
+		} else if to, ok := v["timeout"].(int); ok {
+			inp.Timeout = to
+		}
+		if wd, ok := v["workdir"].(string); ok {
+			inp.WorkDir = wd
+		}
+	default:
+		return nil, fmt.Errorf("invalid input type for BashTool: expected BashInput or map[string]any, got %T", input)
 	}
 
 	timeout := defaultTimeout

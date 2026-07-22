@@ -2,6 +2,8 @@ package compact
 
 import (
 	"strings"
+
+	"github.com/auto-code/auto-code/internal/prompts"
 )
 
 type MicrocompactResult struct {
@@ -86,25 +88,34 @@ type CompactMessage struct {
 	IsLatest bool   `json:"isLatest,omitempty"`
 }
 
+// GetCompactPrompt 获取基础压缩提示词
 func GetCompactPrompt() string {
-	return `Summarize the conversation so far, preserving:
-1. Key decisions and their rationale
-2. Important code changes made
-3. Current task status and next steps
-4. Any user preferences or constraints mentioned
-
-Be concise but complete.`
+	return prompts.GetCompactPrompt("")
 }
 
+// GetCompactPromptWithInstructions 获取带自定义指令的压缩提示词
+func GetCompactPromptWithInstructions(customInstructions string) string {
+	return prompts.GetCompactPrompt(customInstructions)
+}
+
+// GetPartialCompactPrompt 获取部分压缩提示词
 func GetPartialCompactPrompt() string {
-	return `Summarize the earlier parts of this conversation, preserving key context needed for the current task.`
+	return prompts.GetPartialCompactPrompt("", prompts.CompactFrom)
 }
 
+// GetPartialCompactPromptWithInstructions 获取带自定义指令的部分压缩提示词
+func GetPartialCompactPromptWithInstructions(customInstructions string, direction prompts.CompactDirection) string {
+	return prompts.GetPartialCompactPrompt(customInstructions, direction)
+}
+
+// FormatCompactSummary 格式化压缩摘要
 func FormatCompactSummary(summary string) string {
-	if summary == "" {
-		return ""
-	}
-	return "<compact_summary>\n" + summary + "\n</compact_summary>"
+	return prompts.FormatCompactSummary(summary)
+}
+
+// GetCompactUserSummaryMessage 获取压缩用户摘要消息
+func GetCompactUserSummaryMessage(summary string, suppressFollowUpQuestions bool, transcriptPath string, recentMessagesPreserved bool) string {
+	return prompts.GetCompactUserSummaryMessage(summary, suppressFollowUpQuestions, transcriptPath, recentMessagesPreserved)
 }
 
 type SummarizeFunc func(ctx any, messages []CompactMessage, prompt string) (string, error)
