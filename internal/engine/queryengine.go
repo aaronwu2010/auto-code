@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 	"time"
 
@@ -103,7 +104,10 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		defer close(ch)
 		defer func() {
 			if r := recover(); r != nil {
+				buf := make([]byte, 4096)
+				n := runtime.Stack(buf, false)
 				println("SubmitMessage: panic recovered - ", fmt.Sprint(r))
+				println("Stack trace:\n", string(buf[:n]))
 			}
 		}()
 		println("SubmitMessage: goroutine 开始执行")
@@ -188,9 +192,9 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		for output := range outputCh {
 			outputCount++
 			println("SubmitMessage: 收到输出 #", outputCount, ", type=", output.Type)
-			sdkMsg := qe.processQueryOutput(output)
-			if sdkMsg != nil {
-				ch <- *sdkMsg
+			sdkMsgs := qe.processQueryOutput(output)
+			for _, sdkMsg := range sdkMsgs {
+				ch <- sdkMsg
 			}
 
 			if output.Type == "terminal" || output.Type == "error" || output.Type == "interrupted" {
@@ -330,7 +334,7 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 	return outputCh, nil
 }
 
-func (qe *QueryEngine) processQueryOutput(output query.QueryOutput) *SDKMessage {
+func (qe *QueryEngine) processQueryOutput(output query.QueryOutput) []SDKMessage {
 	switch output.Type {
 	case "assistant":
 		if output.Message != nil {
@@ -342,35 +346,51 @@ func (qe *QueryEngine) processQueryOutput(output query.QueryOutput) *SDKMessage 
 			if len(output.Message.ToolCalls) > 0 {
 				qe.streamToolCalls = append(qe.streamToolCalls, output.Message.ToolCalls...)
 			}
-			return &SDKMessage{Type: "assistant", Message: output.Message, SessionID: qe.sessionID}
+			return nil
 		}
 	case "user":
 		if output.Message != nil {
 			qe.mu.Lock()
 			qe.messages = append(qe.messages, *output.Message)
 			qe.mu.Unlock()
-			return &SDKMessage{Type: "user", Message: output.Message, SessionID: qe.sessionID}
+			return []SDKMessage{{Type: "user", Message: output.Message, SessionID: qe.sessionID}}
 		}
 	case "system":
 		if output.Message != nil {
-			return &SDKMessage{Type: "system", Subtype: "compact_boundary", Message: output.Message, SessionID: qe.sessionID}
+			return []SDKMessage{{Type: "system", Subtype: "compact_boundary", Message: output.Message, SessionID: qe.sessionID}}
 		}
 	case "stream_event":
-		return &SDKMessage{Type: "stream_event", Data: output.Data, SessionID: qe.sessionID}
+		return []SDKMessage{{Type: "stream_event", Data: output.Data, SessionID: qe.sessionID}}
 	case "terminal":
 		if qe.streamContent != "" || qe.streamThinking != "" || len(qe.streamToolCalls) > 0 {
+			modelName := ""
+			if output.Message != nil {
+				modelName = output.Message.Model
+			}
 			completeMsg := types.Message{
 				ID:        qe.streamMsgID,
 				Role:      types.RoleAssistant,
 				Content:   qe.streamContent,
 				Thinking:  qe.streamThinking,
 				ToolCalls: qe.streamToolCalls,
-				Model:     output.Message.Model,
+				Model:     modelName,
 				Timestamp: time.Now().Unix(),
 			}
 			qe.mu.Lock()
 			qe.messages = append(qe.messages, completeMsg)
 			qe.mu.Unlock()
+			qe.streamContent = ""
+			qe.streamThinking = ""
+			qe.streamToolCalls = nil
+			qe.streamMsgID = ""
+			reason := "completed"
+			if t, ok := output.Data.(*query.Terminal); ok {
+				reason = t.Reason
+			}
+			return []SDKMessage{
+				{Type: "assistant", Message: &completeMsg, SessionID: qe.sessionID},
+				{Type: "result", Subtype: reason, SessionID: qe.sessionID},
+			}
 		}
 		qe.streamContent = ""
 		qe.streamThinking = ""
@@ -380,24 +400,24 @@ func (qe *QueryEngine) processQueryOutput(output query.QueryOutput) *SDKMessage 
 		if t, ok := output.Data.(*query.Terminal); ok {
 			reason = t.Reason
 		}
-		return &SDKMessage{Type: "result", Subtype: reason, SessionID: qe.sessionID}
+		return []SDKMessage{{Type: "result", Subtype: reason, SessionID: qe.sessionID}}
 	case "error":
 		qe.streamContent = ""
 		qe.streamThinking = ""
 		qe.streamToolCalls = nil
 		qe.streamMsgID = ""
-		return &SDKMessage{
+		return []SDKMessage{{
 			Type:      "error",
 			Subtype:   "api_error",
 			Message:   api.GetAssistantMessageFromError(output.Error),
 			SessionID: qe.sessionID,
-		}
+		}}
 	case "interrupted":
 		qe.streamContent = ""
 		qe.streamThinking = ""
 		qe.streamToolCalls = nil
 		qe.streamMsgID = ""
-		return &SDKMessage{Type: "result", Subtype: "interrupted", SessionID: qe.sessionID}
+		return []SDKMessage{{Type: "result", Subtype: "interrupted", SessionID: qe.sessionID}}
 	}
 	return nil
 }
