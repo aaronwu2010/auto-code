@@ -445,6 +445,27 @@ func IsModelNotLoaded(err error) bool {
 		strings.Contains(err.Error(), "no such model")
 }
 
+func IsSubscriptionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+	return strings.Contains(errMsg, "requires a subscription") ||
+		strings.Contains(errMsg, "upgrade for access") ||
+		strings.Contains(errMsg, "403") ||
+		strings.Contains(errMsg, "authentication_failed")
+}
+
+func IsForbiddenError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if apiErr, ok := err.(*APIError); ok {
+		return apiErr.StatusCode == 403
+	}
+	return strings.Contains(err.Error(), "403")
+}
+
 type RetryConfig struct {
 	MaxRetries int
 	BaseDelay  time.Duration
@@ -469,10 +490,10 @@ func (c *Client) retryConfig() RetryConfig {
 func GetAssistantMessageFromError(err error) *types.Message {
 	errText := err.Error()
 	if apiErr, ok := err.(*APIError); ok {
-		errText = fmt.Sprintf("API Error (%d): %s", apiErr.StatusCode, apiErr.Message)
+		errText = formatFriendlyError(apiErr)
 	}
 	if IsConnectionRefused(err) {
-		errText = "Ollama 服务未启动，请先运行 `ollama serve`"
+		errText = "🔌 Ollama 服务未启动\n\n请先在终端运行 `ollama serve` 启动本地 Ollama 服务，或在设置中配置云端 API。"
 	}
 	return &types.Message{
 		Role:      types.RoleAssistant,
@@ -480,6 +501,32 @@ func GetAssistantMessageFromError(err error) *types.Message {
 		Timestamp: time.Now().Unix(),
 		IsMeta:    true,
 	}
+}
+
+func formatFriendlyError(apiErr *APIError) string {
+	switch apiErr.StatusCode {
+	case 403:
+		if strings.Contains(apiErr.Message, "subscription") ||
+			strings.Contains(apiErr.Message, "upgrade for access") {
+			return "⚠️ 模型访问受限\n\n该模型需要 Ollama 订阅才能使用。你可以：\n\n1. 访问 https://ollama.com/upgrade 升级订阅\n2. 在设置中切换到其他免费模型\n3. 使用本地 Ollama 模型（运行 `ollama pull <模型名>` 下载）"
+		}
+		return fmt.Sprintf("⛔ 访问被拒绝 (403)\n\n%s", apiErr.Message)
+	case 401:
+		return "🔐 API Key 无效或已过期\n\n请在设置中检查你的 Ollama API Key 是否正确。"
+	case 404:
+		if IsModelNotLoaded(fmt.Errorf(apiErr.Message)) {
+			return "📦 模型未找到\n\n该模型不存在或尚未下载。你可以：\n\n1. 在设置中选择其他可用模型\n2. 运行 `ollama pull <模型名>` 下载模型\n3. 检查模型名称是否正确"
+		}
+		return fmt.Sprintf("❌ 资源未找到 (404)\n\n%s", apiErr.Message)
+	case 429:
+		return "⏳ 请求过于频繁\n\n已达到 API 速率限制，请稍后再试。"
+	}
+
+	if apiErr.StatusCode >= 500 {
+		return fmt.Sprintf("🔧 服务器错误 (%d)\n\nOllama 服务暂时不可用，请稍后重试。\n\n详细信息：%s", apiErr.StatusCode, apiErr.Message)
+	}
+
+	return fmt.Sprintf("API Error (%d): %s", apiErr.StatusCode, apiErr.Message)
 }
 
 func ConvertMessagesToOllama(messages []types.Message, systemPrompt string) []OllamaMessage {

@@ -348,7 +348,15 @@ func (qe *QueryEngine) processQueryOutput(output query.QueryOutput) []SDKMessage
 			if len(output.Message.ToolCalls) > 0 {
 				qe.streamToolCalls = append(qe.streamToolCalls, output.Message.ToolCalls...)
 			}
-			return nil
+			streamMsg := &types.Message{
+				ID:        qe.streamMsgID,
+				Role:      types.RoleAssistant,
+				Content:   qe.streamContent,
+				Thinking:  qe.streamThinking,
+				ToolCalls: qe.streamToolCalls,
+				Timestamp: time.Now().Unix(),
+			}
+			return []SDKMessage{{Type: "stream_chunk", Message: streamMsg, SessionID: qe.sessionID}}
 		}
 	case "user":
 		if output.Message != nil {
@@ -359,7 +367,14 @@ func (qe *QueryEngine) processQueryOutput(output query.QueryOutput) []SDKMessage
 		}
 	case "system":
 		if output.Message != nil {
-			return []SDKMessage{{Type: "system", Subtype: "compact_boundary", Message: output.Message, SessionID: qe.sessionID}}
+			qe.mu.Lock()
+			qe.messages = append(qe.messages, *output.Message)
+			qe.mu.Unlock()
+			subtype := "info"
+			if t, ok := output.Data.(string); ok {
+				subtype = t
+			}
+			return []SDKMessage{{Type: "system", Subtype: subtype, Message: output.Message, SessionID: qe.sessionID}}
 		}
 	case "stream_event":
 		return []SDKMessage{{Type: "stream_event", Data: output.Data, SessionID: qe.sessionID}}

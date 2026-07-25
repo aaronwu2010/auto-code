@@ -64,6 +64,7 @@ function App() {
   const [files, setFiles] = useState<FileInfo[]>([]);
   const [selectedFile, setSelectedFile] = useState<string>("");
   const [loadingFiles, setLoadingFiles] = useState(false);
+  const [streamingMessage, setStreamingMessage] = useState<Message | null>(null);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -199,7 +200,10 @@ function App() {
       try {
         const msg: SDKMessage =
           typeof data === "string" ? JSON.parse(data) : (data as SDKMessage);
-        if (msg.type === "assistant" && msg.message) {
+        if (msg.type === "stream_chunk" && msg.message) {
+          setStreamingMessage(msg.message);
+        } else if (msg.type === "assistant" && msg.message) {
+          setStreamingMessage(null);
           setMessages((prev) => {
             const exists = prev.some((m) => m.id === msg.message!.id);
             if (exists) return prev;
@@ -214,6 +218,7 @@ function App() {
         }
         if (msg.type === "result" || msg.type === "error") {
           setIsLoading(false);
+          setStreamingMessage(null);
         }
       } catch {}
     });
@@ -558,7 +563,28 @@ function App() {
               </div>
             )}
             {messages.map(renderMessage)}
-            {isLoading && (
+            {streamingMessage && (
+              <div className="mb-4 px-4 py-3 rounded-2xl max-w-[85%] bg-slate-800/60 border border-slate-700/50 text-slate-200 shadow-sm">
+                <div className="text-[10px] mb-2 font-semibold uppercase tracking-wider text-slate-500">
+                  assistant
+                </div>
+                <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+                  {streamingMessage.content}
+                  <span className="inline-block w-2 h-4 bg-sky-400 ml-0.5 align-middle animate-pulse rounded-sm"></span>
+                </div>
+                {streamingMessage.thinking && (
+                  <details className="bg-violet-900/10 border border-violet-800/30 rounded-lg px-3 py-2 my-1.5">
+                    <summary className="text-xs text-violet-400 cursor-pointer hover:text-violet-300 transition-colors select-none">
+                      💭 思考过程...
+                    </summary>
+                    <pre className="whitespace-pre-wrap break-words text-xs text-slate-500 mt-2">
+                      {streamingMessage.thinking}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            )}
+            {isLoading && !streamingMessage && (
               <div className="flex items-center gap-3 text-slate-500 text-sm px-4 py-3">
                 <div className="flex gap-1">
                   <span className="w-2 h-2 bg-sky-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
