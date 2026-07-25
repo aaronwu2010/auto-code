@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -233,6 +234,32 @@ func (qe *QueryEngine) SetModel(model types.ModelSetting) {
 		cfg.Model = string(model)
 		qe.apiClient = api.NewClient(cfg)
 	}
+}
+
+func (qe *QueryEngine) SetOllamaConfig(baseURL, apiKey, model string) {
+	if baseURL == "" {
+		baseURL = api.DefaultOllamaConfig().BaseURL
+	}
+	isLocal := apiKey == "" && (strings.HasPrefix(baseURL, "localhost") ||
+		strings.HasPrefix(baseURL, "127.0.0.1") ||
+		strings.HasPrefix(baseURL, "http://localhost") ||
+		strings.HasPrefix(baseURL, "http://127.0.0.1"))
+
+	cfg := api.OllamaConfig{
+		BaseURL:   baseURL,
+		APIKey:    apiKey,
+		Model:     model,
+		IsLocal:   isLocal,
+		Timeout:   api.DefaultOllamaConfig().Timeout,
+		KeepAlive: api.DefaultOllamaConfig().KeepAlive,
+	}
+	qe.apiClient = api.NewClient(cfg)
+
+	if model != "" {
+		qe.config.UserSpecifiedModel = types.ModelSetting(model)
+		qe.appState.SetMainLoopModel(types.ModelSetting(model))
+	}
+	qe.config.OllamaConfig = cfg
 }
 
 func (qe *QueryEngine) GetSessionID() types.SessionID {

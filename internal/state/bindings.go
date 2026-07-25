@@ -20,6 +20,7 @@ type MessageSubmitter interface {
 	Interrupt()
 	GetMessages() []types.Message
 	SetModel(model types.ModelSetting)
+	SetOllamaConfig(baseURL, apiKey, model string)
 	GetSessionID() types.SessionID
 }
 
@@ -343,15 +344,15 @@ func (b *WailsBindings) SetOllamaConfig(request OllamaConfigRequest) error {
 
 	if request.Model != "" {
 		b.appState.SetMainLoopModel(types.ModelSetting(request.Model))
+	}
 
-		// 同时更新 QueryEngine 的模型
-		b.mu.RLock()
-		eng := b.engine
-		b.mu.RUnlock()
+	// 同时更新 QueryEngine 的配置
+	b.mu.RLock()
+	eng := b.engine
+	b.mu.RUnlock()
 
-		if eng != nil {
-			eng.SetModel(types.ModelSetting(request.Model))
-		}
+	if eng != nil {
+		eng.SetOllamaConfig(request.BaseURL, request.APIKey, request.Model)
 	}
 
 	return nil
