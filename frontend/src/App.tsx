@@ -150,7 +150,6 @@ function App() {
     } catch {}
   };
 
-  // 加载保存的项目目录
   const loadProjectDir = async () => {
     try {
       const savedDir = await GetProjectDirectory();
@@ -271,7 +270,7 @@ function App() {
     switch (block.type) {
       case "text":
         return (
-          <pre key={idx} className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+          <pre key={idx} className="whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-200">
             {block.text}
           </pre>
         );
@@ -279,13 +278,13 @@ function App() {
         return (
           <div
             key={idx}
-            className="bg-[#1c2d44] border border-[#2a4a6f]/60 rounded-lg px-3 py-2 my-1.5 text-sm"
+            className="bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-2 my-1.5 text-sm"
           >
-            <span className="text-[#6cb6ff] font-semibold text-xs tracking-wide">
-              {block.tool_name}
+            <span className="text-sky-400 font-semibold text-xs tracking-wide">
+              🔧 {block.tool_name}
             </span>
             {block.tool_input && (
-              <pre className="text-xs text-[#7a8a9a] mt-1.5 overflow-x-auto">
+              <pre className="text-xs text-slate-400 mt-1.5 overflow-x-auto">
                 {typeof block.tool_input === "string"
                   ? block.tool_input
                   : JSON.stringify(block.tool_input, null, 2)}
@@ -299,11 +298,11 @@ function App() {
             key={idx}
             className={`rounded-lg px-3 py-2 my-1.5 text-sm ${
               block.is_error
-                ? "bg-[#2d1a1a] border border-[#5a2a2a]/60"
-                : "bg-[#1a2d1a] border border-[#2a4a2a]/60"
+                ? "bg-red-900/20 border border-red-800/40"
+                : "bg-emerald-900/20 border border-emerald-800/40"
             }`}
           >
-            <pre className="whitespace-pre-wrap break-words">
+            <pre className="whitespace-pre-wrap break-words text-slate-300">
               {block.tool_output}
             </pre>
           </div>
@@ -312,12 +311,12 @@ function App() {
         return (
           <details
             key={idx}
-            className="bg-[#1a1a2e]/60 border border-[#2a2a4a]/50 rounded-lg px-3 py-2 my-1.5"
+            className="bg-violet-900/10 border border-violet-800/30 rounded-lg px-3 py-2 my-1.5"
           >
-            <summary className="text-xs text-[#6a6a8a] cursor-pointer hover:text-[#8a8aaa] transition-colors">
-              Thinking...
+            <summary className="text-xs text-violet-400 cursor-pointer hover:text-violet-300 transition-colors select-none">
+              💭 思考过程...
             </summary>
-            <pre className="whitespace-pre-wrap break-words text-xs text-[#5a5a7a] mt-2">
+            <pre className="whitespace-pre-wrap break-words text-xs text-slate-500 mt-2">
               {block.thinking}
             </pre>
           </details>
@@ -334,16 +333,18 @@ function App() {
     return (
       <div
         key={msg.id}
-        className={`mb-3 px-4 py-3 rounded-xl max-w-[92%] ${
+        className={`mb-4 px-4 py-3 rounded-2xl max-w-[85%] shadow-sm ${
           isUser
-            ? "bg-[#1e3a5f]/70 ml-auto border border-[#2a5a8f]/30"
+            ? "bg-gradient-to-br from-sky-600 to-sky-700 ml-auto text-white"
             : isSystem
-            ? "bg-[#2a1a3e]/50 border border-[#3a2a5a]/30"
-            : "bg-[#162440]/60 border border-[#2a3a5a]/30"
+            ? "bg-violet-900/30 border border-violet-700/30 text-slate-200"
+            : "bg-slate-800/60 border border-slate-700/50 text-slate-200"
         }`}
       >
-        <div className="text-[10px] text-[#6a7a8a] mb-1.5 font-semibold uppercase tracking-wider">
-          {msg.role}
+        <div className={`text-[10px] mb-2 font-semibold uppercase tracking-wider ${
+          isUser ? "text-sky-200" : "text-slate-500"
+        }`}>
+          {isUser ? "你" : msg.role}
         </div>
         {msg.content_blocks && msg.content_blocks.length > 0
           ? msg.content_blocks.map((block, i) => renderContentBlock(block, i))
@@ -353,107 +354,120 @@ function App() {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-[#0e1525] text-[#d0d8e8] font-mono">
+    <div className="flex flex-col h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-200 font-sans">
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-2.5 border-b border-[#1e2d44] bg-[#111b2e]">
+      <div className="flex items-center justify-between px-6 py-3 border-b border-slate-800/50 bg-slate-900/80 backdrop-blur-sm">
         <div className="flex items-center gap-3">
-          <span className="text-sm font-bold text-[#6cb6ff] tracking-wide">Auto Code</span>
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center text-white font-bold text-sm shadow-lg">
+            AC
+          </div>
+          <span className="text-base font-semibold bg-gradient-to-r from-sky-400 to-indigo-400 bg-clip-text text-transparent">
+            Auto Code
+          </span>
           {appState?.mainLoopModel && (
-            <span className="text-[11px] text-[#8a9ab0] bg-[#1a2a40] px-2.5 py-0.5 rounded-md border border-[#2a3a50]/50">
+            <span className="text-xs text-slate-400 bg-slate-800/80 px-3 py-1 rounded-full border border-slate-700/50">
               {appState.mainLoopModel}
             </span>
           )}
           {ollamaHealth && (
-            <span className={`text-[11px] px-2.5 py-0.5 rounded-md border ${
+            <span className={`text-xs px-3 py-1 rounded-full border flex items-center gap-1.5 ${
               ollamaHealth.connected
-                ? "bg-[#1a2e1a]/60 text-[#6bff6b] border-[#2a4a2a]/50"
-                : "bg-[#2d1a1a]/60 text-[#ff6b6b] border-[#4a2a2a]/50"
+                ? "bg-emerald-900/30 text-emerald-400 border-emerald-800/40"
+                : "bg-red-900/30 text-red-400 border-red-800/40"
             }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${ollamaHealth.connected ? "bg-emerald-400 animate-pulse" : "bg-red-400"}`}></span>
               {ollamaHealth.connected ? "已连接" : "未连接"}
               {ollamaHealth.is_local ? " · 本地" : " · 云端"}
             </span>
           )}
           {appState?.thinkingEnabled && (
-            <span className="text-[11px] text-[#a78bfa] bg-[#1e1530] px-2.5 py-0.5 rounded-md border border-[#2e2550]/50">
-              Thinking
+            <span className="text-xs text-violet-400 bg-violet-900/30 px-3 py-1 rounded-full border border-violet-800/40">
+              🧠 Thinking
             </span>
           )}
           {appState?.fastMode && (
-            <span className="text-[11px] text-[#fbbf24] bg-[#2a2010] px-2.5 py-0.5 rounded-md border border-[#3a3020]/50">
-              Fast
+            <span className="text-xs text-amber-400 bg-amber-900/30 px-3 py-1 rounded-full border border-amber-800/40">
+              ⚡ Fast
             </span>
           )}
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowSettings(!showSettings)}
-            className="text-xs bg-[#1a2a40] text-[#6cb6ff] px-3 py-1.5 rounded-md hover:bg-[#243550] border border-[#2a3a50]/50 transition-colors"
-          >
-            设置
-          </button>
           {statusText && (
-            <span className="text-[11px] text-[#6a7a8a]">{statusText}</span>
+            <span className="text-xs text-slate-500">{statusText}</span>
           )}
           {isLoading && (
             <button
               onClick={handleInterrupt}
-              className="text-xs bg-[#3a1a1a] text-[#ff6b6b] px-3 py-1.5 rounded-md hover:bg-[#4a2a2a] border border-[#5a2a2a]/50 transition-colors"
+              className="text-xs bg-red-900/40 text-red-400 px-4 py-1.5 rounded-lg hover:bg-red-900/60 border border-red-800/40 transition-all duration-200 flex items-center gap-1.5"
             >
-              Stop
+              ⏹ 停止
             </button>
           )}
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className={`text-xs px-4 py-1.5 rounded-lg transition-all duration-200 flex items-center gap-1.5 ${
+              showSettings
+                ? "bg-sky-600/30 text-sky-400 border border-sky-600/40"
+                : "bg-slate-800/80 text-slate-400 hover:text-slate-300 border border-slate-700/50 hover:border-slate-600/50"
+            }`}
+          >
+            ⚙️ 设置
+          </button>
         </div>
       </div>
 
       {/* 设置面板 */}
       {showSettings && (
-        <div className="border-b border-[#1e2d44] bg-[#111b2e] p-5">
-          <div className="max-w-2xl mx-auto space-y-4">
-            <h2 className="text-sm font-bold text-[#6cb6ff] tracking-wide">Ollama 配置</h2>
+        <div className="border-b border-slate-800/50 bg-slate-900/50 backdrop-blur-sm p-6">
+          <div className="max-w-3xl mx-auto">
+            <h2 className="text-lg font-semibold bg-gradient-to-r from-sky-400 to-indigo-400 bg-clip-text text-transparent mb-5 flex items-center gap-2">
+              <span className="text-xl">🔌</span> Ollama 配置
+            </h2>
 
             {ollamaHealth && (
-              <div className={`text-xs p-2.5 rounded-lg border ${
+              <div className={`text-sm p-3 rounded-xl border mb-5 flex items-center gap-2 ${
                 ollamaHealth.connected
-                  ? "bg-[#1a2e1a]/40 text-[#6bff6b] border-[#2a4a2a]/50"
-                  : "bg-[#2d1a1a]/40 text-[#ff6b6b] border-[#4a2a2a]/50"
+                  ? "bg-emerald-900/20 text-emerald-400 border-emerald-800/30"
+                  : "bg-red-900/20 text-red-400 border-red-800/30"
               }`}>
+                <span className="text-lg">{ollamaHealth.connected ? "✅" : "❌"}</span>
                 {ollamaHealth.connected
-                  ? `✓ 已连接到 ${ollamaHealth.base_url}`
-                  : `✗ 连接失败: ${ollamaHealth.error || "未知错误"}`}
+                  ? `已连接到 ${ollamaHealth.base_url}`
+                  : `连接失败: ${ollamaHealth.error || "未知错误"}`}
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
               <div>
-                <label className="text-[11px] text-[#6a7a8a] block mb-1.5">Ollama URL</label>
+                <label className="text-xs text-slate-400 block mb-2 font-medium">Ollama URL</label>
                 <input
                   type="text"
                   value={ollamaConfig.base_url}
                   onChange={(e) => setOllamaConfig({ ...ollamaConfig, base_url: e.target.value })}
                   placeholder="http://localhost:11434/api"
-                  className="w-full bg-[#0e1525] text-[#d0d8e8] border border-[#1e2d44] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#3a5a8a] transition-colors placeholder-[#3a4a5a]"
+                  className="w-full bg-slate-800/50 text-slate-200 border border-slate-700/50 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-sky-600/50 focus:ring-2 focus:ring-sky-500/20 transition-all duration-200 placeholder-slate-600"
                 />
               </div>
 
               <div>
-                <label className="text-[11px] text-[#6a7a8a] block mb-1.5">API Key（可选）</label>
+                <label className="text-xs text-slate-400 block mb-2 font-medium">API Key（可选）</label>
                 <input
                   type="password"
                   value={ollamaConfig.api_key}
                   onChange={(e) => setOllamaConfig({ ...ollamaConfig, api_key: e.target.value })}
                   placeholder="留空使用本地模式"
-                  className="w-full bg-[#0e1525] text-[#d0d8e8] border border-[#1e2d44] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#3a5a8a] transition-colors placeholder-[#3a4a5a]"
+                  className="w-full bg-slate-800/50 text-slate-200 border border-slate-700/50 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-sky-600/50 focus:ring-2 focus:ring-sky-500/20 transition-all duration-200 placeholder-slate-600"
                 />
               </div>
             </div>
 
-            <div>
-              <label className="text-[11px] text-[#6a7a8a] block mb-1.5">选择模型</label>
+            <div className="mb-5">
+              <label className="text-xs text-slate-400 block mb-2 font-medium">选择模型</label>
               <div className="flex gap-2">
                 <select
                   value={ollamaConfig.model}
                   onChange={(e) => setOllamaConfig({ ...ollamaConfig, model: e.target.value })}
-                  className="flex-1 bg-[#0e1525] text-[#d0d8e8] border border-[#1e2d44] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#3a5a8a] transition-colors"
+                  className="flex-1 bg-slate-800/50 text-slate-200 border border-slate-700/50 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-sky-600/50 focus:ring-2 focus:ring-sky-500/20 transition-all duration-200 cursor-pointer"
                 >
                   <option value="">选择模型...</option>
                   {models.map((m) => (
@@ -470,39 +484,39 @@ function App() {
                     loadModels();
                   }}
                   disabled={loadingModels}
-                  className="bg-[#1a2a40] text-[#6cb6ff] px-4 py-2 rounded-lg hover:bg-[#243550] disabled:opacity-50 text-sm cursor-pointer border border-[#2a3a50]/50 transition-colors"
+                  className="bg-slate-800/80 text-slate-300 px-5 py-2.5 rounded-xl hover:bg-slate-700/80 disabled:opacity-50 text-sm cursor-pointer border border-slate-700/50 transition-all duration-200 flex items-center gap-1.5"
                 >
-                  {loadingModels ? "..." : "刷新"}
+                  {loadingModels ? "⟳" : "🔄"} {loadingModels ? "加载中" : "刷新"}
                 </button>
               </div>
               {modelsError && (
-                <p className="text-xs text-[#ff6b6b] mt-1.5">{modelsError}</p>
+                <p className="text-xs text-red-400 mt-2">{modelsError}</p>
               )}
               {models.length === 0 && !loadingModels && !modelsError && (
-                <p className="text-[11px] text-[#4a5a6a] mt-1.5">
+                <p className="text-xs text-slate-500 mt-2">
                   未找到模型，请确保 Ollama 服务正在运行，或手动输入模型名称
                 </p>
               )}
             </div>
 
-            <div>
-              <label className="text-[11px] text-[#6a7a8a] block mb-1.5">或手动输入模型名称</label>
+            <div className="mb-5">
+              <label className="text-xs text-slate-400 block mb-2 font-medium">或手动输入模型名称</label>
               <input
                 type="text"
                 value={ollamaConfig.model}
                 onChange={(e) => setOllamaConfig({ ...ollamaConfig, model: e.target.value })}
                 placeholder="例如: llama3.2, qwen2.5, deepseek-coder"
-                className="w-full bg-[#0e1525] text-[#d0d8e8] border border-[#1e2d44] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#3a5a8a] transition-colors placeholder-[#3a4a5a]"
+                className="w-full bg-slate-800/50 text-slate-200 border border-slate-700/50 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-sky-600/50 focus:ring-2 focus:ring-sky-500/20 transition-all duration-200 placeholder-slate-600"
               />
             </div>
 
-            <div className="flex gap-2 pt-1">
+            <div className="flex gap-3">
               <button
                 type="button"
                 onClick={saveConfig}
-                className="bg-[#1a3a60] text-[#d0d8e8] px-5 py-2 rounded-lg hover:bg-[#244a70] text-sm border border-[#2a4a70]/50 transition-colors"
+                className="bg-gradient-to-r from-sky-600 to-indigo-600 text-white px-6 py-2.5 rounded-xl hover:from-sky-500 hover:to-indigo-500 text-sm font-medium transition-all duration-200 shadow-lg shadow-sky-900/30 hover:shadow-sky-800/40 flex items-center gap-2"
               >
-                保存配置
+                💾 保存配置
               </button>
               <button
                 type="button"
@@ -510,13 +524,13 @@ function App() {
                   e.preventDefault();
                   checkHealth();
                 }}
-                className="bg-[#1a2a40] text-[#6cb6ff] px-5 py-2 rounded-lg hover:bg-[#243550] text-sm border border-[#2a3a50]/50 transition-colors"
+                className="bg-slate-800/80 text-slate-300 px-6 py-2.5 rounded-xl hover:bg-slate-700/80 text-sm font-medium border border-slate-700/50 transition-all duration-200 flex items-center gap-2"
               >
-                测试连接
+                🔌 测试连接
               </button>
             </div>
             {healthCheckResult && (
-              <div className={`text-sm mt-1 ${healthCheckResult.includes("✓") ? "text-[#6bff6b]" : "text-[#ff6b6b]"}`}>
+              <div className={`text-sm mt-3 flex items-center gap-2 ${healthCheckResult.includes("✓") ? "text-emerald-400" : "text-red-400"}`}>
                 {healthCheckResult}
               </div>
             )}
@@ -527,34 +541,45 @@ function App() {
       {/* 主内容区域 */}
       <div className="flex flex-1 overflow-hidden">
         {/* 左侧对话区域 */}
-        <div className="flex flex-col flex-1">
+        <div className="flex flex-col flex-1 min-w-0">
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-6 py-4">
+          <div className="flex-1 overflow-y-auto px-8 py-6">
             {messages.length === 0 && (
-              <div className="text-center text-[#3a4a5a] mt-24">
-                <div className="text-3xl font-bold text-[#2a3a5a] mb-3 tracking-wide">Auto Code</div>
-                <div className="text-sm">
-                  输入消息开始对话
+              <div className="text-center mt-32">
+                <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center text-white text-3xl font-bold shadow-2xl shadow-sky-900/50">
+                  AC
+                </div>
+                <div className="text-2xl font-bold bg-gradient-to-r from-sky-400 via-indigo-400 to-violet-400 bg-clip-text text-transparent mb-3">
+                  Auto Code
+                </div>
+                <div className="text-slate-500 text-sm">
+                  有什么可以帮你的吗？输入消息开始对话
                 </div>
               </div>
             )}
             {messages.map(renderMessage)}
             {isLoading && (
-              <div className="text-[#6a7a8a] text-sm px-4 py-2 animate-pulse">
-                处理中...
+              <div className="flex items-center gap-3 text-slate-500 text-sm px-4 py-3">
+                <div className="flex gap-1">
+                  <span className="w-2 h-2 bg-sky-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                  <span className="w-2 h-2 bg-sky-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                  <span className="w-2 h-2 bg-sky-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                </div>
+                <span>正在思考中...</span>
               </div>
             )}
             <div ref={messagesEndRef} />
           </div>
 
           {/* Input */}
-          <div className="px-5 py-4 border-t border-[#1e2d44] bg-[#0c1320]">
+          <div className="px-6 py-4 border-t border-slate-800/50 bg-slate-900/50 backdrop-blur-sm">
             {projectDir && (
-              <div className="flex items-center gap-2 mb-2.5 text-[11px] text-[#4a5a6a]">
-                <span className="text-[#6a7a8a]">{projectDir}</span>
+              <div className="flex items-center gap-2 mb-3 text-xs text-slate-500">
+                <span className="text-slate-400">📁</span>
+                <span className="truncate">{projectDir}</span>
               </div>
             )}
-            <div className="flex gap-3">
+            <div className="flex gap-3 items-end">
               <div className="flex-1 relative">
                 <textarea
                   ref={inputRef}
@@ -563,72 +588,76 @@ function App() {
                   onKeyDown={handleKeyDown}
                   placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
                   rows={3}
-                  className="w-full bg-[#111b2e] text-[#d0d8e8] border border-[#1e2d44] rounded-xl px-4 py-3 font-mono text-sm resize-none outline-none focus:border-[#3a5a8a] transition-colors placeholder-[#3a4a5a]"
+                  className="w-full bg-slate-800/50 text-slate-200 border border-slate-700/50 rounded-2xl px-5 py-3.5 text-sm resize-none outline-none focus:border-sky-600/50 focus:ring-2 focus:ring-sky-500/20 transition-all duration-200 placeholder-slate-600 font-sans"
                 />
               </div>
-              <div className="flex flex-col gap-2 justify-end">
+              <div className="flex flex-col gap-2">
                 <button
                   type="button"
                   onClick={() => handleSubmit()}
                   disabled={isLoading || !input.trim()}
-                  className="bg-[#1a3a60] text-[#d0d8e8] rounded-xl px-5 py-2.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#244a70] text-sm border border-[#2a4a70]/50 transition-colors"
+                  className="bg-gradient-to-r from-sky-600 to-indigo-600 text-white rounded-2xl px-6 py-3.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed hover:from-sky-500 hover:to-indigo-500 text-sm font-medium transition-all duration-200 shadow-lg shadow-sky-900/30 hover:shadow-sky-800/40 flex items-center gap-2"
                 >
-                  发送
+                  {isLoading ? "⏳ 发送中" : "发送 →"}
                 </button>
                 {isLoading && (
                   <button
                     onClick={handleInterrupt}
-                    className="bg-[#3a1a1a] text-[#ff6b6b] rounded-xl px-5 py-2 cursor-pointer hover:bg-[#4a2a2a] text-xs border border-[#5a2a2a]/50 transition-colors"
+                    className="bg-red-900/40 text-red-400 rounded-2xl px-6 py-2 cursor-pointer hover:bg-red-900/60 text-xs border border-red-800/40 transition-all duration-200"
                   >
                     取消
                   </button>
                 )}
               </div>
             </div>
-            <div className="flex items-center gap-2 mt-2.5">
+            <div className="flex items-center gap-2 mt-3">
               <button
                 type="button"
                 onClick={handleSelectDirectory}
-                className="text-[11px] bg-[#1a2a40] text-[#6a8aaa] px-3 py-1 rounded-md hover:bg-[#243550] border border-[#2a3a50]/50 transition-colors"
+                className="text-xs bg-slate-800/80 text-slate-400 hover:text-slate-300 px-4 py-1.5 rounded-lg hover:bg-slate-700/80 border border-slate-700/50 transition-all duration-200 flex items-center gap-1.5"
               >
-                项目目录
+                📁 项目目录
               </button>
               {!projectDir && (
-                <span className="text-[11px] text-[#3a4a5a]">未选择项目目录</span>
+                <span className="text-xs text-slate-600">未选择项目目录</span>
               )}
             </div>
           </div>
         </div>
 
         {/* 右侧面板：文件资源管理器 */}
-        <div className="w-64 flex flex-col bg-[#0c1320] overflow-hidden border-l border-[#1e2d44]">
+        <div className="w-72 flex flex-col bg-slate-900/30 overflow-hidden border-l border-slate-800/50">
           <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="px-4 py-3 border-b border-[#1e2d44] text-[11px] font-semibold text-[#6a8aaa] tracking-wide uppercase">
-              文件资源管理器
+            <div className="px-5 py-4 border-b border-slate-800/50 text-xs font-semibold text-slate-400 tracking-wide uppercase flex items-center gap-2">
+              📂 文件资源管理器
             </div>
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto py-2">
               {loadingFiles ? (
-                <div className="text-[11px] text-[#4a5a6a] p-3">加载中...</div>
+                <div className="text-xs text-slate-500 p-4">加载中...</div>
               ) : !projectDir ? (
-                <div className="text-[11px] text-[#3a4a5a] p-3">请选择项目目录</div>
+                <div className="text-xs text-slate-600 p-4 text-center">
+                  请选择项目目录
+                </div>
               ) : files.length === 0 ? (
-                <div className="text-[11px] text-[#3a4a5a] p-3">目录为空</div>
+                <div className="text-xs text-slate-600 p-4 text-center">目录为空</div>
               ) : (
-                <div className="text-[11px] py-1">
+                <div className="text-xs">
                   {files.map((file, i) => (
                     <div
                       key={i}
                       onClick={() => handleFileClick(file)}
-                      className={`px-3 py-1.5 cursor-pointer flex items-center gap-2 transition-colors ${
+                      className={`px-4 py-2 cursor-pointer flex items-center gap-2.5 transition-all duration-150 group ${
                         selectedFile === file.path
-                          ? "bg-[#1a2a40] text-[#6cb6ff]"
-                          : "text-[#8a9ab0] hover:bg-[#111b2e]"
+                          ? "bg-sky-900/30 text-sky-400 border-l-2 border-sky-500"
+                          : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-300 border-l-2 border-transparent"
                       }`}
                     >
-                      <span className="text-[#4a5a6a]">{file.is_dir ? "▸" : "·"}</span>
+                      <span className={`text-base ${selectedFile === file.path ? "text-sky-400" : "text-slate-600 group-hover:text-slate-500"}`}>
+                        {file.is_dir ? "📁" : "📄"}
+                      </span>
                       <span className="truncate flex-1">{file.name}</span>
                       {!file.is_dir && file.size > 0 && (
-                        <span className="text-[9px] text-[#3a4a5a]">
+                        <span className="text-[10px] text-slate-600">
                           {file.size > 1024 * 1024
                             ? `${(file.size / 1024 / 1024).toFixed(1)}M`
                             : file.size > 1024
