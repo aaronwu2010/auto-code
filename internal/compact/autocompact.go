@@ -1,15 +1,17 @@
 package compact
 
+import "github.com/auto-code/auto-code/internal/ablation"
+
 const (
-	AutoCompactBufferTokens        = 10000
-	WarningThresholdBufferTokens   = 30000
-	ErrorThresholdBufferTokens     = 5000
-	ManualCompactBufferTokens      = 10000
-	PostCompactMaxFilesToRestore   = 10
-	PostCompactTokenBudget         = 5000
-	PostCompactMaxTokensPerFile    = 500
-	PostCompactMaxTokensPerSkill   = 500
-	PostCompactSkillsTokenBudget   = 1000
+	AutoCompactBufferTokens      = 10000
+	WarningThresholdBufferTokens = 30000
+	ErrorThresholdBufferTokens   = 5000
+	ManualCompactBufferTokens    = 10000
+	PostCompactMaxFilesToRestore = 10
+	PostCompactTokenBudget       = 5000
+	PostCompactMaxTokensPerFile  = 500
+	PostCompactMaxTokensPerSkill = 500
+	PostCompactSkillsTokenBudget = 1000
 )
 
 type TokenWarningState int
@@ -60,6 +62,9 @@ func CalculateTokenWarningState(currentTokens, windowSize int) TokenWarningState
 }
 
 func IsAutoCompactEnabled() bool {
+	if ablation.IsAutoCompactDisabled() {
+		return false
+	}
 	return true
 }
 

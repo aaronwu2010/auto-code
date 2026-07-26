@@ -36,6 +36,7 @@ type Tool interface {
 	ShouldDefer() bool
 	AlwaysLoad() bool
 	IsMCP() bool
+	GetToolUseSummary(input any, result *ToolResult) string
 }
 
 type PromptOptions struct {
@@ -134,6 +135,21 @@ func (t *BaseTool) Prompt(_ context.Context, _ PromptOptions) (string, error) {
 
 func (t *BaseTool) Call(_ context.Context, _ any, _ *ToolUseContext, _ ToolCallProgress) (*ToolResult, error) {
 	return &ToolResult{Data: "not implemented"}, nil
+}
+
+func (t *BaseTool) GetToolUseSummary(_ any, result *ToolResult) string {
+	if result == nil || result.Data == nil {
+		return ""
+	}
+	switch v := result.Data.(type) {
+	case string:
+		if len(v) > 200 {
+			return v[:200] + "..."
+		}
+		return v
+	default:
+		return ""
+	}
 }
 
 func NewBaseTool(name, description string, isMCP bool) *BaseTool {

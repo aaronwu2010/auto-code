@@ -1,4 +1,4 @@
-﻿package query
+package query
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/auto-code/auto-code/internal/compact"
 	"github.com/auto-code/auto-code/internal/tools"
 	"github.com/auto-code/auto-code/internal/types"
 )
@@ -26,26 +27,26 @@ type QueryOutput struct {
 }
 
 type QueryParams struct {
-	Messages     []types.Message
-	SystemPrompt *types.SystemPrompt
-	UserContext  map[string]string
+	Messages      []types.Message
+	SystemPrompt  *types.SystemPrompt
+	UserContext   map[string]string
 	SystemContext map[string]string
-	CanUseTool   func(tool tools.Tool, input any) (types.PermissionResult, error)
-	ToolUseCtx   *tools.ToolUseContext
-	Tools        []tools.Tool
-	MaxTurns     int
-	MaxBudgetUsd float64
-	Model        types.ModelSetting
-	Thinking     types.ThinkingConfig
+	CanUseTool    func(tool tools.Tool, input any) (types.PermissionResult, error)
+	ToolUseCtx    *tools.ToolUseContext
+	Tools         []tools.Tool
+	MaxTurns      int
+	MaxBudgetUsd  float64
+	Model         types.ModelSetting
+	Thinking      types.ThinkingConfig
 }
 
 type QueryDeps struct {
-	CallModel     func(ctx context.Context, params QueryParams) (<-chan QueryOutput, error)
-	Microcompact  func(messages []types.Message) []types.Message
-	AutoCompact   func(messages []types.Message) (*CompactionResult, error)
-	GenerateUUID  func() string
-	GetCostUSD    func() float64
-	OnToolResult  func(result *tools.ToolResult, toolCtx *tools.ToolUseContext)
+	CallModel    func(ctx context.Context, params QueryParams) (<-chan QueryOutput, error)
+	Microcompact func(messages []types.Message) []types.Message
+	AutoCompact  func(messages []types.Message) (*CompactionResult, error)
+	GenerateUUID func() string
+	GetCostUSD   func() float64
+	OnToolResult func(result *tools.ToolResult, toolCtx *tools.ToolUseContext)
 }
 
 type CompactionResult struct {
@@ -88,6 +89,12 @@ type State struct {
 	StopHookActive               *bool
 	TurnCount                    int
 	Transition                   *Continue
+	HistorySnipTracking          *HistorySnipTrackingState
+}
+
+type HistorySnipTrackingState struct {
+	ToolMessageMetas []compact.ToolMessageMeta
+	Enabled          bool
 }
 
 type StreamingToolExecutor struct {
@@ -197,6 +204,10 @@ func Query(ctx context.Context, params QueryParams, deps QueryDeps) <-chan Query
 			ToolUseContext:      params.ToolUseCtx,
 			TurnCount:           0,
 			AutoCompactTracking: &AutoCompactTrackingState{},
+			HistorySnipTracking: &HistorySnipTrackingState{
+				ToolMessageMetas: make([]compact.ToolMessageMeta, 0),
+				Enabled:          compact.IsHistorySnipEnabled(),
+			},
 		}
 
 		if params.MaxTurns <= 0 {
@@ -224,6 +235,44 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 
 		if deps.Microcompact != nil {
 			messages = deps.Microcompact(messages)
+		}
+
+		if state.HistorySnipTracking != nil && state.HistorySnipTracking.Enabled {
+			messages = applyHistorySnip(messages, state.HistorySnipTracking, state.TurnCount)
+		}
+
+		if compact.IsContextCollapseEnabled() && compact.ShouldContextCollapse(estimateTurnCount(messages)) {
+			compactMessages := make([]compact.CompactMessage, len(messages))
+			for i, msg := range messages {
+				compactMessages[i] = compact.CompactMessage{
+					Role:     string(msg.Role),
+					Content:  msg.Content,
+					IsLatest: i == len(messages)-1,
+				}
+			}
+			collapseResult, collapsedCompact := compact.ApplyContextCollapse(compactMessages)
+			if collapseResult != nil && collapseResult.DidCollapse {
+				collapsedMessages := make([]types.Message, 0, len(collapsedCompact))
+				for _, cm := range collapsedCompact {
+					collapsedMessages = append(collapsedMessages, types.Message{
+						ID:        fmt.Sprintf("collapsed_%d", len(collapsedMessages)),
+						Role:      types.MessageRole(cm.Role),
+						Content:   cm.Content,
+						Timestamp: time.Now().Unix(),
+					})
+				}
+				messages = collapsedMessages
+
+				ch <- QueryOutput{
+					Type: "system",
+					Message: &types.Message{
+						Role:      types.RoleSystem,
+						Content:   "context_collapse",
+						Timestamp: time.Now().Unix(),
+					},
+					Data: collapseResult,
+				}
+			}
 		}
 
 		if deps.AutoCompact != nil && state.AutoCompactTracking != nil && state.AutoCompactTracking.ShouldAutoCompact {
@@ -281,6 +330,14 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 				if msg.Message != nil {
 					state.Messages = append(state.Messages, *msg.Message)
 
+					if state.HistorySnipTracking != nil && state.HistorySnipTracking.Enabled {
+						compact.DetectToolReferences(
+							msg.Message.Content,
+							state.HistorySnipTracking.ToolMessageMetas,
+							state.TurnCount,
+						)
+					}
+
 					if msg.Message.HasToolCalls() {
 						needsFollowUp = true
 						for i, tc := range msg.Message.ToolCalls {
@@ -328,7 +385,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 
 		var toolResultMessages []types.Message
 
-		for _, tc := range getLastToolCalls(state.Messages) {
+		for i, tc := range getLastToolCalls(state.Messages) {
 			tool := tools.FindToolByName(params.Tools, tc.Function.Name)
 			if tool == nil {
 				toolResultMessages = append(toolResultMessages, types.Message{
@@ -346,21 +403,46 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 
 			result := executeToolCall(ctx, tool, input, params.CanUseTool, state.ToolUseContext)
 			if result.Message != nil {
+				msgIdx := len(state.Messages)
 				toolResultMessages = append(toolResultMessages, *result.Message)
 				state.Messages = append(state.Messages, *result.Message)
 				ch <- QueryOutput{Type: "user", Message: result.Message}
+
+				if state.HistorySnipTracking != nil && state.HistorySnipTracking.Enabled {
+					state.HistorySnipTracking.ToolMessageMetas = append(state.HistorySnipTracking.ToolMessageMetas, compact.ToolMessageMeta{
+						Index:              msgIdx,
+						ToolName:           tool.Name(),
+						Content:            result.Message.Content,
+						TurnAdded:          state.TurnCount,
+						LastReferencedTurn: state.TurnCount,
+						IsReferenced:       false,
+					})
+				}
 			}
 			if result.Result != nil && deps.OnToolResult != nil {
 				deps.OnToolResult(result.Result, state.ToolUseContext)
 			}
+			_ = i
 		}
 
 		streamingResults := streamingExecutor.GetRemainingResults()
 		for _, result := range streamingResults {
 			if result.Message != nil {
+				msgIdx := len(state.Messages)
 				toolResultMessages = append(toolResultMessages, *result.Message)
 				state.Messages = append(state.Messages, *result.Message)
 				ch <- QueryOutput{Type: "user", Message: result.Message}
+
+				if state.HistorySnipTracking != nil && state.HistorySnipTracking.Enabled {
+					state.HistorySnipTracking.ToolMessageMetas = append(state.HistorySnipTracking.ToolMessageMetas, compact.ToolMessageMeta{
+						Index:              msgIdx,
+						ToolName:           "",
+						Content:            result.Message.Content,
+						TurnAdded:          state.TurnCount,
+						LastReferencedTurn: state.TurnCount,
+						IsReferenced:       false,
+					})
+				}
 			}
 			if result.Result != nil && deps.OnToolResult != nil {
 				deps.OnToolResult(result.Result, state.ToolUseContext)
@@ -448,4 +530,68 @@ func formatToolOutput(result *tools.ToolResult) string {
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+func applyHistorySnip(messages []types.Message, tracking *HistorySnipTrackingState, currentTurn int) []types.Message {
+	if tracking == nil || !tracking.Enabled {
+		return messages
+	}
+
+	compactMessages := make([]compact.CompactMessage, len(messages))
+	for i, msg := range messages {
+		compactMessages[i] = compact.CompactMessage{
+			Role:     string(msg.Role),
+			Content:  msg.Content,
+			IsLatest: i == len(messages)-1,
+		}
+	}
+
+	snipResult := compact.ApplyHistorySnip(compactMessages, tracking.ToolMessageMetas, currentTurn)
+	if !snipResult.DidSnip {
+		return messages
+	}
+
+	filteredCompact := compact.FilterSnippedMessages(compactMessages, snipResult.SnippedIndices)
+
+	result := make([]types.Message, 0, len(filteredCompact))
+	snipSet := make(map[int]bool)
+	for _, idx := range snipResult.SnippedIndices {
+		snipSet[idx] = true
+	}
+	for i, msg := range messages {
+		if snipSet[i] {
+			continue
+		}
+		result = append(result, msg)
+	}
+
+	updatedMetas := make([]compact.ToolMessageMeta, 0, len(tracking.ToolMessageMetas))
+	snippedCount := 0
+	for _, meta := range tracking.ToolMessageMetas {
+		isSnipped := false
+		for _, idx := range snipResult.SnippedIndices {
+			if meta.Index == idx {
+				isSnipped = true
+				snippedCount++
+				break
+			}
+		}
+		if !isSnipped {
+			meta.Index -= snippedCount
+			updatedMetas = append(updatedMetas, meta)
+		}
+	}
+	tracking.ToolMessageMetas = updatedMetas
+
+	return result
+}
+
+func estimateTurnCount(messages []types.Message) int {
+	turnCount := 0
+	for _, msg := range messages {
+		if msg.Role == types.RoleUser {
+			turnCount++
+		}
+	}
+	return turnCount
 }

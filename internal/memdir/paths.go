@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+
+	"github.com/auto-code/auto-code/internal/ablation"
 )
 
 type Paths struct {
@@ -25,6 +27,9 @@ func NewPaths(projectRoot string) *Paths {
 }
 
 func IsAutoMemoryEnabled() bool {
+	if ablation.IsAutoMemoryDisabled() {
+		return false
+	}
 	if os.Getenv("AUTO_CODE_DISABLE_AUTO_MEMORY") != "" {
 		return false
 	}
