@@ -1,12 +1,12 @@
-﻿package worktree
+package worktree
 
 import (
 	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
 
 	"github.com/auto-code/auto-code/internal/tools"
+	"github.com/auto-code/auto-code/internal/utils/executil"
 )
 
 const (
@@ -72,7 +72,7 @@ func (t *WorktreeTool) Call(ctx context.Context, input any, toolCtx *tools.ToolU
 			return &tools.ToolResult{Data: WorktreeOutput{Action: "enter", Message: "path is required"}}, nil
 		}
 
-		cmd := exec.CommandContext(ctx, "git", "worktree", "add", inp.Path)
+		cmd := executil.CommandContext(ctx, "git", "worktree", "add", inp.Path)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
@@ -92,7 +92,7 @@ func (t *WorktreeTool) Call(ctx context.Context, input any, toolCtx *tools.ToolU
 		}}, nil
 	}
 
-	cmd := exec.CommandContext(ctx, "git", "worktree", "remove", ".")
+	cmd := executil.CommandContext(ctx, "git", "worktree", "remove", ".")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

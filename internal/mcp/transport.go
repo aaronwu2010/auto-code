@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"sync"
 	"sync/atomic"
+
+	"github.com/auto-code/auto-code/internal/utils/executil"
 )
 
 type Transport interface {
@@ -19,20 +21,20 @@ type Transport interface {
 }
 
 type StdioTransport struct {
-	cmd       *exec.Cmd
-	stdin     io.WriteCloser
-	stdout    *bufio.Scanner
-	stderr    io.Reader
-	mu        sync.Mutex
-	pending   map[any]chan *JSONRPCResponse
-	nextID    atomic.Int64
-	onNotif   func(*JSONRPCNotification)
-	closed    bool
-	closeCh   chan struct{}
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	stdout  *bufio.Scanner
+	stderr  io.Reader
+	mu      sync.Mutex
+	pending map[any]chan *JSONRPCResponse
+	nextID  atomic.Int64
+	onNotif func(*JSONRPCNotification)
+	closed  bool
+	closeCh chan struct{}
 }
 
 func NewStdioTransport(command string, args []string, env map[string]string) (*StdioTransport, error) {
-	cmd := exec.Command(command, args...)
+	cmd := executil.Command(command, args...)
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
 	}

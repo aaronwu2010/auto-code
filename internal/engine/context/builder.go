@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/auto-code/auto-code/internal/types"
+	"github.com/auto-code/auto-code/internal/utils/executil"
 )
 
 type ContextBuilder struct {
@@ -54,14 +54,14 @@ func (cb *ContextBuilder) GetGitStatus(ctx context.Context) (string, error) {
 }
 
 func (cb *ContextBuilder) fetchGitStatus(_ context.Context) (string, error) {
-	cmd := exec.Command("git", "status", "--porcelain=v1")
+	cmd := executil.Command("git", "status", "--porcelain=v1")
 	cmd.Dir = cb.cwd
 	output, err := cmd.Output()
 	if err != nil {
 		return "", nil
 	}
 
-	branchCmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	branchCmd := executil.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
 	branchCmd.Dir = cb.cwd
 	branch, _ := branchCmd.Output()
 
@@ -177,7 +177,6 @@ func (cb *ContextBuilder) BuildSystemPrompt(ctx context.Context, customPrompt, a
 
 	return &types.SystemPrompt{
 		Content: content,
-
 	}
 }
 

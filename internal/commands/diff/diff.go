@@ -1,11 +1,11 @@
-﻿package diff
+package diff
 
 import (
 	"context"
 	"fmt"
-	"os/exec"
 
 	"github.com/auto-code/auto-code/internal/clitypes"
+	"github.com/auto-code/auto-code/internal/utils/executil"
 )
 
 type DiffCommand struct{ *clitypes.BaseCommand }
@@ -22,7 +22,7 @@ func (c *DiffCommand) Execute(_ context.Context, cmdCtx *clitypes.CommandContext
 		args = append(args, "HEAD")
 	}
 
-	cmd := exec.Command("git", args...)
+	cmd := executil.Command("git", args...)
 	cmd.Dir = cmdCtx.CWD
 	output, err := cmd.CombinedOutput()
 	if err != nil {

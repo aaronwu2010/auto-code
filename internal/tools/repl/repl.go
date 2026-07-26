@@ -1,4 +1,4 @@
-﻿package repl
+package repl
 
 import (
 	"bytes"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/auto-code/auto-code/internal/tools"
 	"github.com/auto-code/auto-code/internal/types"
+	"github.com/auto-code/auto-code/internal/utils/executil"
 )
 
 const (
@@ -130,7 +131,12 @@ func executePython(ctx context.Context, code string) (string, error) {
 	execCtx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(execCtx, pythonCmd, "-c", code)
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = executil.CommandContext(execCtx, pythonCmd, "-c", code)
+	} else {
+		cmd = exec.CommandContext(execCtx, pythonCmd, "-c", code)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -156,7 +162,12 @@ func executeNode(ctx context.Context, code string) (string, error) {
 	execCtx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(execCtx, nodeCmd, "-e", code)
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = executil.CommandContext(execCtx, nodeCmd, "-e", code)
+	} else {
+		cmd = exec.CommandContext(execCtx, nodeCmd, "-e", code)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

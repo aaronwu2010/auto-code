@@ -12,6 +12,7 @@ import (
 
 	"github.com/auto-code/auto-code/internal/tools"
 	"github.com/auto-code/auto-code/internal/types"
+	"github.com/auto-code/auto-code/internal/utils/executil"
 )
 
 const (
@@ -22,9 +23,9 @@ const (
 )
 
 type BashInput struct {
-	Command    string `json:"command"`
-	Timeout    int    `json:"timeout,omitempty"`
-	WorkDir    string `json:"workdir,omitempty"`
+	Command string `json:"command"`
+	Timeout int    `json:"timeout,omitempty"`
+	WorkDir string `json:"workdir,omitempty"`
 }
 
 type BashOutput struct {
@@ -125,7 +126,7 @@ func (t *BashTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseCo
 	var cmd *exec.Cmd
 	shell := getShell()
 	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(cmdCtx, shell, "/c", inp.Command)
+		cmd = executil.CommandContext(cmdCtx, shell, "/c", inp.Command)
 	} else {
 		cmd = exec.CommandContext(cmdCtx, shell, "-c", inp.Command)
 	}

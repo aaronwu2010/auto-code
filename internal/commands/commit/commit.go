@@ -1,12 +1,12 @@
-﻿package commit
+package commit
 
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/auto-code/auto-code/internal/clitypes"
+	"github.com/auto-code/auto-code/internal/utils/executil"
 )
 
 type CommitCommand struct{ *clitypes.BaseCommand }
@@ -21,13 +21,13 @@ func (c *CommitCommand) Execute(_ context.Context, cmdCtx *clitypes.CommandConte
 		message = strings.Join(cmdCtx.Args, " ")
 	}
 
-	cmd := exec.Command("git", "add", "-A")
+	cmd := executil.Command("git", "add", "-A")
 	cmd.Dir = cmdCtx.CWD
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return &clitypes.CommandResult{Error: fmt.Sprintf("git add failed: %s", string(output))}, nil
 	}
 
-	cmd = exec.Command("git", "commit", "-m", message)
+	cmd = executil.Command("git", "commit", "-m", message)
 	cmd.Dir = cmdCtx.CWD
 	output, err := cmd.CombinedOutput()
 	if err != nil {

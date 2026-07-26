@@ -4,12 +4,13 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-		"os/exec"
+	"os/exec"
 	"runtime"
 	"time"
 
 	"github.com/auto-code/auto-code/internal/tools"
 	"github.com/auto-code/auto-code/internal/types"
+	"github.com/auto-code/auto-code/internal/utils/executil"
 )
 
 const (
@@ -113,7 +114,7 @@ func (t *PowerShellTool) Call(ctx context.Context, input any, toolCtx *tools.Too
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "powershell", "-NoProfile", "-Command", inp.Command)
+	cmd := executil.CommandContext(cmdCtx, "powershell", "-NoProfile", "-Command", inp.Command)
 	if inp.WorkDir != "" {
 		cmd.Dir = inp.WorkDir
 	}

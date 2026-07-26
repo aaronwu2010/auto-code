@@ -3,8 +3,9 @@ package git
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
+
+	"github.com/auto-code/auto-code/internal/utils/executil"
 )
 
 func GetBranch(ctx context.Context, cwd string) (string, error) {
@@ -75,7 +76,7 @@ func Commit(ctx context.Context, cwd string, message string) error {
 }
 
 func runGitCommand(ctx context.Context, cwd string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := executil.CommandContext(ctx, "git", args...)
 	cmd.Dir = cwd
 	out, err := cmd.CombinedOutput()
 	if err != nil {

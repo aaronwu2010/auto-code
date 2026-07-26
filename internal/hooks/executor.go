@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/auto-code/auto-code/internal/utils/executil"
 )
 
 const defaultHookTimeoutMs = 600000
@@ -153,9 +155,9 @@ func (e *HookExecutor) executeCommandHook(ctx context.Context, hook *BashCommand
 
 	var cmd *exec.Cmd
 	if shell == "pwsh" {
-		cmd = exec.CommandContext(hookCtx, "pwsh", "-Command", hook.Command)
+		cmd = executil.CommandContext(hookCtx, "pwsh", "-Command", hook.Command)
 	} else {
-		cmd = exec.CommandContext(hookCtx, shell, "-c", hook.Command)
+		cmd = executil.CommandContext(hookCtx, shell, "-c", hook.Command)
 	}
 	cmd.Stdin = strings.NewReader(string(inputJSON))
 

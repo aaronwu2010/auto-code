@@ -2,10 +2,11 @@ package voice
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/auto-code/auto-code/internal/utils/executil"
 )
 
 const maxKeyterms = 50
@@ -94,7 +95,7 @@ func GetVoiceKeyterms(projectRoot string, recentFiles []string) []string {
 }
 
 func getGitBranch() string {
-	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd := executil.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -103,7 +104,7 @@ func getGitBranch() string {
 }
 
 func GetProjectRoot() string {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd := executil.Command("git", "rev-parse", "--show-toplevel")
 	output, err := cmd.Output()
 	if err != nil {
 		cwd, _ := os.Getwd()

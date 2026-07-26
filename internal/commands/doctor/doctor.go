@@ -1,4 +1,4 @@
-﻿package doctor
+package doctor
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/auto-code/auto-code/internal/clitypes"
+	"github.com/auto-code/auto-code/internal/utils/executil"
 )
 
 type DoctorCommand struct{ *clitypes.BaseCommand }
@@ -29,7 +30,7 @@ func (c *DoctorCommand) Execute(_ context.Context, _ *clitypes.CommandContext) (
 	}
 
 	if gitPath, err := exec.LookPath("git"); err == nil {
-		cmd := exec.Command(gitPath, "--version")
+		cmd := executil.Command(gitPath, "--version")
 		if output, err := cmd.Output(); err == nil {
 			sb.WriteString(fmt.Sprintf("  Git: %s", string(output)))
 		}

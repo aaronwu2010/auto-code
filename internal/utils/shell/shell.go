@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+
+	"github.com/auto-code/auto-code/internal/utils/executil"
 )
 
 type ShellResult struct {
@@ -18,9 +20,9 @@ type ShellResult struct {
 }
 
 type ShellExecutor struct {
-	mu     sync.Mutex
-	cwd    string
-	env    []string
+	mu  sync.Mutex
+	cwd string
+	env []string
 }
 
 func NewShellExecutor(cwd string) *ShellExecutor {
@@ -48,7 +50,7 @@ func (e *ShellExecutor) Execute(ctx context.Context, command string, timeout tim
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
+	cmd := executil.CommandContext(ctx, "bash", "-c", command)
 	cmd.Dir = e.cwd
 	if len(e.env) > 0 {
 		cmd.Env = append(cmd.Environ(), e.env...)
@@ -85,7 +87,7 @@ func (e *ShellExecutor) Execute(ctx context.Context, command string, timeout tim
 }
 
 func (e *ShellExecutor) ExecuteStream(ctx context.Context, command string) (io.Reader, io.Reader, func() error, error) {
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
+	cmd := executil.CommandContext(ctx, "bash", "-c", command)
 	cmd.Dir = e.cwd
 
 	stdoutPipe, err := cmd.StdoutPipe()
