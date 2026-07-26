@@ -9,6 +9,7 @@ import (
 	"github.com/auto-code/auto-code/internal/tools/bash"
 	"github.com/auto-code/auto-code/internal/tools/brief"
 	"github.com/auto-code/auto-code/internal/tools/config"
+	"github.com/auto-code/auto-code/internal/tools/coordinator"
 	"github.com/auto-code/auto-code/internal/tools/cron"
 	"github.com/auto-code/auto-code/internal/tools/fileedit"
 	"github.com/auto-code/auto-code/internal/tools/fileread"
@@ -48,6 +49,14 @@ func NewToolRegistry() *ToolRegistry {
 	return &ToolRegistry{
 		baseTools: make([]tools.Tool, 0),
 	}
+}
+
+var coreToolNames = map[string]bool{
+	"Read": true, "Edit": true, "Write": true,
+	"Glob": true, "Grep": true,
+	"Bash": true, "PowerShell": true,
+	"ToolSearch": true, "Ask": true,
+	"TodoWrite": true,
 }
 
 func NewDefaultToolRegistry() *ToolRegistry {
@@ -93,6 +102,16 @@ func NewDefaultToolRegistry() *ToolRegistry {
 	r.Register(toosearch.NewToolSearchTool())
 	r.Register(webbrowser.NewWebBrowserTool())
 	r.Register(agent.NewAgentTool())
+	r.Register(coordinator.NewCoordinatorTool())
+
+	for _, tool := range r.baseTools {
+		if coreToolNames[tool.Name()] {
+			tool.SetAlwaysLoad(true)
+		} else {
+			tool.SetShouldDefer(true)
+		}
+	}
+
 	return r
 }
 
@@ -139,6 +158,35 @@ func (r *ToolRegistry) AssembleToolPool(permissionCtx types.ToolPermissionContex
 	}
 
 	return unique
+}
+
+func (r *ToolRegistry) GetCoreTools(permissionCtx types.ToolPermissionContext, mcpTools []tools.Tool) []tools.Tool {
+	allTools := r.AssembleToolPool(permissionCtx, mcpTools)
+
+	coreTools := make([]tools.Tool, 0)
+	for _, t := range allTools {
+		if t.AlwaysLoad() || !t.ShouldDefer() {
+			coreTools = append(coreTools, t)
+		}
+	}
+	return coreTools
+}
+
+func (r *ToolRegistry) GetDeferredTools(permissionCtx types.ToolPermissionContext, mcpTools []tools.Tool) []tools.Tool {
+	allTools := r.AssembleToolPool(permissionCtx, mcpTools)
+
+	deferredTools := make([]tools.Tool, 0)
+	for _, t := range allTools {
+		if t.ShouldDefer() && !t.AlwaysLoad() {
+			deferredTools = append(deferredTools, t)
+		}
+	}
+	return deferredTools
+}
+
+func (r *ToolRegistry) FindToolByName(permissionCtx types.ToolPermissionContext, mcpTools []tools.Tool, name string) tools.Tool {
+	allTools := r.AssembleToolPool(permissionCtx, mcpTools)
+	return tools.FindToolByName(allTools, name)
 }
 
 func isDeniedByRules(tool tools.Tool, rules types.ToolPermissionRulesBySource) bool {

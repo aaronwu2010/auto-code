@@ -1,18 +1,21 @@
 package toolpermission
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 type CoordinatorPermissionParams struct {
-	ToolName    string
-	ToolInput   map[string]interface{}
-	SessionID   string
-	HookResult  *HookPermissionResult
+	ToolName   string
+	ToolInput  map[string]interface{}
+	SessionID  string
+	HookResult *HookPermissionResult
 }
 
 type HookPermissionResult struct {
-	Behavior       PermissionBehavior
-	Reason         string
-	UpdatedInput   map[string]interface{}
+	Behavior     PermissionBehavior
+	Reason       string
+	UpdatedInput map[string]interface{}
 }
 
 func HandleCoordinatorPermission(ctx context.Context, params CoordinatorPermissionParams) *PermissionDecision {
@@ -46,6 +49,8 @@ type InteractivePermissionParams struct {
 	SessionID     string
 	HookResult    *HookPermissionResult
 	IsInteractive bool
+	Classifier    *ToolClassifier
+	Summary       string
 }
 
 func HandleInteractivePermission(ctx context.Context, params InteractivePermissionParams) *PermissionDecision {
@@ -63,6 +68,17 @@ func HandleInteractivePermission(ctx context.Context, params InteractivePermissi
 				Source:       ApprovalSourceHook,
 				Reason:       params.HookResult.Reason,
 				UpdatedInput: params.HookResult.UpdatedInput,
+			}
+		}
+	}
+
+	if params.Classifier != nil {
+		classifierResult, err := params.Classifier.Classify(ctx, params.ToolName, params.ToolInput, params.Summary)
+		if err == nil && classifierResult.Decision != PermissionAsk {
+			return &PermissionDecision{
+				Behavior: classifierResult.Decision,
+				Source:   ApprovalSourceClassifier,
+				Reason:   fmt.Sprintf("classifier: %s (confidence: %.2f)", classifierResult.Reason, classifierResult.Confidence),
 			}
 		}
 	}

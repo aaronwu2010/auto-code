@@ -47,6 +47,7 @@ type QueryDeps struct {
 	GenerateUUID func() string
 	GetCostUSD   func() float64
 	OnToolResult func(result *tools.ToolResult, toolCtx *tools.ToolUseContext)
+	GetTools     func() []tools.Tool
 }
 
 type CompactionResult struct {
@@ -299,10 +300,15 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 
 		ch <- QueryOutput{Type: "stream_request_start"}
 
+		currentTools := params.Tools
+		if deps.GetTools != nil {
+			currentTools = deps.GetTools()
+		}
+
 		streamCh, err := deps.CallModel(ctx, QueryParams{
 			Messages:     messages,
 			SystemPrompt: params.SystemPrompt,
-			Tools:        params.Tools,
+			Tools:        currentTools,
 			Model:        params.Model,
 			Thinking:     params.Thinking,
 		})
@@ -341,7 +347,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 					if msg.Message.HasToolCalls() {
 						needsFollowUp = true
 						for i, tc := range msg.Message.ToolCalls {
-							tool := tools.FindToolByName(params.Tools, tc.Function.Name)
+							tool := tools.FindToolByName(currentTools, tc.Function.Name)
 							if tool != nil {
 								var input any
 								if tc.Function.Arguments != nil {
@@ -386,7 +392,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		var toolResultMessages []types.Message
 
 		for i, tc := range getLastToolCalls(state.Messages) {
-			tool := tools.FindToolByName(params.Tools, tc.Function.Name)
+			tool := tools.FindToolByName(currentTools, tc.Function.Name)
 			if tool == nil {
 				toolResultMessages = append(toolResultMessages, types.Message{
 					Role:      types.RoleTool,

@@ -13,6 +13,8 @@ type ToolPermissionChecker struct {
 	executor      *hooks.HookExecutor
 	isInteractive bool
 	mode          PermissionMode
+	classifier    *ToolClassifier
+	getSummary    func() string
 }
 
 type PermissionMode string
@@ -30,6 +32,11 @@ func NewToolPermissionChecker(registry *hooks.HookRegistry, executor *hooks.Hook
 		isInteractive: isInteractive,
 		mode:          mode,
 	}
+}
+
+func (c *ToolPermissionChecker) SetClassifier(classifier *ToolClassifier, getSummary func() string) {
+	c.classifier = classifier
+	c.getSummary = getSummary
 }
 
 func (c *ToolPermissionChecker) CanUseTool(ctx context.Context, toolName string, toolInput map[string]interface{}) *PermissionDecision {
@@ -59,12 +66,18 @@ func (c *ToolPermissionChecker) CanUseTool(ctx context.Context, toolName string,
 			SessionID: "",
 		})
 	default:
+		summary := ""
+		if c.getSummary != nil {
+			summary = c.getSummary()
+		}
 		return HandleInteractivePermission(ctx, InteractivePermissionParams{
 			ToolName:      toolName,
 			ToolInput:     toolInput,
 			SessionID:     "",
 			HookResult:    hookPermResult,
 			IsInteractive: c.isInteractive,
+			Classifier:    c.classifier,
+			Summary:       summary,
 		})
 	}
 }

@@ -37,6 +37,8 @@ type Tool interface {
 	AlwaysLoad() bool
 	IsMCP() bool
 	GetToolUseSummary(input any, result *ToolResult) string
+	SetAlwaysLoad(v bool)
+	SetShouldDefer(v bool)
 }
 
 type PromptOptions struct {
@@ -124,6 +126,9 @@ func (t *BaseTool) IsReadOnly(any) bool        { return t.ToolIsReadOnly }
 func (t *BaseTool) IsDestructive(any) bool     { return t.ToolIsDestructive }
 func (t *BaseTool) IsConcurrencySafe(any) bool { return t.ToolIsConcurrencySafe }
 func (t *BaseTool) UserFacingName(any) string  { return t.ToolName }
+
+func (t *BaseTool) SetAlwaysLoad(v bool)  { t.ToolAlwaysLoad = v }
+func (t *BaseTool) SetShouldDefer(v bool) { t.ToolShouldDefer = v }
 
 func (t *BaseTool) CheckPermissions(_ context.Context, _ any, _ *ToolUseContext) (types.PermissionResult, error) {
 	return types.PermissionResult{Behavior: types.DecisionAllow}, nil

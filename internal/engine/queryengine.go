@@ -14,7 +14,10 @@ import (
 	"github.com/auto-code/auto-code/internal/prompts"
 	"github.com/auto-code/auto-code/internal/state"
 	"github.com/auto-code/auto-code/internal/tools"
+	"github.com/auto-code/auto-code/internal/tools/agent"
+	"github.com/auto-code/auto-code/internal/tools/coordinator"
 	"github.com/auto-code/auto-code/internal/tools/registry"
+	"github.com/auto-code/auto-code/internal/tools/toosearch"
 	"github.com/auto-code/auto-code/internal/types"
 )
 
@@ -90,6 +93,178 @@ func NewQueryEngine(appState *state.AppState, config *QueryEngineConfig) *QueryE
 
 func (qe *QueryEngine) Startup(ctx context.Context) {
 	qe.ctx, qe.cancel = context.WithCancel(ctx)
+	qe.setupAgentTool()
+}
+
+func (qe *QueryEngine) setupAgentTool() {
+	permissionCtx := qe.appState.GetToolPermissionContext()
+	allTools := qe.toolReg.AssembleToolPool(permissionCtx, nil)
+	for _, t := range allTools {
+		if agentTool, ok := t.(*agent.AgentTool); ok {
+			agentTool.SetSubAgentRunner(qe.runSubAgent)
+		}
+		if coordTool, ok := t.(*coordinator.CoordinatorTool); ok {
+			coordTool.SetSubAgentRunner(qe.runSubAgent)
+		}
+	}
+}
+
+func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTools []string, maxTurns int, onProgress func(string)) (string, error) {
+	if onProgress != nil {
+		onProgress("Building sub-agent tool pool...")
+	}
+
+	permissionCtx := qe.appState.GetToolPermissionContext()
+	allTools := qe.toolReg.AssembleToolPool(permissionCtx, nil)
+
+	var subTools []tools.Tool
+	if len(allowedTools) > 0 {
+		toolMap := make(map[string]tools.Tool)
+		for _, t := range allTools {
+			toolMap[t.Name()] = t
+		}
+		for _, name := range allowedTools {
+			if t, ok := toolMap[name]; ok {
+				subTools = append(subTools, t)
+			}
+		}
+	} else {
+		subTools = allTools
+	}
+
+	if onProgress != nil {
+		onProgress(fmt.Sprintf("Sub-agent has %d tools available", len(subTools)))
+	}
+
+	systemPrompt, err := qe.buildSystemPrompt(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to build system prompt: %w", err)
+	}
+
+	canUseTool := qe.config.CanUseTool
+	if canUseTool == nil {
+		canUseTool = func(tool tools.Tool, input any) (types.PermissionResult, error) {
+			return types.PermissionResult{Behavior: types.DecisionAllow}, nil
+		}
+	}
+
+	readFileState := make(tools.FileStateCache)
+	for k, v := range qe.readFileState {
+		readFileState[k] = v
+	}
+
+	messages := []types.Message{
+		{
+			ID:        generateMessageID(),
+			Role:      types.RoleUser,
+			Content:   prompt,
+			Timestamp: time.Now().Unix(),
+		},
+	}
+
+	toolUseCtx := &tools.ToolUseContext{
+		Options: tools.ToolUseOptions{
+			Commands:      qe.config.Commands,
+			MainLoopModel: string(qe.config.UserSpecifiedModel),
+			Tools:         subTools,
+			Verbose:       qe.config.Verbose,
+			MCPClients:    qe.config.MCPClients,
+			RefreshTools: func() []tools.Tool {
+				return subTools
+			},
+		},
+		AbortCtx:         ctx,
+		ReadFileState:    readFileState,
+		Messages:         messages,
+		ProjectDirectory: qe.getProjectDirectory(),
+	}
+
+	queryParams := query.QueryParams{
+		Messages:     messages,
+		SystemPrompt: systemPrompt,
+		Tools:        subTools,
+		CanUseTool:   canUseTool,
+		ToolUseCtx:   toolUseCtx,
+		MaxTurns:     maxTurns,
+		MaxBudgetUsd: qe.getConfig().MaxBudgetUsd,
+		Model:        qe.config.UserSpecifiedModel,
+	}
+
+	turnCount := 0
+	deps := query.QueryDeps{
+		CallModel: func(callCtx context.Context, p query.QueryParams) (<-chan query.QueryOutput, error) {
+			turnCount++
+			if onProgress != nil {
+				onProgress(fmt.Sprintf("Turn %d: calling model...", turnCount))
+			}
+			return qe.callModel(callCtx, p)
+		},
+		Microcompact: qe.microcompact,
+		AutoCompact:  qe.autoCompact,
+		GenerateUUID: generateMessageID,
+		GetCostUSD:   func() float64 { return 0 },
+		GetTools: func() []tools.Tool {
+			return subTools
+		},
+		OnToolResult: func(result *tools.ToolResult, toolCtx *tools.ToolUseContext) {
+			if result.ContextModifier != nil {
+				result.ContextModifier(toolCtx)
+				subTools = toolCtx.Options.Tools
+			}
+			if onProgress != nil && result.Data != nil {
+				onProgress(fmt.Sprintf("Tool result: %s", truncateString(fmt.Sprintf("%v", result.Data), 100)))
+			}
+		},
+	}
+
+	if onProgress != nil {
+		onProgress("Sub-agent starting execution...")
+	}
+
+	outputCh := query.Query(ctx, queryParams, deps)
+
+	var lastAssistantContent string
+	var lastError error
+
+	for output := range outputCh {
+		select {
+		case <-ctx.Done():
+			return lastAssistantContent, ctx.Err()
+		default:
+		}
+
+		switch output.Type {
+		case "assistant":
+			if output.Message != nil {
+				lastAssistantContent = output.Message.Content
+			}
+		case "terminal":
+			if onProgress != nil {
+				onProgress("Sub-agent completed successfully")
+			}
+			return lastAssistantContent, nil
+		case "error":
+			lastError = output.Error
+			if onProgress != nil {
+				onProgress(fmt.Sprintf("Sub-agent error: %v", output.Error))
+			}
+		case "interrupted":
+			return lastAssistantContent, ctx.Err()
+		}
+	}
+
+	if lastError != nil {
+		return lastAssistantContent, lastError
+	}
+
+	return lastAssistantContent, nil
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 func (qe *QueryEngine) Shutdown(_ context.Context) {
@@ -138,8 +313,9 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		println("SubmitMessage: 系统提示构建完成")
 
 		permissionCtx := qe.appState.GetToolPermissionContext()
-		availableTools := qe.toolReg.GetTools(permissionCtx)
-		println("SubmitMessage: 可用工具数量=", len(availableTools))
+		allTools := qe.toolReg.AssembleToolPool(permissionCtx, nil)
+		coreTools := qe.toolReg.GetCoreTools(permissionCtx, nil)
+		println("SubmitMessage: 核心工具数量=", len(coreTools), ", 全部工具数量=", len(allTools))
 
 		canUseTool := qe.config.CanUseTool
 		if canUseTool == nil {
@@ -148,13 +324,25 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 			}
 		}
 
+		activeTools := make([]tools.Tool, len(coreTools))
+		copy(activeTools, coreTools)
+
+		for _, t := range activeTools {
+			if tsTool, ok := t.(*toosearch.ToolSearchTool); ok {
+				tsTool.SetTools(allTools)
+			}
+		}
+
 		toolUseCtx := &tools.ToolUseContext{
 			Options: tools.ToolUseOptions{
 				Commands:      qe.config.Commands,
 				MainLoopModel: string(qe.config.UserSpecifiedModel),
-				Tools:         availableTools,
+				Tools:         activeTools,
 				Verbose:       qe.config.Verbose,
 				MCPClients:    qe.config.MCPClients,
+				RefreshTools: func() []tools.Tool {
+					return activeTools
+				},
 			},
 			AbortCtx:         ctx,
 			ReadFileState:    qe.readFileState,
@@ -165,7 +353,7 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		queryParams := query.QueryParams{
 			Messages:     qe.getMessagesAfterCompactBoundary(),
 			SystemPrompt: systemPrompt,
-			Tools:        availableTools,
+			Tools:        activeTools,
 			CanUseTool:   canUseTool,
 			ToolUseCtx:   toolUseCtx,
 			MaxTurns:     qe.getConfig().MaxTurns,
@@ -181,9 +369,13 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 			AutoCompact:  qe.autoCompact,
 			GenerateUUID: generateMessageID,
 			GetCostUSD:   func() float64 { return 0 },
+			GetTools: func() []tools.Tool {
+				return activeTools
+			},
 			OnToolResult: func(result *tools.ToolResult, toolCtx *tools.ToolUseContext) {
 				if result.ContextModifier != nil {
 					result.ContextModifier(toolCtx)
+					activeTools = toolCtx.Options.Tools
 				}
 			},
 		}
