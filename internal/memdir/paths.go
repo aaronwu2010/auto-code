@@ -45,7 +45,9 @@ func IsExtractModeActive() bool {
 
 func GetMemoryBaseDir() string {
 	if envDir := os.Getenv("AUTO_CODE_CONFIG_HOME"); envDir != "" {
-		return filepath.Join(envDir, ".claude")
+		if validated, err := validateMemoryPath(envDir); err == nil {
+			return filepath.Join(validated, ".claude")
+		}
 	}
 	homeDir, _ := os.UserHomeDir()
 	return filepath.Join(homeDir, ".claude")
@@ -109,11 +111,18 @@ func (p *Paths) HasAutoMemPathOverride() bool {
 	return os.Getenv("AUTO_CODE_COWORK_MEMORY_PATH_OVERRIDE") != ""
 }
 
+func isUNCPath(path string) bool {
+	return strings.HasPrefix(path, "\\\\") || strings.HasPrefix(path, "//")
+}
+
 func validateMemoryPath(p string) (string, error) {
 	if p == "" {
 		return "", errInvalidPath
 	}
 	if strings.Contains(p, "\x00") {
+		return "", errInvalidPath
+	}
+	if isUNCPath(p) {
 		return "", errInvalidPath
 	}
 	if !filepath.IsAbs(p) {

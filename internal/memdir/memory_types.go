@@ -54,7 +54,12 @@ const WhatNotToSaveSection = `Do NOT save:
 const WhenToAccessSection = `Access your memories:
 - At the start of each conversation
 - When context about the user or project would be helpful
-- When making decisions that could benefit from past interactions`
+- When making decisions that could benefit from past interactions
+
+After recalling memory:
+- Verify code-related claims by reading the actual files
+- Verify project state with current codebase, don't rely solely on memory
+- Treat memory as hints, not ground truth—always confirm important details`
 
 const MemoryDriftCaveat = `Note: Memories may become outdated over time. Verify critical information with the current state of the project.`
 

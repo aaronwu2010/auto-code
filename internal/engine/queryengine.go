@@ -12,6 +12,7 @@ import (
 	"github.com/auto-code/auto-code/internal/compact"
 	"github.com/auto-code/auto-code/internal/engine/query"
 	"github.com/auto-code/auto-code/internal/prompts"
+	"github.com/auto-code/auto-code/internal/services/extractmemories"
 	"github.com/auto-code/auto-code/internal/state"
 	"github.com/auto-code/auto-code/internal/tools"
 	"github.com/auto-code/auto-code/internal/tools/agent"
@@ -387,7 +388,7 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		for output := range outputCh {
 			outputCount++
 			println("SubmitMessage: 收到输出 #", outputCount, ", type=", output.Type)
-			sdkMsgs := qe.processQueryOutput(output)
+			sdkMsgs := qe.processQueryOutput(ctx, output)
 			for _, sdkMsg := range sdkMsgs {
 				ch <- sdkMsg
 			}
@@ -555,7 +556,7 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 	return outputCh, nil
 }
 
-func (qe *QueryEngine) processQueryOutput(output query.QueryOutput) []SDKMessage {
+func (qe *QueryEngine) processQueryOutput(ctx context.Context, output query.QueryOutput) []SDKMessage {
 	switch output.Type {
 	case "assistant":
 		if output.Message != nil {
@@ -623,6 +624,7 @@ func (qe *QueryEngine) processQueryOutput(output query.QueryOutput) []SDKMessage
 			if t, ok := output.Data.(*query.Terminal); ok {
 				reason = t.Reason
 			}
+			extractmemories.NotifyConversationEnd(ctx, qe.GetMessages())
 			return []SDKMessage{
 				{Type: "assistant", Message: &completeMsg, SessionID: qe.sessionID},
 				{Type: "result", Subtype: reason, SessionID: qe.sessionID},
@@ -636,6 +638,7 @@ func (qe *QueryEngine) processQueryOutput(output query.QueryOutput) []SDKMessage
 		if t, ok := output.Data.(*query.Terminal); ok {
 			reason = t.Reason
 		}
+		extractmemories.NotifyConversationEnd(ctx, qe.GetMessages())
 		return []SDKMessage{{Type: "result", Subtype: reason, SessionID: qe.sessionID}}
 	case "error":
 		qe.streamContent = ""

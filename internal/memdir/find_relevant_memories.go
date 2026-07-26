@@ -48,7 +48,14 @@ func FindRelevantMemories(ctx context.Context, query string, memoryDir string, r
 		toolsSection = fmt.Sprintf("\nRecently used tools: %s", strings.Join(recentTools, ", "))
 	}
 
-	systemPrompt := `You are a memory relevance selector. Given a user query and a list of memory files, select the most relevant ones. Return a JSON object with a "selected_memories" array containing up to 5 filenames that are most relevant to the query. Only select files that are directly relevant.`
+	systemPrompt := `You are a memory relevance selector. Given a user query and a list of memory files, select the most relevant ones. Return a JSON object with a "selected_memories" array containing up to 5 filenames that are most relevant to the query.
+
+Selection rules:
+1. Judge relevance only based on the title and description provided. Do not guess or assume content beyond what is stated.
+2. Prefer omission over error: if you are unsure about relevance, exclude the file.
+3. Do not select files the user has already read or that have been surfaced before.
+
+Only select files that are directly relevant.`
 
 	userPrompt := fmt.Sprintf("Query: %s\n\nAvailable memories:\n%s%s", query, manifest, toolsSection)
 

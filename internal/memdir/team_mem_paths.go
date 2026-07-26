@@ -23,9 +23,27 @@ func IsTeamMemoryEnabled() bool {
 
 func GetTeamMemPath() string {
 	if envDir := os.Getenv("AUTO_CODE_TEAM_MEMORY_DIR"); envDir != "" {
-		return envDir
+		if validated, err := validateTeamMemPath(envDir); err == nil {
+			return validated
+		}
 	}
 	return filepath.Join(GetMemoryBaseDir(), "team-memory")
+}
+
+func validateTeamMemPath(p string) (string, error) {
+	if p == "" {
+		return "", &PathTraversalError{Path: p, Msg: "empty path"}
+	}
+	if strings.Contains(p, "\x00") {
+		return "", &PathTraversalError{Path: p, Msg: "null byte in path"}
+	}
+	if strings.HasPrefix(p, "\\\\") || strings.HasPrefix(p, "//") {
+		return "", &PathTraversalError{Path: p, Msg: "UNC path not allowed"}
+	}
+	if !filepath.IsAbs(p) {
+		return "", &PathTraversalError{Path: p, Msg: "relative path not allowed"}
+	}
+	return filepath.Clean(p), nil
 }
 
 func GetTeamMemEntrypoint() string {

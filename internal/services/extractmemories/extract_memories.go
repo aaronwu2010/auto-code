@@ -2,6 +2,7 @@ package extractmemories
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -42,17 +43,35 @@ type ExtractMemories struct {
 	paths                 *memdir.Paths
 }
 
+type ConversationEndHandler func(ctx context.Context, messages []types.Message)
+
+var conversationEndHandlers []ConversationEndHandler
+
+func RegisterConversationEndHandler(handler ConversationEndHandler) {
+	conversationEndHandlers = append(conversationEndHandlers, handler)
+}
+
+func NotifyConversationEnd(ctx context.Context, messages []types.Message) {
+	for _, handler := range conversationEndHandlers {
+		go handler(ctx, messages)
+	}
+}
+
 type extractContext struct {
-	ctx                context.Context
-	messages           []types.Message
-	appendSystemMsg    string
+	ctx             context.Context
+	messages        []types.Message
+	appendSystemMsg string
 }
 
 func NewExtractMemories(paths *memdir.Paths) *ExtractMemories {
-	return &ExtractMemories{
+	em := &ExtractMemories{
 		inFlightCount: 0,
-		paths:               paths,
+		paths:         paths,
 	}
+	RegisterConversationEndHandler(func(ctx context.Context, messages []types.Message) {
+		_ = em.ExecuteExtractMemories(ctx, messages, "")
+	})
+	return em
 }
 
 func CreateAutoMemCanUseTool(memoryDir string) CanUseToolFn {
@@ -137,6 +156,19 @@ func (e *ExtractMemories) runExtraction(ctx context.Context, messages []types.Me
 		return nil
 	}
 
+	lastUUID := e.lastMemoryMessageUUID
+	if e.hasMemoryWritesSince(lastUUID, messages) {
+		e.lastMemoryMessageUUID = getLastMessageUUID(messages)
+		e.turnsSinceLast = 0
+		return nil
+	}
+
+	if !e.shouldExtract(messages) {
+		e.lastMemoryMessageUUID = getLastMessageUUID(messages)
+		e.turnsSinceLast = 0
+		return nil
+	}
+
 	headers, _ := memdir.ScanMemoryFiles(ctx, memoryDir)
 	manifest := memdir.FormatMemoryManifest(headers)
 
@@ -161,9 +193,111 @@ func (e *ExtractMemories) runExtraction(ctx context.Context, messages []types.Me
 
 	e.mu.Lock()
 	e.turnsSinceLast = 0
+	e.lastMemoryMessageUUID = getLastMessageUUID(messages)
 	e.mu.Unlock()
 
 	return err
+}
+
+func (e *ExtractMemories) hasMemoryWritesSince(lastUUID string, messages []types.Message) bool {
+	found := lastUUID == ""
+	for _, msg := range messages {
+		if !found {
+			if msg.UUID == lastUUID {
+				found = true
+			}
+			continue
+		}
+		if msg.Role != types.RoleAssistant {
+			continue
+		}
+		for _, tc := range msg.ToolCalls {
+			name := strings.ToLower(tc.Function.Name)
+			if name != "write" && name != "edit" && name != "filewrite" && name != "fileedit" {
+				continue
+			}
+			var input struct {
+				FilePath string `json:"file_path"`
+			}
+			if err := json.Unmarshal(tc.Function.Arguments, &input); err != nil {
+				continue
+			}
+			if input.FilePath == "" {
+				continue
+			}
+			if e.paths.IsAutoMemPath(input.FilePath) != "" {
+				return true
+			}
+			if memdir.IsTeamMemPath(input.FilePath) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func getLastMessageUUID(messages []types.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].UUID != "" {
+			return messages[i].UUID
+		}
+	}
+	return ""
+}
+
+func (e *ExtractMemories) shouldExtract(messages []types.Message) bool {
+	if len(messages) < 2 {
+		return false
+	}
+
+	userCount := 0
+	assistantCount := 0
+	hasSubstantiveContent := false
+	hasSensitiveKeywords := false
+
+	sensitiveKeywords := []string{"password", "secret", "token", "api key", "private key", "credential"}
+
+	for _, msg := range messages {
+		content := strings.ToLower(msg.Content)
+
+		switch msg.Role {
+		case types.RoleUser:
+			userCount++
+			if len(msg.Content) > 20 {
+				hasSubstantiveContent = true
+			}
+			for _, kw := range sensitiveKeywords {
+				if strings.Contains(content, kw) {
+					hasSensitiveKeywords = true
+					break
+				}
+			}
+		case types.RoleAssistant:
+			assistantCount++
+			if len(msg.Content) > 50 {
+				hasSubstantiveContent = true
+			}
+		}
+	}
+
+	if userCount < 1 || assistantCount < 1 {
+		return false
+	}
+
+	if !hasSubstantiveContent {
+		return false
+	}
+
+	if hasSensitiveKeywords {
+		return false
+	}
+
+	totalTurns := userCount + assistantCount
+	if totalTurns < 2 {
+		return false
+	}
+
+	return true
 }
 
 func (e *ExtractMemories) buildExtractPrompt(messages []types.Message, manifest string, appendSystemMsg string) string {
@@ -179,6 +313,11 @@ func (e *ExtractMemories) buildExtractPrompt(messages []types.Message, manifest 
 
 	sb.WriteString(memdir.WhatNotToSaveSection + "\n\n")
 	sb.WriteString(memdir.MemoryFrontmatterExample + "\n\n")
+
+	sb.WriteString("Structural requirements:\n")
+	sb.WriteString("- feedback type: Must contain a clear rule statement and the context/scenario where it applies\n")
+	sb.WriteString("- project type: Must include project background, key decisions, and current status\n")
+	sb.WriteString("All memory files must have proper YAML frontmatter with description and type fields.\n\n")
 
 	if manifest != "" {
 		sb.WriteString("Existing memories:\n")
