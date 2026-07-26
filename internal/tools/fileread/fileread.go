@@ -146,6 +146,8 @@ func (t *FileReadTool) Call(ctx context.Context, input any, toolCtx *tools.ToolU
 
 	filePath := expandPath(inp.FilePath)
 
+	filePath = tools.EnsurePathInProjectDirectory(filePath, toolCtx)
+
 	if isBlockedDevicePath(filePath) {
 		return &tools.ToolResult{Data: "Cannot read from device files as they may block or produce infinite output."}, nil
 	}

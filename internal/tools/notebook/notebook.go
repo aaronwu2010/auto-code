@@ -1,10 +1,12 @@
-﻿package notebook
+package notebook
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/auto-code/auto-code/internal/tools"
 )
@@ -37,10 +39,10 @@ type NotebookCell struct {
 }
 
 type Notebook struct {
-	Cells    []NotebookCell `json:"cells"`
-	Metadata any            `json:"metadata"`
-	NBFormat int            `json:"nbformat"`
-	NBFormatMinor int       `json:"nbformat_minor"`
+	Cells         []NotebookCell `json:"cells"`
+	Metadata      any            `json:"metadata"`
+	NBFormat      int            `json:"nbformat"`
+	NBFormatMinor int            `json:"nbformat_minor"`
 }
 
 type NotebookTool struct {
@@ -72,10 +74,23 @@ func (t *NotebookTool) Call(ctx context.Context, input any, toolCtx *tools.ToolU
 		return nil, fmt.Errorf("invalid input type")
 	}
 
-	data, err := os.ReadFile(inp.FilePath)
+	filePath := inp.FilePath
+	if strings.HasPrefix(filePath, "~") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			filePath = filepath.Join(home, filePath[1:])
+		}
+	}
+	abs, err := filepath.Abs(filePath)
+	if err == nil {
+		filePath = abs
+	}
+	filePath = tools.EnsurePathInProjectDirectory(filePath, toolCtx)
+
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return t.createNewNotebook(inp)
+			return t.createNewNotebook(filePath, inp)
 		}
 		return nil, fmt.Errorf("failed to read notebook: %w", err)
 	}
@@ -99,18 +114,18 @@ func (t *NotebookTool) Call(ctx context.Context, input any, toolCtx *tools.ToolU
 		return nil, fmt.Errorf("failed to marshal notebook: %w", err)
 	}
 
-	if err := os.WriteFile(inp.FilePath, updated, 0o644); err != nil {
+	if err := os.WriteFile(filePath, updated, 0o644); err != nil {
 		return nil, fmt.Errorf("failed to write notebook: %w", err)
 	}
 
 	return &tools.ToolResult{Data: NotebookEditOutput{
-		FilePath:   inp.FilePath,
+		FilePath:   filePath,
 		CellNumber: inp.CellNumber,
 		Status:     "updated",
 	}}, nil
 }
 
-func (t *NotebookTool) createNewNotebook(inp NotebookEditInput) (*tools.ToolResult, error) {
+func (t *NotebookTool) createNewNotebook(filePath string, inp NotebookEditInput) (*tools.ToolResult, error) {
 	cellType := inp.CellType
 	if cellType == "" {
 		cellType = "code"
@@ -133,12 +148,12 @@ func (t *NotebookTool) createNewNotebook(inp NotebookEditInput) (*tools.ToolResu
 		return nil, fmt.Errorf("failed to marshal notebook: %w", err)
 	}
 
-	if err := os.WriteFile(inp.FilePath, data, 0o644); err != nil {
+	if err := os.WriteFile(filePath, data, 0o644); err != nil {
 		return nil, fmt.Errorf("failed to write notebook: %w", err)
 	}
 
 	return &tools.ToolResult{Data: NotebookEditOutput{
-		FilePath:   inp.FilePath,
+		FilePath:   filePath,
 		CellNumber: 0,
 		Status:     "created",
 	}}, nil

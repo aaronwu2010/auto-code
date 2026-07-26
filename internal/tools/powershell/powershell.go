@@ -4,8 +4,11 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/auto-code/auto-code/internal/tools"
@@ -115,9 +118,24 @@ func (t *PowerShellTool) Call(ctx context.Context, input any, toolCtx *tools.Too
 	defer cancel()
 
 	cmd := executil.CommandContext(cmdCtx, "powershell", "-NoProfile", "-Command", inp.Command)
-	if inp.WorkDir != "" {
-		cmd.Dir = inp.WorkDir
+
+	workDir := inp.WorkDir
+	if workDir == "" {
+		workDir = tools.GetDefaultSearchDir(toolCtx)
+	} else {
+		if strings.HasPrefix(workDir, "~") {
+			home, err := os.UserHomeDir()
+			if err == nil {
+				workDir = filepath.Join(home, workDir[1:])
+			}
+		}
+		abs, err := filepath.Abs(workDir)
+		if err == nil {
+			workDir = abs
+		}
+		workDir = tools.EnsurePathInProjectDirectory(workDir, toolCtx)
 	}
+	cmd.Dir = workDir
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {

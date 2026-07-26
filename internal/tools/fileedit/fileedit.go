@@ -121,6 +121,8 @@ func (t *FileEditTool) Call(ctx context.Context, input any, toolCtx *tools.ToolU
 	newString := inp.NewString
 	replaceAll := inp.ReplaceAll
 
+	filePath = tools.EnsurePathInProjectDirectory(filePath, toolCtx)
+
 	if oldString == newString {
 		return nil, fmt.Errorf("no changes to make: old_string and new_string are exactly the same")
 	}

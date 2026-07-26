@@ -133,13 +133,10 @@ func (t *GrepTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseCo
 
 	searchDir := inp.Path
 	if searchDir == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get working directory: %w", err)
-		}
-		searchDir = cwd
+		searchDir = tools.GetDefaultSearchDir(toolCtx)
 	} else {
 		searchDir = expandPath(searchDir)
+		searchDir = tools.EnsurePathInProjectDirectory(searchDir, toolCtx)
 	}
 
 	var includePattern *regexp.Regexp

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -114,10 +115,19 @@ func (t *BashTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseCo
 
 	workDir := inp.WorkDir
 	if workDir == "" {
-		cwd, err := os.Getwd()
-		if err == nil {
-			workDir = cwd
+		workDir = tools.GetDefaultSearchDir(toolCtx)
+	} else {
+		if strings.HasPrefix(workDir, "~") {
+			home, err := os.UserHomeDir()
+			if err == nil {
+				workDir = filepath.Join(home, workDir[1:])
+			}
 		}
+		abs, err := filepath.Abs(workDir)
+		if err == nil {
+			workDir = abs
+		}
+		workDir = tools.EnsurePathInProjectDirectory(workDir, toolCtx)
 	}
 
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
