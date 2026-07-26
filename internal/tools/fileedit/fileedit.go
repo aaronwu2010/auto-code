@@ -156,7 +156,7 @@ func (t *FileEditTool) Call(ctx context.Context, input any, toolCtx *tools.ToolU
 	}
 
 	if toolCtx != nil && toolCtx.ReadFileState != nil {
-		if _, read := toolCtx.ReadFileState[filePath]; !read && oldString != "" {
+		if !toolCtx.ReadFileState.Has(filePath) && oldString != "" {
 			return nil, fmt.Errorf("file has not been read yet. Read it first before writing to it")
 		}
 	}
@@ -188,7 +188,7 @@ func (t *FileEditTool) Call(ctx context.Context, input any, toolCtx *tools.ToolU
 	}
 
 	if toolCtx != nil && toolCtx.ReadFileState != nil {
-		toolCtx.ReadFileState[filePath] = updatedContent
+		toolCtx.ReadFileState.Set(filePath, updatedContent)
 	}
 
 	patch := generatePatch(fileContent, updatedContent, filePath)

@@ -128,7 +128,7 @@ func (t *FileWriteTool) Call(ctx context.Context, input any, toolCtx *tools.Tool
 		oldContent = &existing
 
 		if toolCtx != nil && toolCtx.ReadFileState != nil {
-			if _, read := toolCtx.ReadFileState[filePath]; !read {
+			if !toolCtx.ReadFileState.Has(filePath) {
 				return nil, fmt.Errorf("file has not been read yet. Read it first before writing to it")
 			}
 		}
@@ -144,7 +144,7 @@ func (t *FileWriteTool) Call(ctx context.Context, input any, toolCtx *tools.Tool
 	}
 
 	if toolCtx != nil && toolCtx.ReadFileState != nil {
-		toolCtx.ReadFileState[filePath] = content
+		toolCtx.ReadFileState.Set(filePath, content)
 	}
 
 	var outputType string

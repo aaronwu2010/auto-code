@@ -20,18 +20,18 @@ const (
 )
 
 var blockedDevicePaths = map[string]bool{
-	"/dev/zero":      true,
-	"/dev/random":    true,
-	"/dev/urandom":   true,
-	"/dev/full":      true,
-	"/dev/stdin":     true,
-	"/dev/tty":       true,
-	"/dev/console":   true,
-	"/dev/stdout":    true,
-	"/dev/stderr":    true,
-	"/dev/fd/0":      true,
-	"/dev/fd/1":      true,
-	"/dev/fd/2":      true,
+	"/dev/zero":    true,
+	"/dev/random":  true,
+	"/dev/urandom": true,
+	"/dev/full":    true,
+	"/dev/stdin":   true,
+	"/dev/tty":     true,
+	"/dev/console": true,
+	"/dev/stdout":  true,
+	"/dev/stderr":  true,
+	"/dev/fd/0":    true,
+	"/dev/fd/1":    true,
+	"/dev/fd/2":    true,
 }
 
 var binaryExtensions = map[string]bool{
@@ -218,7 +218,7 @@ func (t *FileReadTool) Call(ctx context.Context, input any, toolCtx *tools.ToolU
 	}
 
 	if toolCtx != nil && toolCtx.ReadFileState != nil {
-		toolCtx.ReadFileState[filePath] = content
+		toolCtx.ReadFileState.Set(filePath, content)
 	}
 
 	return &tools.ToolResult{Data: output}, nil

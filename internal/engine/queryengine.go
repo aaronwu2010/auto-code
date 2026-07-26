@@ -33,7 +33,7 @@ type QueryEngine struct {
 	sessionID       types.SessionID
 	config          *QueryEngineConfig
 	usage           api.Usage
-	readFileState   tools.FileStateCache
+	readFileState   *tools.FileStateCache
 	streamContent   string
 	streamThinking  string
 	streamToolCalls []types.ToolCall
@@ -88,7 +88,7 @@ func NewQueryEngine(appState *state.AppState, config *QueryEngineConfig) *QueryE
 		messages:      make([]types.Message, 0),
 		sessionID:     generateSessionID(),
 		config:        config,
-		readFileState: make(tools.FileStateCache),
+		readFileState: tools.NewFileStateCache(),
 	}
 }
 
@@ -149,10 +149,7 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 		}
 	}
 
-	readFileState := make(tools.FileStateCache)
-	for k, v := range qe.readFileState {
-		readFileState[k] = v
-	}
+	readFileState := qe.readFileState.Clone()
 
 	messages := []types.Message{
 		{
@@ -541,6 +538,8 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 				if msg.Message != nil {
 					outputCh <- query.QueryOutput{Type: "assistant", Message: msg.Message}
 				}
+			case "tool_calls_start":
+				outputCh <- query.QueryOutput{Type: "tool_calls_start"}
 			case "done":
 				if msg.Usage != nil {
 					qe.usage = *msg.Usage
@@ -598,7 +597,14 @@ func (qe *QueryEngine) processQueryOutput(ctx context.Context, output query.Quer
 		}
 	case "stream_event":
 		return []SDKMessage{{Type: "stream_event", Data: output.Data, SessionID: qe.sessionID}}
+	case "tool_calls_start":
+		return []SDKMessage{{Type: "tool_calls_start", SessionID: qe.sessionID}}
 	case "terminal":
+		reason := "completed"
+		if t, ok := output.Data.(*query.Terminal); ok {
+			reason = t.Reason
+		}
+		println("processQueryOutput: 收到 terminal, reason=", reason, ", streamContentLen=", len(qe.streamContent), ", streamToolCalls=", len(qe.streamToolCalls))
 		if qe.streamContent != "" || qe.streamThinking != "" || len(qe.streamToolCalls) > 0 {
 			modelName := ""
 			if output.Message != nil {
@@ -620,10 +626,6 @@ func (qe *QueryEngine) processQueryOutput(ctx context.Context, output query.Quer
 			qe.streamThinking = ""
 			qe.streamToolCalls = nil
 			qe.streamMsgID = ""
-			reason := "completed"
-			if t, ok := output.Data.(*query.Terminal); ok {
-				reason = t.Reason
-			}
 			extractmemories.NotifyConversationEnd(ctx, qe.GetMessages())
 			return []SDKMessage{
 				{Type: "assistant", Message: &completeMsg, SessionID: qe.sessionID},
@@ -634,10 +636,6 @@ func (qe *QueryEngine) processQueryOutput(ctx context.Context, output query.Quer
 		qe.streamThinking = ""
 		qe.streamToolCalls = nil
 		qe.streamMsgID = ""
-		reason := "completed"
-		if t, ok := output.Data.(*query.Terminal); ok {
-			reason = t.Reason
-		}
 		extractmemories.NotifyConversationEnd(ctx, qe.GetMessages())
 		return []SDKMessage{{Type: "result", Subtype: reason, SessionID: qe.sessionID}}
 	case "error":

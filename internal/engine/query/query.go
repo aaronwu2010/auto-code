@@ -344,6 +344,8 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 						)
 					}
 
+					println("queryLoop: 收到assistant消息, contentLen=", len(msg.Message.Content), ", hasToolCalls=", msg.Message.HasToolCalls(), ", toolCallCount=", len(msg.Message.ToolCalls))
+
 					if msg.Message.HasToolCalls() {
 						needsFollowUp = true
 						for i, tc := range msg.Message.ToolCalls {
@@ -369,6 +371,9 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 					ch <- QueryOutput{Type: "user", Message: msg.Message}
 				}
 
+			case "tool_calls_start":
+				ch <- QueryOutput{Type: "tool_calls_start"}
+
 			case "stream_event":
 				if streamMsg, ok := msg.Data.(*StreamMessageWrapper); ok {
 					stopReason = streamMsg.StopReason
@@ -382,12 +387,15 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			}
 		}
 
-		_ = stopReason
+		lastMsg := state.Messages[len(state.Messages)-1]
+		println("queryLoop: stream结束, stopReason=", stopReason, ", needsFollowUp=", needsFollowUp, ", lastMsg.role=", string(lastMsg.Role), ", hasToolCalls=", lastMsg.HasToolCalls(), ", toolCallCount=", len(lastMsg.ToolCalls))
 
 		if !needsFollowUp {
+			println("queryLoop: 无需继续，发送 terminal completed")
 			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "completed"}}
 			return
 		}
+		println("queryLoop: 需要继续，开始执行工具调用，工具数量=", len(getLastToolCalls(state.Messages)))
 
 		var toolResultMessages []types.Message
 
@@ -459,16 +467,21 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 
 		state.TurnCount++
 
+		println("queryLoop: 工具执行完成, turnCount=", state.TurnCount, ", maxTurns=", params.MaxTurns, ", 消息总数=", len(state.Messages))
+
 		if params.MaxBudgetUsd > 0 && deps.GetCostUSD != nil && deps.GetCostUSD() >= params.MaxBudgetUsd {
+			println("queryLoop: 达到预算上限，终止")
 			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "max_budget_usd"}}
 			return
 		}
 
 		if state.TurnCount >= params.MaxTurns {
+			println("queryLoop: 达到最大轮数，终止, turnCount=", state.TurnCount)
 			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "max_turns_reached"}}
 			return
 		}
 
+		println("queryLoop: 进入下一轮循环...")
 		state.Transition = &Continue{Reason: ContinueNextTurn}
 	}
 }

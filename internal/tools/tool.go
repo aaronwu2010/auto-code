@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"sync"
 
 	"github.com/auto-code/auto-code/internal/types"
 )
@@ -56,7 +57,7 @@ type AgentDefinition struct {
 type ToolUseContext struct {
 	Options           ToolUseOptions
 	AbortCtx          context.Context
-	ReadFileState     FileStateCache
+	ReadFileState     *FileStateCache
 	GetAppState       func() *types.ToolPermissionContext
 	SetAppState       func(f func(prev *types.ToolPermissionContext) *types.ToolPermissionContext)
 	HandleElicitation func(serverName string, params any) (any, error)
@@ -82,7 +83,46 @@ type ToolUseOptions struct {
 	RefreshTools            func() []Tool
 }
 
-type FileStateCache map[string]string
+type FileStateCache struct {
+	mu    sync.RWMutex
+	cache map[string]string
+}
+
+func NewFileStateCache() *FileStateCache {
+	return &FileStateCache{
+		cache: make(map[string]string),
+	}
+}
+
+func (c *FileStateCache) Get(key string) (string, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	val, ok := c.cache[key]
+	return val, ok
+}
+
+func (c *FileStateCache) Set(key string, value string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cache[key] = value
+}
+
+func (c *FileStateCache) Has(key string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	_, ok := c.cache[key]
+	return ok
+}
+
+func (c *FileStateCache) Clone() *FileStateCache {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	newCache := make(map[string]string, len(c.cache))
+	for k, v := range c.cache {
+		newCache[k] = v
+	}
+	return &FileStateCache{cache: newCache}
+}
 
 type MCPServerConnection struct {
 	ServerName string `json:"server_name"`

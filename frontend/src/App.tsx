@@ -65,6 +65,7 @@ function App() {
   const [selectedFile, setSelectedFile] = useState<string>("");
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState<Message | null>(null);
+  const [isToolCalling, setIsToolCalling] = useState(false);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -202,8 +203,12 @@ function App() {
           typeof data === "string" ? JSON.parse(data) : (data as SDKMessage);
         if (msg.type === "stream_chunk" && msg.message) {
           setStreamingMessage(msg.message);
+          setIsToolCalling(false);
+        } else if (msg.type === "tool_calls_start") {
+          setIsToolCalling(true);
         } else if (msg.type === "assistant" && msg.message) {
           setStreamingMessage(null);
+          setIsToolCalling(false);
           setMessages((prev) => {
             const exists = prev.some((m) => m.id === msg.message!.id);
             if (exists) return prev;
@@ -219,6 +224,7 @@ function App() {
         if (msg.type === "result" || msg.type === "error") {
           setIsLoading(false);
           setStreamingMessage(null);
+          setIsToolCalling(false);
         }
       } catch {}
     });
@@ -252,11 +258,13 @@ function App() {
     const currentInput = input;
     setInput("");
     setIsLoading(true);
+    setIsToolCalling(false);
 
     try {
       await SendMessage({ prompt: currentInput });
     } catch {
       setIsLoading(false);
+      setIsToolCalling(false);
     }
   };
 
@@ -280,23 +288,7 @@ function App() {
           </pre>
         );
       case "tool_use":
-        return (
-          <div
-            key={idx}
-            className="bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-2 my-1.5 text-sm"
-          >
-            <span className="text-sky-400 font-semibold text-xs tracking-wide">
-              🔧 {block.tool_name}
-            </span>
-            {block.tool_input && (
-              <pre className="text-xs text-slate-400 mt-1.5 overflow-x-auto">
-                {typeof block.tool_input === "string"
-                  ? block.tool_input
-                  : JSON.stringify(block.tool_input, null, 2)}
-              </pre>
-            )}
-          </div>
-        );
+        return null;
       case "tool_result":
         return (
           <div
@@ -346,11 +338,11 @@ function App() {
             : "bg-slate-800/60 border border-slate-700/50 text-slate-200"
         }`}
       >
-        <div className={`text-[10px] mb-2 font-semibold uppercase tracking-wider ${
-          isUser ? "text-sky-200" : "text-slate-500"
-        }`}>
-          {isUser ? "你" : msg.role}
-        </div>
+        {!isUser && (
+          <div className="text-[10px] mb-2 font-semibold uppercase tracking-wider text-slate-500">
+            {msg.role}
+          </div>
+        )}
         {msg.content_blocks && msg.content_blocks.length > 0
           ? msg.content_blocks.map((block, i) => renderContentBlock(block, i))
           : <pre className="whitespace-pre-wrap break-words text-sm leading-relaxed">{msg.content}</pre>}
@@ -570,7 +562,18 @@ function App() {
                 </div>
                 <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
                   {streamingMessage.content}
-                  <span className="inline-block w-2 h-4 bg-sky-400 ml-0.5 align-middle animate-pulse rounded-sm"></span>
+                  {!streamingMessage.content && isToolCalling ? (
+                    <span className="flex items-center gap-2 text-amber-400">
+                      <span className="flex gap-1">
+                        <span className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                        <span className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                        <span className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                      </span>
+                      正在调用工具...
+                    </span>
+                  ) : (
+                    <span className="inline-block w-2 h-4 bg-sky-400 ml-0.5 align-middle animate-pulse rounded-sm"></span>
+                  )}
                 </div>
                 {streamingMessage.thinking && (
                   <details className="bg-violet-900/10 border border-violet-800/30 rounded-lg px-3 py-2 my-1.5">
@@ -582,6 +585,21 @@ function App() {
                     </pre>
                   </details>
                 )}
+              </div>
+            )}
+            {isToolCalling && !streamingMessage && (
+              <div className="mb-4 px-4 py-3 rounded-2xl max-w-[85%] bg-slate-800/60 border border-slate-700/50 text-slate-200 shadow-sm">
+                <div className="text-[10px] mb-2 font-semibold uppercase tracking-wider text-slate-500">
+                  assistant
+                </div>
+                <div className="flex items-center gap-2 text-amber-400 text-sm">
+                  <span className="flex gap-1">
+                    <span className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                    <span className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                    <span className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                  </span>
+                  正在调用工具...
+                </div>
               </div>
             )}
             {isLoading && !streamingMessage && (

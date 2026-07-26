@@ -306,9 +306,11 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 
 	var (
-		usage        Usage
-		stopReason   string
-		toolCallsAcc []types.ToolCall
+		usage            Usage
+		stopReason       string
+		toolCallsAcc     []types.ToolCall
+		toolCallsSent    bool
+		assistantContent string
 	)
 
 	for scanner.Scan() {
@@ -323,6 +325,7 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 		}
 
 		if event.Message.Content != "" {
+			assistantContent += event.Message.Content
 			msg := &types.Message{
 				Role:      types.RoleAssistant,
 				Content:   event.Message.Content,
@@ -343,6 +346,11 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 		}
 
 		if len(event.Message.ToolCalls) > 0 {
+			if !toolCallsSent {
+				toolCallsSent = true
+				println("parseNDJSONStream: 检测到 tool_calls 开始, 数量=", len(event.Message.ToolCalls))
+				ch <- StreamMessage{Type: "tool_calls_start"}
+			}
 			toolCallsAcc = append(toolCallsAcc, event.Message.ToolCalls...)
 		}
 
@@ -364,6 +372,7 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 			}
 
 			if len(toolCallsAcc) > 0 {
+				println("parseNDJSONStream: done时发送 tool_calls 消息, 数量=", len(toolCallsAcc))
 				msg := &types.Message{
 					Role:      types.RoleAssistant,
 					ToolCalls: toolCallsAcc,
@@ -373,6 +382,7 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 				ch <- StreamMessage{Type: "tool_calls", Message: msg}
 			}
 
+			println("parseNDJSONStream: 流式结束, stopReason=", stopReason, ", contentLen=", len(assistantContent), ", toolCalls总数=", len(toolCallsAcc))
 			ch <- StreamMessage{
 				Type:       "done",
 				StopReason: stopReason,
