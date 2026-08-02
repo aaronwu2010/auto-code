@@ -1,0 +1,81 @@
+{
+  "name": "auto-code",
+  "displayName": "Auto Code",
+  "description": "AI 编程助手 - VS Code 插件版本，复用 auto-code Go 核心",
+  "version": "0.1.0",
+  "publisher": "auto-code",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/auto-code/auto-code"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning",
+    "Programming Languages"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "auto-code.openChat",
+        "title": "Auto Code: Open Chat",
+        "category": "Auto Code"
+      },
+      {
+        "command": "auto-code.restartServer",
+        "title": "Auto Code: Restart Server",
+        "category": "Auto Code"
+      }
+    ],
+    "configuration": {
+      "title": "Auto Code",
+      "properties": {
+        "auto-code.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "auto-code-server 可执行文件路径。留空则使用扩展自带的 bin/auto-code-server"
+        },
+        "auto-code.ollamaBaseUrl": {
+          "type": "string",
+          "default": "http://localhost:11434/api",
+          "description": "Ollama 服务地址"
+        },
+        "auto-code.ollamaApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Ollama API Key（本地模式留空）"
+        },
+        "auto-code.ollamaModel": {
+          "type": "string",
+          "default": "",
+          "description": "默认使用的模型名称（留空使用服务端默认值）"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run build:extension && npm run build:webview",
+    "build:extension": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18",
+    "build:webview": "cd webview-ui && npm run build",
+    "watch:extension": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18 --sourcemap --watch",
+    "watch:webview": "cd webview-ui && npm run dev",
+    "build:server": "cd .. && go build -o vscode-extension/bin/auto-code-server.exe ./cmd/auto-code-server",
+    "package": "npm run build:extension && npm run build:webview -- --emptyOutDir",
+    "vsce:package": "npm run package && npx vsce package --no-dependencies",
+    "test": "echo no-tests"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.27.0",
+    "esbuild": "^0.21.0",
+    "typescript": "^5.4.0"
+  }
+}

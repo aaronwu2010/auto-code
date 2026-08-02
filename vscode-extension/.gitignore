@@ -1,0 +1,7 @@
+node_modules/
+dist/
+webview-ui/node_modules/
+webview-ui/dist/
+*.vsix
+bin/auto-code-server
+bin/auto-code-server.exe

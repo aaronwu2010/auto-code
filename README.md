@@ -77,3 +77,57 @@ Error: Wails applications will not build without the correct build tags.
 ```
 
 必须通过 `wails build` 或 `wails dev` 命令构建。
+
+## VS Code 插件
+
+除 Wails 桌面应用外，本项目还提供一个 VS Code 插件（位于 [`vscode-extension/`](vscode-extension/)），复用同一套 Go 核心（QueryEngine、工具系统、上下文管理），通过 stdio NDJSON-RPC 与 Go 子进程通信。插件已移除文件浏览器与项目目录选择，改为自动读取 VS Code 工作区目录并在 Header 显示。
+
+### 构建 .vsix 安装包
+
+前置条件：Go 1.24+、Node.js 16+。
+
+```powershell
+# 1. 构建 Go 后端二进制（在仓库根目录）
+go build -o vscode-extension\bin\auto-code-server.exe .\cmd\auto-code-server
+
+# 2. 安装依赖并打包（在 vscode-extension 目录）
+cd vscode-extension
+npm install
+cd webview-ui
+npm install
+cd ..
+npm run vsce:package
+```
+
+构建产物：`vscode-extension\auto-code-<version>.vsix`（约 5.6 MB，内含 Go 二进制、扩展主进程、Webview 静态资源）。
+
+### 安装 .vsix
+
+1. 打开 VS Code → 扩展面板 → 右上角 `...` → **从 VSIX 安装...**
+2. 选择 `vscode-extension\auto-code-<version>.vsix`
+3. 重新加载窗口（`Ctrl+Shift+P` → `Developer: Reload Window`）
+
+### 使用方法
+
+1. 打开命令面板（`Ctrl+Shift+P` / macOS `Cmd+Shift+P`）。
+2. 执行 `Auto Code: Open Chat` 打开对话面板。
+3. 点击右上角 **⚙️ 设置**，填写 Ollama URL、API Key、模型，点击 **💾 保存配置** → **🔌 测试连接**。
+4. 在输入框输入消息，`Enter` 发送，`Shift+Enter` 换行。
+
+| 命令 | 说明 |
+| --- | --- |
+| `Auto Code: Open Chat` | 打开对话面板 |
+| `Auto Code: Restart Server` | 重启 Go 后端进程（配置变更或异常时使用） |
+
+### 配置项（settings.json）
+
+| 配置键 | 说明 | 默认值 |
+| --- | --- | --- |
+| `auto-code.serverPath` | auto-code-server 可执行文件路径，留空使用扩展自带 | `""` |
+| `auto-code.ollamaBaseUrl` | Ollama 服务地址 | `http://localhost:11434/api` |
+| `auto-code.ollamaApiKey` | Ollama API Key（本地模式留空） | `""` |
+| `auto-code.ollamaModel` | 默认模型名称 | `""` |
+
+> 修改 `settings.json` 后需执行 `Auto Code: Restart Server` 生效。
+
+更多细节见 [vscode-extension/README.md](vscode-extension/README.md)。
