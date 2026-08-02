@@ -1,32 +1,150 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { ServerClient } from './serverClient';
 import { WorkspaceManager } from './workspace';
 
+function getNonce(): string {
+  let text = '';
+  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  for (let i = 0; i < 32; i++) {
+    text += possible.charAt(Math.floor(Math.random() * possible.length));
+  }
+  return text;
+}
+
+function buildHtml(
+  webview: vscode.Webview,
+  extensionUri: vscode.Uri
+): string {
+  const distUri = vscode.Uri.joinPath(extensionUri, 'webview-ui', 'dist');
+  const scriptUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(distUri, 'assets', 'index.js')
+  );
+  const styleUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(distUri, 'assets', 'index.css')
+  );
+  const nonce = getNonce();
+
+  return /* html */ `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${webview.cspSource};" />
+  <title>Auto Code</title>
+  <link rel="stylesheet" href="${styleUri}" />
+</head>
+<body>
+  <div id="root"></div>
+  <script nonce="${nonce}" src="${scriptUri}"></script>
+</body>
+</html>`;
+}
+
 /**
- * AutoCodeWebviewPanel 管理 Webview 面板的生命周期，
- * 并在 Webview <-> 扩展主进程 <-> Go server 之间桥接消息。
+ * WebviewHost：把 Webview<->server 桥接逻辑抽离为共享类，
+ * 同时适用于 WebviewPanel（独立面板）和 WebviewView（侧边栏视图）。
+ */
+export class AutoCodeWebviewHost implements vscode.Disposable {
+  private disposables: vscode.Disposable[] = [];
+
+  constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly webview: vscode.Webview,
+    private readonly server: ServerClient,
+    private readonly workspace: WorkspaceManager,
+    private readonly onPostingMessage: (msg: unknown) => Thenable<boolean>,
+    initialWorkspaceDir: string
+  ) {
+    this.setupListeners();
+    this.postMessage({ type: 'workspace', dir: initialWorkspaceDir });
+  }
+
+  /** 构造 HTML */
+  getHtml(): string {
+    return buildHtml(this.webview, this.context.extensionUri);
+  }
+
+  /** 处理来自 Webview 的消息 */
+  async handleMessage(msg: unknown): Promise<void> {
+    if (typeof msg !== 'object' || msg === null) {
+      return;
+    }
+    const m = msg as { type?: string; id?: string; method?: string; params?: unknown };
+
+    if (m.type === 'request' && m.method) {
+      try {
+        const result = await this.server.request(m.method, m.params);
+        this.postMessage({ type: 'response', id: m.id, result });
+      } catch (err) {
+        this.postMessage({
+          type: 'response',
+          id: m.id,
+          error: (err as Error).message,
+        });
+      }
+      return;
+    }
+
+    if (m.type === 'getWorkspace') {
+      this.postMessage({
+        type: 'workspace',
+        dir: this.workspace.getCurrentWorkspace() ?? '',
+      });
+      return;
+    }
+  }
+
+  dispose(): void {
+    for (const d of this.disposables) {
+      d.dispose();
+    }
+    this.disposables.length = 0;
+  }
+
+  private postMessage(message: unknown): void {
+    void this.onPostingMessage(message);
+  }
+
+  private setupListeners(): void {
+    this.disposables.push(
+      this.webview.onDidReceiveMessage((msg) => void this.handleMessage(msg)),
+      this.server.onQueryMessage((data) => {
+        this.postMessage({ type: 'event', event: 'query:message', data });
+      }),
+      this.server.onStateChange((data) => {
+        this.postMessage({ type: 'event', event: 'state:change', data });
+      }),
+      this.workspace.onDidChangeWorkspaceFolders(() => {
+        this.postMessage({
+          type: 'workspace',
+          dir: this.workspace.getCurrentWorkspace() ?? '',
+        });
+      })
+    );
+  }
+}
+
+/**
+ * 独立 Webview 面板（命令面板 `Auto Code: Open Chat`）。
  */
 export class AutoCodeWebviewPanel implements vscode.Disposable {
   public static readonly viewType = 'autoCodeChat';
   private panel: vscode.WebviewPanel | undefined;
-  private readonly disposables: vscode.Disposable[] = [];
+  private host: AutoCodeWebviewHost | undefined;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly server: ServerClient,
-    private readonly workspace: WorkspaceManager,
-    private readonly output: vscode.OutputChannel | undefined
+    private readonly workspace: WorkspaceManager
   ) {}
 
-  /** 显示面板。如不存在则创建。 */
   async show(): Promise<void> {
     if (this.panel) {
       this.panel.reveal(vscode.ViewColumn.Active);
       return;
     }
 
-    // 确保 server 已启动
     try {
       await this.server.start();
     } catch (err) {
@@ -37,6 +155,7 @@ export class AutoCodeWebviewPanel implements vscode.Disposable {
     }
 
     const workspaceDir = this.workspace.getCurrentWorkspace() ?? '';
+
     this.panel = vscode.window.createWebviewPanel(
       AutoCodeWebviewPanel.viewType,
       'Auto Code',
@@ -50,114 +169,101 @@ export class AutoCodeWebviewPanel implements vscode.Disposable {
       }
     );
 
-    this.panel.webview.html = this.getHtmlForWebview();
-
-    this.disposables.push(
-      this.panel.onDidDispose(() => {
-        this.panel = undefined;
-      }),
-      // Webview -> 扩展主进程 -> server
-      this.panel.webview.onDidReceiveMessage((msg) => this.onMessageFromWebview(msg)),
-      // server 事件 -> Webview
-      this.server.onQueryMessage((data) => {
-        this.postMessageToWebview({ type: 'event', event: 'query:message', data });
-      }),
-      this.server.onStateChange((data) => {
-        this.postMessageToWebview({ type: 'event', event: 'state:change', data });
-      }),
-      // 工作区切换 -> 通知 Webview
-      this.workspace.onDidChangeWorkspaceFolders(() => {
-        this.postMessageToWebview({
-          type: 'workspace',
-          dir: this.workspace.getCurrentWorkspace() ?? '',
-        });
-      })
+    this.host = new AutoCodeWebviewHost(
+      this.context,
+      this.panel.webview,
+      this.server,
+      this.workspace,
+      (m) => this.panel!.webview.postMessage(m),
+      workspaceDir
     );
+    this.panel.webview.html = this.host.getHtml();
 
-    // 首次加载时推送当前工作区
-    this.postMessageToWebview({ type: 'workspace', dir: workspaceDir });
+    this.panel.onDidDispose(() => {
+      this.host?.dispose();
+      this.host = undefined;
+      this.panel = undefined;
+    });
   }
 
-  /** @inheritdoc */
   dispose(): void {
+    this.host?.dispose();
+    this.host = undefined;
     this.panel?.dispose();
     this.panel = undefined;
-    for (const d of this.disposables) {
-      d.dispose();
-    }
-    this.disposables.length = 0;
-  }
-
-  // ===== 私有方法 =====
-
-  private async onMessageFromWebview(msg: unknown): Promise<void> {
-    if (typeof msg !== 'object' || msg === null) {
-      return;
-    }
-    const m = msg as { type?: string; id?: string; method?: string; params?: unknown };
-
-    // 请求转发
-    if (m.type === 'request' && m.method) {
-      try {
-        const result = await this.server.request(m.method, m.params);
-        this.postMessageToWebview({ type: 'response', id: m.id, result });
-      } catch (err) {
-        this.postMessageToWebview({
-          type: 'response',
-          id: m.id,
-          error: (err as Error).message,
-        });
-      }
-      return;
-    }
-
-    // 工作区查询
-    if (m.type === 'getWorkspace') {
-      this.postMessageToWebview({
-        type: 'workspace',
-        dir: this.workspace.getCurrentWorkspace() ?? '',
-      });
-      return;
-    }
-  }
-
-  private postMessageToWebview(message: unknown): void {
-    this.panel?.webview.postMessage(message);
-  }
-
-  private getHtmlForWebview(): string {
-    const distUri = vscode.Uri.joinPath(this.context.extensionUri, 'webview-ui', 'dist');
-    const scriptUri = this.panel!.webview.asWebviewUri(
-      vscode.Uri.joinPath(distUri, 'assets', 'index.js')
-    );
-    const styleUri = this.panel!.webview.asWebviewUri(
-      vscode.Uri.joinPath(distUri, 'assets', 'index.css')
-    );
-    const nonce = getNonce();
-
-    return /* html */ `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; style-src ${this.panel!.webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${this.panel!.webview.cspSource};" />
-  <title>Auto Code</title>
-  <link rel="stylesheet" href="${styleUri}" />
-</head>
-<body>
-  <div id="root"></div>
-  <script nonce="${nonce}" src="${scriptUri}"></script>
-</body>
-</html>`;
   }
 }
 
-function getNonce(): string {
-  let text = '';
-  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  for (let i = 0; i < 32; i++) {
-    text += possible.charAt(Math.floor(Math.random() * possible.length));
+/**
+ * 侧边栏视图（WebviewViewProvider）——通过点击活动栏图标打开。
+ */
+export class AutoCodeSidebarProvider implements vscode.WebviewViewProvider {
+  public static readonly viewId = 'auto-code.chat';
+  private view: vscode.WebviewView | undefined;
+  private host: AutoCodeWebviewHost | undefined;
+
+  constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly server: ServerClient,
+    private readonly workspace: WorkspaceManager
+  ) {}
+
+  /** 以编程方式聚焦侧边栏视图。 */
+  async reveal(): Promise<void> {
+    try {
+      await this.server.start();
+    } catch (err) {
+      vscode.window.showErrorMessage(
+        `启动 Auto Code server 失败: ${(err as Error).message}\n请检查 auto-code.serverPath 配置`
+      );
+    }
+    await vscode.commands.executeCommand(
+      'setContext',
+      'auto-code:sidebarFocused',
+      true
+    );
   }
-  return text;
+
+  resolveWebviewView(
+    webviewView: vscode.WebviewView,
+    _context: vscode.WebviewViewResolveContext<unknown>,
+    _token: vscode.CancellationToken
+  ): void | Thenable<void> {
+    this.view = webviewView;
+
+    webviewView.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [
+        vscode.Uri.joinPath(this.context.extensionUri, 'webview-ui', 'dist'),
+      ],
+    };
+
+    void (async () => {
+      try {
+        await this.server.start();
+      } catch (err) {
+        vscode.window.showErrorMessage(
+          `启动 Auto Code server 失败: ${(err as Error).message}`
+        );
+      }
+      const workspaceDir = this.workspace.getCurrentWorkspace() ?? '';
+
+      this.host?.dispose();
+      this.host = new AutoCodeWebviewHost(
+        this.context,
+        webviewView.webview,
+        this.server,
+        this.workspace,
+        (m) => webviewView.webview.postMessage(m),
+        workspaceDir
+      );
+      webviewView.webview.html = this.host.getHtml();
+    })();
+
+    webviewView.onDidDispose(() => {
+      this.host?.dispose();
+      this.host = undefined;
+      this.view = undefined;
+    });
+  }
 }

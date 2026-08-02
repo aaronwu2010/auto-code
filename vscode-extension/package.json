@@ -21,11 +21,31 @@
     "onStartupFinished"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "auto-code",
+          "title": "Auto Code",
+          "icon": "resources/auto-code.svg"
+        }
+      ]
+    },
+    "views": {
+      "auto-code": [
+        {
+          "type": "webview",
+          "id": "auto-code.chat",
+          "name": "Chat",
+          "contextualTitle": "Auto Code Chat"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "auto-code.openChat",
         "title": "Auto Code: Open Chat",
-        "category": "Auto Code"
+        "category": "Auto Code",
+        "icon": "$(comment-discussion)"
       },
       {
         "command": "auto-code.restartServer",
@@ -33,6 +53,15 @@
         "category": "Auto Code"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "auto-code.restartServer",
+          "when": "view == auto-code.chat",
+          "group": "navigation@10"
+        }
+      ]
+    },
     "configuration": {
       "title": "Auto Code",
       "properties": {
