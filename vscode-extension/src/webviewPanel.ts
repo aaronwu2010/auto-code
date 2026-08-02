@@ -126,7 +126,7 @@ export class AutoCodeWebviewHost implements vscode.Disposable {
 }
 
 /**
- * 独立 Webview 面板（命令面板 `Auto Code: Open Chat`）。
+ * 独立 Webview 面板（命令面板 `Auto Code: Open Chat`、Explorer 标题栏图标）。
  */
 export class AutoCodeWebviewPanel implements vscode.Disposable {
   public static readonly viewType = 'autoCodeChat';
@@ -139,10 +139,20 @@ export class AutoCodeWebviewPanel implements vscode.Disposable {
     private readonly workspace: WorkspaceManager
   ) {}
 
-  async show(): Promise<void> {
+  /** 显示面板。默认在编辑器最右侧列（ViewColumn.Beside）打开，大方框效果。 */
+  async show(targetColumn: vscode.ViewColumn = vscode.ViewColumn.Beside): Promise<void> {
     if (this.panel) {
-      this.panel.reveal(vscode.ViewColumn.Active);
-      return;
+      // 若面板已经存在但列不同，先切列再 reveal
+      const current = (this.panel as WebviewPanelWithColumn).viewColumn;
+      if (current && current !== targetColumn) {
+        this.host?.dispose();
+        this.panel.dispose();
+        this.panel = undefined;
+        this.host = undefined;
+      } else {
+        this.panel.reveal(targetColumn);
+        return;
+      }
     }
 
     try {
@@ -159,7 +169,7 @@ export class AutoCodeWebviewPanel implements vscode.Disposable {
     this.panel = vscode.window.createWebviewPanel(
       AutoCodeWebviewPanel.viewType,
       'Auto Code',
-      vscode.ViewColumn.Active,
+      { viewColumn: targetColumn, preserveFocus: false },
       {
         enableScripts: true,
         retainContextWhenHidden: true,
@@ -194,13 +204,20 @@ export class AutoCodeWebviewPanel implements vscode.Disposable {
   }
 }
 
+type WebviewPanelWithColumn = vscode.WebviewPanel & { viewColumn?: vscode.ViewColumn };
+
 /**
- * 侧边栏视图（WebviewViewProvider）——通过点击活动栏图标打开。
+ * 侧边栏/面板视图（WebviewViewProvider）——通过点击活动栏或面板图标打开。
+ * 同一个 Provider 类支持多个 viewId：右侧 Secondary Side Bar（`auto-code.chat`）和底部 Panel（`auto-code.panelChat`）。
  */
 export class AutoCodeSidebarProvider implements vscode.WebviewViewProvider {
-  public static readonly viewId = 'auto-code.chat';
-  private view: vscode.WebviewView | undefined;
-  private host: AutoCodeWebviewHost | undefined;
+  public static readonly sideBarViewId = 'auto-code.chat';          // Secondary Side Bar (右侧)
+  public static readonly activityViewId = 'auto-code.activityChat'; // Activity Bar (左侧)
+  public static readonly panelViewId = 'auto-code.panelChat';       // Panel (底部/拖到右侧)
+  private static readonly secondarySidebarContainerId = 'auto-code';
+
+  private readonly hosts = new Map<string, AutoCodeWebviewHost>();
+  private readonly views = new Map<string, vscode.WebviewView>();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -208,7 +225,7 @@ export class AutoCodeSidebarProvider implements vscode.WebviewViewProvider {
     private readonly workspace: WorkspaceManager
   ) {}
 
-  /** 以编程方式聚焦侧边栏视图。 */
+  /** 以编程方式打开 Chat 界面：优先展开右侧 Secondary Side Bar → Auto Code（代码旁边的位置） */
   async reveal(): Promise<void> {
     try {
       await this.server.start();
@@ -217,19 +234,39 @@ export class AutoCodeSidebarProvider implements vscode.WebviewViewProvider {
         `启动 Auto Code server 失败: ${(err as Error).message}\n请检查 auto-code.serverPath 配置`
       );
     }
-    await vscode.commands.executeCommand(
-      'setContext',
-      'auto-code:sidebarFocused',
-      true
-    );
+    // workbench.view.extension.<containerId> 会自动展开对应容器（右侧 Secondary Side Bar 会被自动打开）
+    try {
+      await vscode.commands.executeCommand(
+        `workbench.view.extension.${AutoCodeSidebarProvider.secondarySidebarContainerId}`
+      );
+      return;
+    } catch {
+      // ignore, fallthrough
+    }
+    try {
+      // 兜底：直接尝试聚焦具体 viewId
+      await vscode.commands.executeCommand(
+        `${AutoCodeSidebarProvider.sideBarViewId}.focus`
+      );
+      return;
+    } catch {
+      // ignore, fallthrough
+    }
+    try {
+      // 再兜底：打开 panel 容器
+      await vscode.commands.executeCommand('workbench.view.extension.auto-code-panel');
+    } catch {
+      // ignore
+    }
   }
 
   resolveWebviewView(
     webviewView: vscode.WebviewView,
-    _context: vscode.WebviewViewResolveContext<unknown>,
+    context: vscode.WebviewViewResolveContext<unknown>,
     _token: vscode.CancellationToken
   ): void | Thenable<void> {
-    this.view = webviewView;
+    const viewId = context.viewId ?? webviewView.viewType;
+    this.views.set(viewId, webviewView);
 
     webviewView.webview.options = {
       enableScripts: true,
@@ -248,8 +285,8 @@ export class AutoCodeSidebarProvider implements vscode.WebviewViewProvider {
       }
       const workspaceDir = this.workspace.getCurrentWorkspace() ?? '';
 
-      this.host?.dispose();
-      this.host = new AutoCodeWebviewHost(
+      this.hosts.get(viewId)?.dispose();
+      const host = new AutoCodeWebviewHost(
         this.context,
         webviewView.webview,
         this.server,
@@ -257,13 +294,20 @@ export class AutoCodeSidebarProvider implements vscode.WebviewViewProvider {
         (m) => webviewView.webview.postMessage(m),
         workspaceDir
       );
-      webviewView.webview.html = this.host.getHtml();
+      this.hosts.set(viewId, host);
+      webviewView.webview.html = host.getHtml();
     })();
 
     webviewView.onDidDispose(() => {
-      this.host?.dispose();
-      this.host = undefined;
-      this.view = undefined;
+      this.hosts.get(viewId)?.dispose();
+      this.hosts.delete(viewId);
+      this.views.delete(viewId);
     });
+  }
+
+  dispose(): void {
+    for (const host of this.hosts.values()) host.dispose();
+    this.hosts.clear();
+    this.views.clear();
   }
 }

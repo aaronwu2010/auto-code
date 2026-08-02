@@ -24,17 +24,47 @@
     "viewsContainers": {
       "activitybar": [
         {
+          "id": "auto-code-activity",
+          "title": "Auto Code",
+          "icon": "resources/auto-code.svg"
+        }
+      ],
+      "secondarySidebar": [
+        {
           "id": "auto-code",
+          "title": "Auto Code",
+          "icon": "resources/auto-code.svg"
+        }
+      ],
+      "panel": [
+        {
+          "id": "auto-code-panel",
           "title": "Auto Code",
           "icon": "resources/auto-code.svg"
         }
       ]
     },
     "views": {
+      "auto-code-activity": [
+        {
+          "type": "webview",
+          "id": "auto-code.activityChat",
+          "name": "Chat",
+          "contextualTitle": "Auto Code Chat"
+        }
+      ],
       "auto-code": [
         {
           "type": "webview",
           "id": "auto-code.chat",
+          "name": "Chat",
+          "contextualTitle": "Auto Code Chat"
+        }
+      ],
+      "auto-code-panel": [
+        {
+          "type": "webview",
+          "id": "auto-code.panelChat",
           "name": "Chat",
           "contextualTitle": "Auto Code Chat"
         }
@@ -48,6 +78,12 @@
         "icon": "$(comment-discussion)"
       },
       {
+        "command": "auto-code.openChatSidebar",
+        "title": "Auto Code: Open Chat in Sidebar",
+        "category": "Auto Code",
+        "icon": "$(comment-discussion)"
+      },
+      {
         "command": "auto-code.restartServer",
         "title": "Auto Code: Restart Server",
         "category": "Auto Code"
@@ -56,8 +92,13 @@
     "menus": {
       "view/title": [
         {
+          "command": "auto-code.openChat",
+          "when": "view == workbench.explorer.fileView",
+          "group": "navigation@100"
+        },
+        {
           "command": "auto-code.restartServer",
-          "when": "view == auto-code.chat",
+          "when": "view == auto-code.chat || view == auto-code.activityChat || view == auto-code.panelChat",
           "group": "navigation@10"
         }
       ]

@@ -20,13 +20,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   serverClient = new ServerClient(context, outputChannel);
   context.subscriptions.push(serverClient);
 
-  // 侧边栏视图
+  // 共享的 WebviewViewProvider：同时挂到 3 个容器
+  //  - Secondary Side Bar (代码旁边，用户首选位置)  viewId = auto-code.chat
+  //  - Activity Bar (左侧，保留原有图标入口)       viewId = auto-code.activityChat
+  //  - Panel (底部面板，可拖拽到右侧)               viewId = auto-code.panelChat
   sidebarProvider = new AutoCodeSidebarProvider(context, serverClient, workspaceManager);
+  const commonViewOptions = { webviewOptions: { retainContextWhenHidden: true } };
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
-      AutoCodeSidebarProvider.viewId,
+      AutoCodeSidebarProvider.sideBarViewId,
       sidebarProvider,
-      { webviewOptions: { retainContextWhenHidden: true } }
+      commonViewOptions
+    ),
+    vscode.window.registerWebviewViewProvider(
+      AutoCodeSidebarProvider.activityViewId,
+      sidebarProvider,
+      commonViewOptions
+    ),
+    vscode.window.registerWebviewViewProvider(
+      AutoCodeSidebarProvider.panelViewId,
+      sidebarProvider,
+      commonViewOptions
     )
   );
 
@@ -35,10 +49,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(webviewPanel);
 
   context.subscriptions.push(
+    // 主要入口（Explorer 标题栏图标 + 命令面板默认）→ 在最右侧编辑器列打开（大方框效果）
     vscode.commands.registerCommand('auto-code.openChat', () => {
-      // 优先聚焦侧边栏视图（用户可见度更高）；同时保留面板以备用户调用。
+      webviewPanel?.show(vscode.ViewColumn.Beside);
+    }),
+    // 备用入口：在 Secondary Side Bar 显示（如果用户喜欢右侧列窄视图）
+    vscode.commands.registerCommand('auto-code.openChatSidebar', () => {
       sidebarProvider?.reveal().catch(() => {
-        webviewPanel?.show();
+        webviewPanel?.show(vscode.ViewColumn.Beside);
       });
     }),
     vscode.commands.registerCommand('auto-code.restartServer', async () => {
