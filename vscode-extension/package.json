@@ -89,6 +89,14 @@
         "category": "Auto Code"
       }
     ],
+    "keybindings": [
+      {
+        "command": "auto-code.openChat",
+        "key": "ctrl+alt+i",
+        "mac": "cmd+alt+i",
+        "when": "!chatInputFocus && !inputFocus"
+      }
+    ],
     "menus": {
       "view/title": [
         {
