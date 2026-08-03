@@ -36,14 +36,22 @@ function App() {
   const [workspaceDir, setWorkspaceDir] = useState<string>("");
   const [streamingMessage, setStreamingMessage] = useState<Message | null>(null);
   const [isToolCalling, setIsToolCalling] = useState(false);
+  const [phaseHint, setPhaseHint] = useState<string>("");
 
   const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, []);
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, scrollToBottom]);
+  }, [messages, streamingMessage, isToolCalling, phaseHint, scrollToBottom]);
+
+  // 每隔 120ms 强制滚动到底（针对流式追加时高频不 scroll 的兜底）
+  useEffect(() => {
+    if (!isLoading) return;
+    const t = window.setInterval(scrollToBottom, 120);
+    return () => window.clearInterval(t);
+  }, [isLoading, scrollToBottom]);
 
   useEffect(() => {
     if (showSettings && models.length === 0 && !loadingModels) {
@@ -119,18 +127,55 @@ function App() {
     const offQuery = api.onQueryMessage((msg: SDKMessage) => {
       try {
         if (msg.type === "stream_chunk" && msg.message) {
-          setStreamingMessage(msg.message);
-          setIsToolCalling(false);
+          setStreamingMessage((prev) => {
+            // 只有在内容/思考变长（或首条）时才替换，避免覆盖"更长的版本"
+            if (!prev) return msg.message!;
+            const newContent = msg.message!.content ?? "";
+            const oldContent = prev.content ?? "";
+            const newThinking = msg.message!.thinking ?? "";
+            const oldThinking = prev.thinking ?? "";
+            if (
+              newContent.length >= oldContent.length ||
+              newThinking.length >= oldThinking.length
+            ) {
+              return msg.message!;
+            }
+            return prev;
+          });
+          setIsToolCalling(
+            (msg.message.tool_calls && msg.message.tool_calls.length > 0) || isToolCalling
+          );
+          setPhaseHint("");
         } else if (msg.type === "tool_calls_start") {
           setIsToolCalling(true);
-        } else if (msg.type === "assistant" && msg.message) {
-          setStreamingMessage(null);
-          setIsToolCalling(false);
+          setPhaseHint("正在调用工具（读取文件/执行命令）...");
+        } else if (msg.type === "user" && msg.message) {
           setMessages((prev) => {
             const exists = prev.some((m) => m.id === msg.message!.id);
             if (exists) return prev;
             return [...prev, msg.message!];
           });
+          setPhaseHint("已发送，模型正在思考...");
+        } else if (msg.type === "assistant" && msg.message) {
+          setStreamingMessage(null);
+          setIsToolCalling(false);
+          setPhaseHint("");
+          setMessages((prev) => {
+            const exists = prev.some((m) => m.id === msg.message!.id);
+            if (exists) return prev;
+            return [...prev, msg.message!];
+          });
+        } else if (msg.type === "system" && msg.message) {
+          setMessages((prev) => {
+            const exists = prev.some((m) => m.id === msg.message!.id);
+            if (exists) return prev;
+            return [...prev, msg.message!];
+          });
+        } else if (msg.type === "stream_event") {
+          const d = msg.data as Record<string, unknown> | undefined;
+          if (d && typeof d.model === "string") {
+            setPhaseHint(`模型推理中 · ${String(d.model)}`);
+          }
         } else if (msg.message) {
           setMessages((prev) => {
             const exists = prev.some((m) => m.id === msg.message!.id);
@@ -138,10 +183,11 @@ function App() {
             return [...prev, msg.message!];
           });
         }
-        if (msg.type === "result" || msg.type === "error") {
+        if (msg.type === "result" || msg.type === "error" || msg.type === "interrupted") {
           setIsLoading(false);
           setStreamingMessage(null);
           setIsToolCalling(false);
+          setPhaseHint("");
         }
       } catch {
         /* ignore */
@@ -533,14 +579,35 @@ function App() {
               </div>
             )}
             {messages.map(renderMessage)}
-            {streamingMessage && (
+            {(isLoading || streamingMessage || isToolCalling) && (
               <div className="mb-4 px-4 py-3 rounded-2xl max-w-[85%] bg-slate-800/60 border border-slate-700/50 text-slate-200 shadow-sm">
-                <div className="text-[10px] mb-2 font-semibold uppercase tracking-wider text-slate-500">
-                  assistant
+                <div className="flex items-center gap-2 text-[10px] mb-2 font-semibold uppercase tracking-wider text-slate-500">
+                  <span>assistant</span>
+                  {phaseHint && (
+                    <span className="ml-auto text-[10px] text-slate-500 normal-case tracking-normal">
+                      {phaseHint}
+                    </span>
+                  )}
                 </div>
+                {/* Thinking（流式：默认展开，实时追加） */}
+                {streamingMessage?.thinking && (
+                  <details
+                    open
+                    className="bg-violet-900/15 border border-violet-800/40 rounded-lg px-3 py-2 my-1.5"
+                  >
+                    <summary className="text-xs text-violet-400 cursor-pointer hover:text-violet-300 transition-colors select-none">
+                      💭 思考过程（{streamingMessage.thinking.length} 字，实时追加）
+                    </summary>
+                    <pre className="whitespace-pre-wrap break-words text-xs text-slate-500 mt-2 max-h-64 overflow-y-auto">
+                      {streamingMessage.thinking}
+                      <span className="inline-block w-1.5 h-3 bg-violet-400 ml-0.5 align-middle animate-pulse rounded-sm" />
+                    </pre>
+                  </details>
+                )}
+                {/* Content（流式，实时追加 + 光标） */}
                 <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
-                  {streamingMessage.content}
-                  {!streamingMessage.content && isToolCalling ? (
+                  {streamingMessage?.content || ""}
+                  {!streamingMessage?.content && isToolCalling && !phaseHint ? (
                     <span className="flex items-center gap-2 text-amber-400">
                       <span className="flex gap-1">
                         <span
@@ -559,62 +626,43 @@ function App() {
                       正在调用工具...
                     </span>
                   ) : (
-                    <span className="inline-block w-2 h-4 bg-sky-400 ml-0.5 align-middle animate-pulse rounded-sm"></span>
+                    <span className="inline-block w-2 h-4 bg-sky-400 ml-0.5 align-middle animate-pulse rounded-sm" />
                   )}
                 </div>
-                {streamingMessage.thinking && (
-                  <details className="bg-violet-900/10 border border-violet-800/30 rounded-lg px-3 py-2 my-1.5">
-                    <summary className="text-xs text-violet-400 cursor-pointer hover:text-violet-300 transition-colors select-none">
-                      💭 思考过程...
-                    </summary>
-                    <pre className="whitespace-pre-wrap break-words text-xs text-slate-500 mt-2">
-                      {streamingMessage.thinking}
-                    </pre>
-                  </details>
+                {/* ToolCall 预览卡片（当 tool_calls 出现时即时展示） */}
+                {streamingMessage?.tool_calls && streamingMessage.tool_calls.length > 0 && (
+                  <div className="mt-2 space-y-1.5">
+                    {streamingMessage.tool_calls.map((tc, i) => (
+                      <div
+                        key={i}
+                        className="rounded-lg px-3 py-2 bg-amber-900/20 border border-amber-800/40 text-xs"
+                      >
+                        <div className="text-amber-400 font-medium mb-1 flex items-center gap-1.5">
+                          🔧 {tc.name || `tool_${i}`}
+                          {tc.id && <span className="text-[10px] text-slate-500">#{tc.id.slice(0, 8)}</span>}
+                        </div>
+                        {tc.input && (
+                          <pre className="whitespace-pre-wrap break-words text-slate-400 max-h-40 overflow-y-auto">
+                            {typeof tc.input === "string"
+                              ? tc.input
+                              : JSON.stringify(tc.input, null, 2)}
+                          </pre>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 )}
-              </div>
-            )}
-            {isToolCalling && !streamingMessage && (
-              <div className="mb-4 px-4 py-3 rounded-2xl max-w-[85%] bg-slate-800/60 border border-slate-700/50 text-slate-200 shadow-sm">
-                <div className="text-[10px] mb-2 font-semibold uppercase tracking-wider text-slate-500">
-                  assistant
-                </div>
-                <div className="flex items-center gap-2 text-amber-400 text-sm">
-                  <span className="flex gap-1">
-                    <span
-                      className="w-2 h-2 bg-amber-400 rounded-full animate-bounce"
-                      style={{ animationDelay: "0ms" }}
-                    ></span>
-                    <span
-                      className="w-2 h-2 bg-amber-400 rounded-full animate-bounce"
-                      style={{ animationDelay: "150ms" }}
-                    ></span>
-                    <span
-                      className="w-2 h-2 bg-amber-400 rounded-full animate-bounce"
-                      style={{ animationDelay: "300ms" }}
-                    ></span>
-                  </span>
-                  正在调用工具...
-                </div>
-              </div>
-            )}
-            {isLoading && !streamingMessage && (
-              <div className="flex items-center gap-3 text-slate-500 text-sm px-4 py-3">
-                <div className="flex gap-1">
-                  <span
-                    className="w-2 h-2 bg-sky-400 rounded-full animate-bounce"
-                    style={{ animationDelay: "0ms" }}
-                  ></span>
-                  <span
-                    className="w-2 h-2 bg-sky-400 rounded-full animate-bounce"
-                    style={{ animationDelay: "150ms" }}
-                  ></span>
-                  <span
-                    className="w-2 h-2 bg-sky-400 rounded-full animate-bounce"
-                    style={{ animationDelay: "300ms" }}
-                  ></span>
-                </div>
-                <span>正在思考中...</span>
+                {/* 没有 streamingMessage，但处于 tool_calls_start 或 phaseHint 的兜底显示 */}
+                {!streamingMessage && (phaseHint || isToolCalling) && (
+                  <div className="flex items-center gap-2 text-amber-400 text-sm pt-1">
+                    <span className="flex gap-1">
+                      <span className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }}></span>
+                      <span className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }}></span>
+                      <span className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }}></span>
+                    </span>
+                    <span>{phaseHint || "正在处理..."}</span>
+                  </div>
+                )}
               </div>
             )}
             <div ref={messagesEndRef} />

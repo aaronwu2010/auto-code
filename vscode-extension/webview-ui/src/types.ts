@@ -11,6 +11,13 @@ export interface Message {
   timestamp: number;
   is_meta?: boolean;
   uuid?: string;
+  tool_calls?: ToolCallState[];
+}
+
+export interface ToolCallState {
+  id?: string;
+  name?: string;
+  input?: string | Record<string, unknown>;
 }
 
 export interface ContentBlock {

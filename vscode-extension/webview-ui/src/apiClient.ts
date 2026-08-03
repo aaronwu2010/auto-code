@@ -132,7 +132,7 @@ function requestWorkspace(): void {
 export const api = {
   // ===== 消息 =====
   sendMessage(prompt: string): Promise<{ success: boolean; error?: string; session_id?: string }> {
-    return request("send_message", { prompt });
+    return request("send_message", { prompt }, 300000); // 5 分钟长推理容忍
   },
   interrupt(): Promise<{ ok: boolean }> {
     return request("interrupt", {});
