@@ -3,6 +3,7 @@ package toosearch
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/auto-code/auto-code/internal/tools"
 )
@@ -43,9 +44,18 @@ func (t *ToolSearchTool) SetTools(allTools []tools.Tool) {
 }
 
 func (t *ToolSearchTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(ToolSearchInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp ToolSearchInput
+	switch v := input.(type) {
+	case ToolSearchInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseToolSearchInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for ToolSearchTool: expected ToolSearchInput or map[string]any, got %T", input)
 	}
 
 	var results []map[string]string
@@ -102,6 +112,17 @@ Usage:
 - Use this when you need a specialized tool and it's not in the currently available tools
 - The query can be a tool name or a keyword from the description
 - Matching tools will be loaded immediately for subsequent use`, nil
+}
+
+func ParseToolSearchInput(raw map[string]any) (ToolSearchInput, error) {
+	inp := ToolSearchInput{}
+	if v, ok := raw["query"].(string); ok {
+		inp.Query = v
+	}
+	if strings.TrimSpace(inp.Query) == "" {
+		return inp, fmt.Errorf("query is required")
+	}
+	return inp, nil
 }
 
 func containsIgnoreCase(s, substr string) bool {

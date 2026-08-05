@@ -1,12 +1,14 @@
-﻿package team
+package team
 
 import (
-	"time"
 	"context"
 	"fmt"
+	"strings"
 	"sync"
-		"github.com/auto-code/auto-code/internal/tools"
-	)
+	"time"
+
+	"github.com/auto-code/auto-code/internal/tools"
+)
 
 const maxResultChars = 100000
 
@@ -68,9 +70,18 @@ func NewTeamDeleteTool() *TeamDeleteTool {
 }
 
 func (t *TeamCreateTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(TeamCreateInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp TeamCreateInput
+	switch v := input.(type) {
+	case TeamCreateInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseTeamCreateInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for TeamCreateTool: expected TeamCreateInput or map[string]any, got %T", input)
 	}
 	teamID := fmt.Sprintf("team_%d", time.Now().UnixNano())
 	team := &TeamData{
@@ -89,11 +100,20 @@ func (t *TeamCreateTool) Prompt(_ context.Context, _ tools.PromptOptions) (strin
 }
 
 func (t *TeamDeleteTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(TeamDeleteInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp TeamDeleteInput
+	switch v := input.(type) {
+	case TeamDeleteInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseTeamDeleteInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for TeamDeleteTool: expected TeamDeleteInput or map[string]any, got %T", input)
 	}
-	_, ok = teamStore.LoadAndDelete(inp.TeamID)
+	_, ok := teamStore.LoadAndDelete(inp.TeamID)
 	if !ok {
 		return &tools.ToolResult{Data: fmt.Sprintf("Team not found: %s", inp.TeamID)}, nil
 	}
@@ -102,4 +122,41 @@ func (t *TeamDeleteTool) Call(ctx context.Context, input any, toolCtx *tools.Too
 
 func (t *TeamDeleteTool) Prompt(_ context.Context, _ tools.PromptOptions) (string, error) {
 	return "Delete a team by its ID.", nil
+}
+
+func ParseTeamCreateInput(raw map[string]any) (TeamCreateInput, error) {
+	inp := TeamCreateInput{}
+	if v, ok := raw["name"].(string); ok {
+		inp.Name = v
+	}
+	if v, ok := raw["description"].(string); ok {
+		inp.Description = v
+	}
+	if rawMembers, ok := raw["members"].([]any); ok {
+		inp.Members = make([]string, 0, len(rawMembers))
+		for i, m := range rawMembers {
+			if s, ok := m.(string); ok {
+				inp.Members = append(inp.Members, s)
+			} else {
+				return inp, fmt.Errorf("members[%d] must be a string", i)
+			}
+		}
+	} else if rawSlice, ok := raw["members"].([]string); ok {
+		inp.Members = rawSlice
+	}
+	if strings.TrimSpace(inp.Name) == "" {
+		return inp, fmt.Errorf("name is required")
+	}
+	return inp, nil
+}
+
+func ParseTeamDeleteInput(raw map[string]any) (TeamDeleteInput, error) {
+	inp := TeamDeleteInput{}
+	if v, ok := raw["team_id"].(string); ok {
+		inp.TeamID = v
+	}
+	if strings.TrimSpace(inp.TeamID) == "" {
+		return inp, fmt.Errorf("team_id is required")
+	}
+	return inp, nil
 }

@@ -1,4 +1,4 @@
-﻿package webfetch
+package webfetch
 
 import (
 	"context"
@@ -72,9 +72,18 @@ func (t *WebFetchTool) CheckPermissions(_ context.Context, input any, toolCtx *t
 }
 
 func (t *WebFetchTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(WebFetchInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type for WebFetchTool")
+	var inp WebFetchInput
+	switch v := input.(type) {
+	case WebFetchInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseWebFetchInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for WebFetchTool: expected WebFetchInput or map[string]any, got %T", input)
 	}
 
 	url := inp.URL

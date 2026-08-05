@@ -1,4 +1,4 @@
-﻿package snip
+package snip
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -72,9 +73,18 @@ func NewSnipTool() *SnipTool {
 }
 
 func (t *SnipTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(SnipInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp SnipInput
+	switch v := input.(type) {
+	case SnipInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseSnipInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for SnipTool: expected SnipInput or map[string]any, got %T", input)
 	}
 
 	category := inp.Category
@@ -148,4 +158,18 @@ func (t *SnipTool) saveToFile() bool {
 
 func (t *SnipTool) Prompt(_ context.Context, _ tools.PromptOptions) (string, error) {
 	return "Capture a snippet of text for later reference. Useful for saving intermediate results or important context.", nil
+}
+
+func ParseSnipInput(raw map[string]any) (SnipInput, error) {
+	inp := SnipInput{}
+	if v, ok := raw["content"].(string); ok {
+		inp.Content = v
+	}
+	if v, ok := raw["category"].(string); ok {
+		inp.Category = v
+	}
+	if strings.TrimSpace(inp.Content) == "" {
+		return inp, fmt.Errorf("content is required")
+	}
+	return inp, nil
 }

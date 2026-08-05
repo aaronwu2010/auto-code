@@ -1,4 +1,4 @@
-﻿package sleep
+package sleep
 
 import (
 	"time"
@@ -38,9 +38,18 @@ func NewSleepTool() *SleepTool {
 }
 
 func (t *SleepTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(SleepInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp SleepInput
+	switch v := input.(type) {
+	case SleepInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseSleepInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for SleepTool: expected SleepInput or map[string]any, got %T", input)
 	}
 	if inp.DurationMs <= 0 {
 		return nil, fmt.Errorf("duration_ms must be positive")
@@ -59,4 +68,17 @@ func (t *SleepTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseC
 
 func (t *SleepTool) Prompt(_ context.Context, _ tools.PromptOptions) (string, error) {
 	return "Delay execution for a specified duration in milliseconds. Maximum 5 minutes.", nil
+}
+
+func ParseSleepInput(raw map[string]any) (SleepInput, error) {
+	inp := SleepInput{}
+	if v, ok := raw["duration_ms"].(float64); ok {
+		inp.DurationMs = int(v)
+	} else if v, ok := raw["duration_ms"].(int); ok {
+		inp.DurationMs = v
+	}
+	if inp.DurationMs <= 0 {
+		return inp, fmt.Errorf("duration_ms is required and must be positive")
+	}
+	return inp, nil
 }

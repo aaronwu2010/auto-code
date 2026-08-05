@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/auto-code/auto-code/internal/tools"
 	"github.com/auto-code/auto-code/internal/utils/executil"
@@ -64,9 +65,18 @@ func NewExitWorktreeTool() *WorktreeTool {
 
 func (t *WorktreeTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
 	if t.isEnter {
-		inp, ok := input.(WorktreeInput)
-		if !ok {
-			return nil, fmt.Errorf("invalid input type")
+		var inp WorktreeInput
+		switch v := input.(type) {
+		case WorktreeInput:
+			inp = v
+		case map[string]any:
+			parsed, err := ParseWorktreeInput(v)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse input: %w", err)
+			}
+			inp = parsed
+		default:
+			return nil, fmt.Errorf("invalid input type for WorktreeTool: expected WorktreeInput or map[string]any, got %T", input)
 		}
 		if inp.Path == "" {
 			return &tools.ToolResult{Data: WorktreeOutput{Action: "enter", Message: "path is required"}}, nil
@@ -115,4 +125,15 @@ func (t *WorktreeTool) Prompt(_ context.Context, _ tools.PromptOptions) (string,
 		return "Enter a git worktree for isolated work. Creates a new working directory linked to the same repository.", nil
 	}
 	return "Exit the current git worktree and return to the main working directory.", nil
+}
+
+func ParseWorktreeInput(raw map[string]any) (WorktreeInput, error) {
+	inp := WorktreeInput{}
+	if v, ok := raw["path"].(string); ok {
+		inp.Path = v
+	}
+	if strings.TrimSpace(inp.Path) == "" {
+		return inp, fmt.Errorf("path is required")
+	}
+	return inp, nil
 }

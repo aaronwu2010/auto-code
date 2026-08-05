@@ -1,8 +1,9 @@
-﻿package task
+package task
 
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -167,9 +168,18 @@ func NewTaskUpdateTool() *TaskUpdateTool {
 }
 
 func (t *TaskCreateTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(TaskCreateInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp TaskCreateInput
+	switch v := input.(type) {
+	case TaskCreateInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseTaskCreateInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for TaskCreateTool: expected TaskCreateInput or map[string]any, got %T", input)
 	}
 	taskID := fmt.Sprintf("task_%d", time.Now().UnixNano())
 	task := &TaskData{
@@ -190,9 +200,18 @@ func (t *TaskCreateTool) Prompt(_ context.Context, _ tools.PromptOptions) (strin
 }
 
 func (t *TaskGetTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(TaskGetInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp TaskGetInput
+	switch v := input.(type) {
+	case TaskGetInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseTaskGetInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for TaskGetTool: expected TaskGetInput or map[string]any, got %T", input)
 	}
 	val, ok := taskStore.Load(inp.TaskID)
 	if !ok {
@@ -221,9 +240,18 @@ func (t *TaskListTool) Prompt(_ context.Context, _ tools.PromptOptions) (string,
 }
 
 func (t *TaskOutputTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(TaskOutputInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp TaskOutputInput
+	switch v := input.(type) {
+	case TaskOutputInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseTaskOutputInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for TaskOutputTool: expected TaskOutputInput or map[string]any, got %T", input)
 	}
 	val, ok := taskStore.Load(inp.TaskID)
 	if !ok {
@@ -238,9 +266,18 @@ func (t *TaskOutputTool) Prompt(_ context.Context, _ tools.PromptOptions) (strin
 }
 
 func (t *TaskStopTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(TaskStopInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp TaskStopInput
+	switch v := input.(type) {
+	case TaskStopInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseTaskStopInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for TaskStopTool: expected TaskStopInput or map[string]any, got %T", input)
 	}
 	val, ok := taskStore.Load(inp.TaskID)
 	if !ok {
@@ -258,9 +295,18 @@ func (t *TaskStopTool) Prompt(_ context.Context, _ tools.PromptOptions) (string,
 }
 
 func (t *TaskUpdateTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(TaskUpdateInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp TaskUpdateInput
+	switch v := input.(type) {
+	case TaskUpdateInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseTaskUpdateInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for TaskUpdateTool: expected TaskUpdateInput or map[string]any, got %T", input)
 	}
 	val, ok := taskStore.Load(inp.TaskID)
 	if !ok {
@@ -295,4 +341,74 @@ func GetTask(taskID string) *TaskData {
 		return nil
 	}
 	return t
+}
+
+func ParseTaskCreateInput(raw map[string]any) (TaskCreateInput, error) {
+	inp := TaskCreateInput{}
+	if v, ok := raw["title"].(string); ok {
+		inp.Title = v
+	}
+	if v, ok := raw["description"].(string); ok {
+		inp.Description = v
+	}
+	if v, ok := raw["active_form"].(string); ok {
+		inp.ActiveForm = v
+	}
+	if strings.TrimSpace(inp.Title) == "" {
+		return inp, fmt.Errorf("title is required")
+	}
+	return inp, nil
+}
+
+func ParseTaskGetInput(raw map[string]any) (TaskGetInput, error) {
+	inp := TaskGetInput{}
+	if v, ok := raw["task_id"].(string); ok {
+		inp.TaskID = v
+	}
+	if strings.TrimSpace(inp.TaskID) == "" {
+		return inp, fmt.Errorf("task_id is required")
+	}
+	return inp, nil
+}
+
+func ParseTaskOutputInput(raw map[string]any) (TaskOutputInput, error) {
+	inp := TaskOutputInput{}
+	if v, ok := raw["task_id"].(string); ok {
+		inp.TaskID = v
+	}
+	if strings.TrimSpace(inp.TaskID) == "" {
+		return inp, fmt.Errorf("task_id is required")
+	}
+	return inp, nil
+}
+
+func ParseTaskStopInput(raw map[string]any) (TaskStopInput, error) {
+	inp := TaskStopInput{}
+	if v, ok := raw["task_id"].(string); ok {
+		inp.TaskID = v
+	}
+	if strings.TrimSpace(inp.TaskID) == "" {
+		return inp, fmt.Errorf("task_id is required")
+	}
+	return inp, nil
+}
+
+func ParseTaskUpdateInput(raw map[string]any) (TaskUpdateInput, error) {
+	inp := TaskUpdateInput{}
+	if v, ok := raw["task_id"].(string); ok {
+		inp.TaskID = v
+	}
+	if v, ok := raw["title"].(string); ok {
+		inp.Title = v
+	}
+	if v, ok := raw["description"].(string); ok {
+		inp.Description = v
+	}
+	if v, ok := raw["status"].(string); ok {
+		inp.Status = v
+	}
+	if strings.TrimSpace(inp.TaskID) == "" {
+		return inp, fmt.Errorf("task_id is required")
+	}
+	return inp, nil
 }

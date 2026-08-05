@@ -1,11 +1,13 @@
-﻿package todo
+package todo
 
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
-		"github.com/auto-code/auto-code/internal/tools"
-	)
+
+	"github.com/auto-code/auto-code/internal/tools"
+)
 
 const (
 	toolName        = "TodoWrite"
@@ -56,9 +58,18 @@ func NewTodoWriteTool() *TodoWriteTool {
 }
 
 func (t *TodoWriteTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(TodoWriteInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp TodoWriteInput
+	switch v := input.(type) {
+	case TodoWriteInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseTodoWriteInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for TodoWriteTool: expected TodoWriteInput or map[string]any, got %T", input)
 	}
 	sessionID := "default"
 	if toolCtx != nil {
@@ -81,4 +92,38 @@ func GetTodos(sessionID string) []TodoItem {
 		return existing.([]TodoItem)
 	}
 	return nil
+}
+
+func ParseTodoWriteInput(raw map[string]any) (TodoWriteInput, error) {
+	inp := TodoWriteInput{}
+	rawTodos, ok := raw["todos"].([]any)
+	if !ok {
+		if rawSlice, ok := raw["todos"].([]TodoItem); ok {
+			inp.Todos = rawSlice
+			return inp, nil
+		}
+		return inp, fmt.Errorf("todos is required and must be an array")
+	}
+	inp.Todos = make([]TodoItem, 0, len(rawTodos))
+	for i, rt := range rawTodos {
+		item := TodoItem{}
+		m, ok := rt.(map[string]any)
+		if !ok {
+			return inp, fmt.Errorf("todos[%d] must be an object with content and status", i)
+		}
+		if v, ok := m["content"].(string); ok {
+			item.Content = v
+		}
+		if v, ok := m["status"].(string); ok {
+			item.Status = v
+		}
+		if strings.TrimSpace(item.Content) == "" {
+			return inp, fmt.Errorf("todos[%d].content is required", i)
+		}
+		if item.Status == "" {
+			item.Status = "pending"
+		}
+		inp.Todos = append(inp.Todos, item)
+	}
+	return inp, nil
 }

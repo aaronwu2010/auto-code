@@ -1,8 +1,9 @@
-﻿package cron
+package cron
 
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -72,9 +73,18 @@ func (t *CronTool) SetOnExec(fn func(command string) (string, error)) {
 }
 
 func (t *CronTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(CronInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp CronInput
+	switch v := input.(type) {
+	case CronInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseCronInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for CronTool: expected CronInput or map[string]any, got %T", input)
 	}
 
 	duration, err := ParseDuration(inp.Schedule)
@@ -184,4 +194,27 @@ func ParseDuration(schedule string) (time.Duration, error) {
 		return 0, fmt.Errorf("invalid schedule format: %s", schedule)
 	}
 	return time.ParseDuration(schedule)
+}
+
+func ParseCronInput(raw map[string]any) (CronInput, error) {
+	inp := CronInput{}
+	if v, ok := raw["task_id"].(string); ok {
+		inp.TaskID = v
+	}
+	if v, ok := raw["schedule"].(string); ok {
+		inp.Schedule = v
+	}
+	if v, ok := raw["command"].(string); ok {
+		inp.Command = v
+	}
+	if strings.TrimSpace(inp.TaskID) == "" {
+		return inp, fmt.Errorf("task_id is required")
+	}
+	if strings.TrimSpace(inp.Schedule) == "" {
+		return inp, fmt.Errorf("schedule is required")
+	}
+	if strings.TrimSpace(inp.Command) == "" {
+		return inp, fmt.Errorf("command is required")
+	}
+	return inp, nil
 }

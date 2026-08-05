@@ -1,8 +1,9 @@
-﻿package mcpauth
+package mcpauth
 
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/auto-code/auto-code/internal/tools"
 )
@@ -38,9 +39,18 @@ func NewMcpAuthTool() *McpAuthTool {
 }
 
 func (t *McpAuthTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(McpAuthInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp McpAuthInput
+	switch v := input.(type) {
+	case McpAuthInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseMcpAuthInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for McpAuthTool: expected McpAuthInput or map[string]any, got %T", input)
 	}
 
 	return &tools.ToolResult{Data: fmt.Sprintf("MCP auth for %s: OAuth flow initiated. Please complete authentication in your browser.", inp.ServerName)}, nil
@@ -48,4 +58,15 @@ func (t *McpAuthTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUs
 
 func (t *McpAuthTool) Prompt(_ context.Context, _ tools.PromptOptions) (string, error) {
 	return "Authenticate with an MCP server that requires OAuth authorization.", nil
+}
+
+func ParseMcpAuthInput(raw map[string]any) (McpAuthInput, error) {
+	inp := McpAuthInput{}
+	if v, ok := raw["server_name"].(string); ok {
+		inp.ServerName = v
+	}
+	if strings.TrimSpace(inp.ServerName) == "" {
+		return inp, fmt.Errorf("server_name is required")
+	}
+	return inp, nil
 }

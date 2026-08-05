@@ -69,9 +69,18 @@ func NewNotebookEditTool() *NotebookTool {
 }
 
 func (t *NotebookTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(NotebookEditInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp NotebookEditInput
+	switch v := input.(type) {
+	case NotebookEditInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseNotebookEditInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for NotebookTool: expected NotebookEditInput or map[string]any, got %T", input)
 	}
 
 	filePath := inp.FilePath
@@ -164,4 +173,29 @@ func (t *NotebookTool) Prompt(_ context.Context, _ tools.PromptOptions) (string,
 - The cell_number is 0-indexed
 - The new_source replaces the entire cell content
 - Set cell_type to "code" or "markdown" to change cell type`, nil
+}
+
+func ParseNotebookEditInput(raw map[string]any) (NotebookEditInput, error) {
+	inp := NotebookEditInput{}
+	if v, ok := raw["file_path"].(string); ok {
+		inp.FilePath = v
+	}
+	if v, ok := raw["cell_number"].(float64); ok {
+		inp.CellNumber = int(v)
+	} else if v, ok := raw["cell_number"].(int); ok {
+		inp.CellNumber = v
+	}
+	if v, ok := raw["new_source"].(string); ok {
+		inp.NewSource = v
+	}
+	if v, ok := raw["cell_type"].(string); ok {
+		inp.CellType = v
+	}
+	if strings.TrimSpace(inp.FilePath) == "" {
+		return inp, fmt.Errorf("file_path is required")
+	}
+	if strings.TrimSpace(inp.NewSource) == "" {
+		return inp, fmt.Errorf("new_source is required")
+	}
+	return inp, nil
 }

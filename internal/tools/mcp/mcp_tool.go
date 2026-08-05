@@ -1,8 +1,9 @@
-﻿package mcp
+package mcp
 
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/auto-code/auto-code/internal/tools"
 )
@@ -53,9 +54,18 @@ func NewMCPToolWithBridge(bridge BridgeProvider) *MCPTool {
 }
 
 func (t *MCPTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(MCPInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp MCPInput
+	switch v := input.(type) {
+	case MCPInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseMCPInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for MCPTool: expected MCPInput or map[string]any, got %T", input)
 	}
 
 	if t.bridge == nil {
@@ -75,4 +85,24 @@ func (t *MCPTool) Prompt(_ context.Context, _ tools.PromptOptions) (string, erro
 - The server_name identifies which MCP server to use
 - The tool_name specifies which tool to call on that server
 - Arguments are passed as key-value pairs to the MCP tool`, nil
+}
+
+func ParseMCPInput(raw map[string]any) (MCPInput, error) {
+	inp := MCPInput{}
+	if v, ok := raw["server_name"].(string); ok {
+		inp.ServerName = v
+	}
+	if v, ok := raw["tool_name"].(string); ok {
+		inp.ToolName = v
+	}
+	if v, ok := raw["arguments"].(map[string]any); ok {
+		inp.Arguments = v
+	}
+	if strings.TrimSpace(inp.ServerName) == "" {
+		return inp, fmt.Errorf("server_name is required")
+	}
+	if strings.TrimSpace(inp.ToolName) == "" {
+		return inp, fmt.Errorf("tool_name is required")
+	}
+	return inp, nil
 }

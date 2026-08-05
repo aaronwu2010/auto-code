@@ -118,9 +118,18 @@ func (t *CoordinatorTool) SetSubAgentRunner(runner SubAgentRunner) {
 }
 
 func (t *CoordinatorTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(CoordinatorInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp CoordinatorInput
+	switch v := input.(type) {
+	case CoordinatorInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseCoordinatorInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for CoordinatorTool: expected CoordinatorInput or map[string]any, got %T", input)
 	}
 
 	if t.subAgentRunner == nil {

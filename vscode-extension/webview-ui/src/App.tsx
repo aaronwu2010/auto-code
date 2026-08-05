@@ -1,4 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
 import { api } from "./apiClient";
 import type {
   Message,
@@ -10,6 +12,65 @@ import type {
   SDKMessage,
   StateChangeEvent,
 } from "./types";
+
+// 初始化 marked：GFM 风格 + 代码块围栏 + 宽松换行；不使用任何高亮器以避免体积
+marked.setOptions({
+  gfm: true,
+  breaks: true,
+});
+
+/** 快速启发式判断字符串是否包含 Markdown 结构（标题/围栏/表/列表/引用/链接/行内代码块）。若不包含则回退到纯文本渲染，避免普通对话被加 `<p>` 标签。 */
+function looksLikeMarkdown(text: string): boolean {
+  if (!text) return false;
+  const mdSignals = [
+    /^\s{0,3}#{1,6}\s+\S/m,
+    /^\s{0,3}```/m,
+    /^\s{0,3}>\s?\S/m,
+    /^\s{0,3}[-*+]\s+\S/m,
+    /^\s{0,3}\d+\.\s+\S/m,
+    /^\s{0,3}\|[^\n]+\|\s*$/m,
+    /\[([^\]]+)\]\((https?:\/\/|\/|\.)[^)]*\)/,
+    /(^|[^`])`[^`\n]+`([^`]|$)/,
+    /^\s{0,3}\S[^\n]*\n\s{0,3}[-=]{2,}\s*$/m,
+    /\*\*[^*\n]+\*\*|__[^_\n]+__/,
+  ];
+  return mdSignals.some((rx) => rx.test(text));
+}
+
+/** 统一 Markdown 渲染：marked -> DOMPurify -> React 注入。
+ *  若文本不像 MD，则直接走纯文本换行，避免单行被包 p 标签引入行距。 */
+function MarkdownContent({ text, className = "" }: { text: string; className?: string }) {
+  const html = useMemo(() => {
+    const src = text ?? "";
+    if (!looksLikeMarkdown(src)) {
+      return null;
+    }
+    try {
+      const raw = marked.parse(src, { async: false }) as string;
+      return DOMPurify.sanitize(raw, {
+        ADD_ATTR: ["target"],
+      });
+    } catch {
+      return null;
+    }
+  }, [text]);
+
+  if (html === null) {
+    return (
+      <pre
+        className={`whitespace-pre-wrap break-words text-sm leading-relaxed ${className}`}
+      >
+        {text ?? ""}
+      </pre>
+    );
+  }
+  return (
+    <div
+      className={`markdown-body ${className}`}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
 
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -329,12 +390,26 @@ function App() {
             {msg.role}
           </div>
         )}
+        {msg.thinking && !isUser && (
+          <details className="bg-violet-900/10 border border-violet-800/30 rounded-lg px-3 py-2 my-1.5">
+            <summary className="text-xs text-violet-400 cursor-pointer hover:text-violet-300 transition-colors select-none">
+              💭 思考过程（{msg.thinking.length} 字）
+            </summary>
+            <pre className="whitespace-pre-wrap break-words text-xs text-slate-500 mt-2">
+              {msg.thinking}
+            </pre>
+          </details>
+        )}
         {msg.content_blocks && msg.content_blocks.length > 0
           ? msg.content_blocks.map((block, i) => renderContentBlock(block, i))
-          : (
+          : isUser
+          ? (
             <pre className="whitespace-pre-wrap break-words text-sm leading-relaxed">
               {msg.content}
             </pre>
+          )
+          : (
+            <MarkdownContent text={msg.content} />
           )}
       </div>
     );
@@ -604,31 +679,40 @@ function App() {
                     </pre>
                   </details>
                 )}
-                {/* Content（流式，实时追加 + 光标） */}
-                <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
-                  {streamingMessage?.content || ""}
-                  {!streamingMessage?.content && isToolCalling && !phaseHint ? (
-                    <span className="flex items-center gap-2 text-amber-400">
-                      <span className="flex gap-1">
-                        <span
-                          className="w-2 h-2 bg-amber-400 rounded-full animate-bounce"
-                          style={{ animationDelay: "0ms" }}
-                        ></span>
-                        <span
-                          className="w-2 h-2 bg-amber-400 rounded-full animate-bounce"
-                          style={{ animationDelay: "150ms" }}
-                        ></span>
-                        <span
-                          className="w-2 h-2 bg-amber-400 rounded-full animate-bounce"
-                          style={{ animationDelay: "300ms" }}
-                        ></span>
+                {/* Content（流式，Markdown 实时渲染；尾部追加光标；若无内容则显示 loading 点） */}
+                {streamingMessage?.content ? (
+                  <div className="relative">
+                    <MarkdownContent text={streamingMessage.content} className="pr-3" />
+                    <span
+                      aria-hidden
+                      className="inline-block w-2 h-4 bg-sky-400 ml-1 align-middle animate-pulse rounded-sm align-bottom"
+                    />
+                  </div>
+                ) : (
+                  <div className="text-sm leading-relaxed whitespace-pre-wrap break-words min-h-[1.6em]">
+                    {!streamingMessage?.content && isToolCalling && !phaseHint ? (
+                      <span className="flex items-center gap-2 text-amber-400">
+                        <span className="flex gap-1">
+                          <span
+                            className="w-2 h-2 bg-amber-400 rounded-full animate-bounce"
+                            style={{ animationDelay: "0ms" }}
+                          ></span>
+                          <span
+                            className="w-2 h-2 bg-amber-400 rounded-full animate-bounce"
+                            style={{ animationDelay: "150ms" }}
+                          ></span>
+                          <span
+                            className="w-2 h-2 bg-amber-400 rounded-full animate-bounce"
+                            style={{ animationDelay: "300ms" }}
+                          ></span>
+                        </span>
+                        正在调用工具...
                       </span>
-                      正在调用工具...
-                    </span>
-                  ) : (
-                    <span className="inline-block w-2 h-4 bg-sky-400 ml-0.5 align-middle animate-pulse rounded-sm" />
-                  )}
-                </div>
+                    ) : (
+                      <span className="inline-block w-2 h-4 bg-sky-400 ml-0.5 align-middle animate-pulse rounded-sm" />
+                    )}
+                  </div>
+                )}
                 {/* ToolCall 预览卡片（当 tool_calls 出现时即时展示） */}
                 {streamingMessage?.tool_calls && streamingMessage.tool_calls.length > 0 && (
                   <div className="mt-2 space-y-1.5">

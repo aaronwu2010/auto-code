@@ -1,4 +1,4 @@
-﻿package monitor
+package monitor
 
 import (
 	"context"
@@ -49,9 +49,18 @@ func NewMonitorTool() *MonitorTool {
 }
 
 func (t *MonitorTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(MonitorInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp MonitorInput
+	switch v := input.(type) {
+	case MonitorInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseMonitorInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for MonitorTool: expected MonitorInput or map[string]any, got %T", input)
 	}
 
 	taskData := task.GetTask(inp.TaskID)
@@ -110,4 +119,20 @@ func (t *MonitorTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUs
 
 func (t *MonitorTool) Prompt(_ context.Context, _ tools.PromptOptions) (string, error) {
 	return "Monitor a running process or task for output. Returns the current output of the task. Use duration to poll until the task completes or the time elapses.", nil
+}
+
+func ParseMonitorInput(raw map[string]any) (MonitorInput, error) {
+	inp := MonitorInput{}
+	if v, ok := raw["task_id"].(string); ok {
+		inp.TaskID = v
+	}
+	if v, ok := raw["duration"].(float64); ok {
+		inp.Duration = int(v)
+	} else if v, ok := raw["duration"].(int); ok {
+		inp.Duration = v
+	}
+	if inp.TaskID == "" {
+		return inp, fmt.Errorf("task_id is required")
+	}
+	return inp, nil
 }

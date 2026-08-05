@@ -53,9 +53,18 @@ func (t *AgentTool) SetSubAgentRunner(runner SubAgentRunner) {
 }
 
 func (t *AgentTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(AgentInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp AgentInput
+	switch v := input.(type) {
+	case AgentInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseAgentInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for AgentTool: expected AgentInput or map[string]any, got %T", input)
 	}
 
 	if t.subAgentRunner == nil {
@@ -140,4 +149,35 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+func ParseAgentInput(raw map[string]any) (AgentInput, error) {
+	inp := AgentInput{}
+	if v, ok := raw["prompt"].(string); ok {
+		inp.Prompt = v
+	}
+	if v, ok := raw["agent_type"].(string); ok {
+		inp.AgentType = v
+	}
+	if rawTools, ok := raw["allowed_tools"].([]any); ok {
+		inp.AllowedTools = make([]string, 0, len(rawTools))
+		for i, tl := range rawTools {
+			if s, ok := tl.(string); ok {
+				inp.AllowedTools = append(inp.AllowedTools, s)
+			} else {
+				return inp, fmt.Errorf("allowed_tools[%d] must be a string", i)
+			}
+		}
+	} else if rawSlice, ok := raw["allowed_tools"].([]string); ok {
+		inp.AllowedTools = rawSlice
+	}
+	if v, ok := raw["max_turns"].(int); ok {
+		inp.MaxTurns = v
+	} else if v, ok := raw["max_turns"].(float64); ok {
+		inp.MaxTurns = int(v)
+	}
+	if strings.TrimSpace(inp.Prompt) == "" {
+		return inp, fmt.Errorf("prompt is required")
+	}
+	return inp, nil
 }

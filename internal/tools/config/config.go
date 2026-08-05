@@ -1,4 +1,4 @@
-﻿package config
+package config
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/auto-code/auto-code/internal/tools"
-	)
+)
 
 const (
 	toolName        = "Config"
@@ -17,9 +17,9 @@ const (
 )
 
 type ConfigInput struct {
-	Action  string `json:"action"`
-	Key     string `json:"key,omitempty"`
-	Value   string `json:"value,omitempty"`
+	Action string `json:"action"`
+	Key    string `json:"key,omitempty"`
+	Value  string `json:"value,omitempty"`
 }
 
 type ConfigTool struct {
@@ -50,9 +50,18 @@ func NewConfigTool() *ConfigTool {
 }
 
 func (t *ConfigTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(ConfigInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp ConfigInput
+	switch v := input.(type) {
+	case ConfigInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseConfigInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for ConfigTool: expected ConfigInput or map[string]any, got %T", input)
 	}
 
 	switch inp.Action {
@@ -133,4 +142,37 @@ func (t *ConfigTool) saveConfig() {
 		sb.WriteString(fmt.Sprintf("%s=%s\n", k, v))
 	}
 	os.WriteFile(configPath, []byte(sb.String()), 0o644)
+}
+
+func ParseConfigInput(raw map[string]any) (ConfigInput, error) {
+	inp := ConfigInput{}
+	if v, ok := raw["action"].(string); ok {
+		inp.Action = v
+	}
+	if v, ok := raw["key"].(string); ok {
+		inp.Key = v
+	}
+	if v, ok := raw["value"].(string); ok {
+		inp.Value = v
+	}
+	if strings.TrimSpace(inp.Action) == "" {
+		return inp, fmt.Errorf("action is required")
+	}
+	switch inp.Action {
+	case "get", "delete":
+		if strings.TrimSpace(inp.Key) == "" {
+			return inp, fmt.Errorf("key is required for %s action", inp.Action)
+		}
+	case "set":
+		if strings.TrimSpace(inp.Key) == "" {
+			return inp, fmt.Errorf("key is required for set action")
+		}
+		if strings.TrimSpace(inp.Value) == "" {
+			return inp, fmt.Errorf("value is required for set action")
+		}
+	case "list":
+	default:
+		return inp, fmt.Errorf("unknown action: %s (expected get, set, list, delete)", inp.Action)
+	}
+	return inp, nil
 }

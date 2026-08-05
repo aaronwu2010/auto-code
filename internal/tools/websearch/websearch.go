@@ -1,4 +1,4 @@
-﻿package websearch
+package websearch
 
 import (
 	"context"
@@ -71,9 +71,18 @@ func (t *WebSearchTool) CheckPermissions(_ context.Context, input any, toolCtx *
 }
 
 func (t *WebSearchTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(WebSearchInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type for WebSearchTool")
+	var inp WebSearchInput
+	switch v := input.(type) {
+	case WebSearchInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseWebSearchInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for WebSearchTool: expected WebSearchInput or map[string]any, got %T", input)
 	}
 
 	start := time.Now()

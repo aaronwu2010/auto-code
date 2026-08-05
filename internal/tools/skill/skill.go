@@ -1,8 +1,9 @@
-﻿package skill
+package skill
 
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/auto-code/auto-code/internal/skills"
@@ -81,9 +82,18 @@ func (t *SkillTool) ListSkills() []string {
 }
 
 func (t *SkillTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(SkillInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp SkillInput
+	switch v := input.(type) {
+	case SkillInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseSkillInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for SkillTool: expected SkillInput or map[string]any, got %T", input)
 	}
 
 	t.mu.RLock()
@@ -104,4 +114,18 @@ func (t *SkillTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseC
 
 func (t *SkillTool) Prompt(_ context.Context, _ tools.PromptOptions) (string, error) {
 	return "Invoke a named skill with optional parameters. Skills are registered at startup and can be discovered via the skills command.", nil
+}
+
+func ParseSkillInput(raw map[string]any) (SkillInput, error) {
+	inp := SkillInput{}
+	if v, ok := raw["skill_name"].(string); ok {
+		inp.SkillName = v
+	}
+	if v, ok := raw["params"].(map[string]any); ok {
+		inp.Params = v
+	}
+	if strings.TrimSpace(inp.SkillName) == "" {
+		return inp, fmt.Errorf("skill_name is required")
+	}
+	return inp, nil
 }

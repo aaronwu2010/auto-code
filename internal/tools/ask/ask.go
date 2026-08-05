@@ -1,8 +1,9 @@
-﻿package ask
+package ask
 
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/auto-code/auto-code/internal/tools"
@@ -67,9 +68,18 @@ func (t *AskTool) SubmitAnswer(answer string) {
 }
 
 func (t *AskTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(AskInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp AskInput
+	switch v := input.(type) {
+	case AskInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseAskInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for AskTool: expected AskInput or map[string]any, got %T", input)
 	}
 
 	t.mu.RLock()
@@ -98,4 +108,30 @@ func (t *AskTool) Prompt(_ context.Context, _ tools.PromptOptions) (string, erro
 2. Clarify ambiguous instructions
 3. Get decisions on implementation choices
 4. Offer choices to the user about what direction to take.`, nil
+}
+
+func ParseAskInput(raw map[string]any) (AskInput, error) {
+	inp := AskInput{}
+	if v, ok := raw["question"].(string); ok {
+		inp.Question = v
+	}
+	if v, ok := raw["header"].(string); ok {
+		inp.Header = v
+	}
+	if rawOpts, ok := raw["options"].([]any); ok {
+		inp.Options = make([]string, 0, len(rawOpts))
+		for i, o := range rawOpts {
+			if s, ok := o.(string); ok {
+				inp.Options = append(inp.Options, s)
+			} else {
+				return inp, fmt.Errorf("options[%d] must be a string", i)
+			}
+		}
+	} else if rawSlice, ok := raw["options"].([]string); ok {
+		inp.Options = rawSlice
+	}
+	if strings.TrimSpace(inp.Question) == "" {
+		return inp, fmt.Errorf("question is required")
+	}
+	return inp, nil
 }

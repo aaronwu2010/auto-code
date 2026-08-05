@@ -76,9 +76,18 @@ func (t *REPLTool) CheckPermissions(_ context.Context, input any, toolCtx *tools
 }
 
 func (t *REPLTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(REPLInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type for REPLTool")
+	var inp REPLInput
+	switch v := input.(type) {
+	case REPLInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseREPLInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for REPLTool: expected REPLInput or map[string]any, got %T", input)
 	}
 
 	language := inp.Language

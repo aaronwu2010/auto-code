@@ -1,4 +1,4 @@
-﻿package brief
+package brief
 
 import (
 	"context"
@@ -38,9 +38,18 @@ func NewBriefTool() *BriefTool {
 }
 
 func (t *BriefTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(BriefInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp BriefInput
+	switch v := input.(type) {
+	case BriefInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseBriefInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for BriefTool: expected BriefInput or map[string]any, got %T", input)
 	}
 	if toolCtx != nil && toolCtx.SetAppState != nil {
 		toolCtx.SetAppState(func(prev *types.ToolPermissionContext) *types.ToolPermissionContext {
@@ -58,4 +67,12 @@ func (t *BriefTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseC
 
 func (t *BriefTool) Prompt(_ context.Context, _ tools.PromptOptions) (string, error) {
 	return "Toggle brief output mode. When enabled, tool results are shown in a condensed format.", nil
+}
+
+func ParseBriefInput(raw map[string]any) (BriefInput, error) {
+	inp := BriefInput{Enabled: true}
+	if v, ok := raw["enabled"].(bool); ok {
+		inp.Enabled = v
+	}
+	return inp, nil
 }

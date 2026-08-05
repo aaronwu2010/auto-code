@@ -1,4 +1,4 @@
-﻿package webbrowser
+package webbrowser
 
 import (
 	"context"
@@ -46,9 +46,18 @@ func NewWebBrowserTool() *WebBrowserTool {
 }
 
 func (t *WebBrowserTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
-	inp, ok := input.(WebBrowserInput)
-	if !ok {
-		return nil, fmt.Errorf("invalid input type")
+	var inp WebBrowserInput
+	switch v := input.(type) {
+	case WebBrowserInput:
+		inp = v
+	case map[string]any:
+		parsed, err := ParseWebBrowserInput(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input: %w", err)
+		}
+		inp = parsed
+	default:
+		return nil, fmt.Errorf("invalid input type for WebBrowserTool: expected WebBrowserInput or map[string]any, got %T", input)
 	}
 
 	if inp.URL == "" {
@@ -75,4 +84,15 @@ func (t *WebBrowserTool) Call(ctx context.Context, input any, toolCtx *tools.Too
 
 func (t *WebBrowserTool) Prompt(_ context.Context, _ tools.PromptOptions) (string, error) {
 	return "Open a URL in the system browser. Use this when the user wants to open a web page.", nil
+}
+
+func ParseWebBrowserInput(raw map[string]any) (WebBrowserInput, error) {
+	inp := WebBrowserInput{}
+	if v, ok := raw["url"].(string); ok {
+		inp.URL = v
+	}
+	if inp.URL == "" {
+		return inp, fmt.Errorf("url is required")
+	}
+	return inp, nil
 }
