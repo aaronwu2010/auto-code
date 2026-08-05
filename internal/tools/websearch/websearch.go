@@ -105,10 +105,13 @@ func (t *WebSearchTool) Call(ctx context.Context, input any, toolCtx *tools.Tool
 }
 
 func (t *WebSearchTool) Prompt(_ context.Context, _ tools.PromptOptions) (string, error) {
-	return `Search the web for information. Use this tool when you need to find information online.
-- The query parameter is the search string to look up
-- Returns a list of search results with titles, URLs, and snippets
-- Use WebFetchTool to retrieve the full content of a specific URL`, nil
+	return `Search the public web for up-to-date information.
+- Use this whenever you need real-time data, news, documentation, facts you're unsure of, or topics you have no local knowledge about.
+- Always prefer this over guessing, hallucinating facts, or inventing links.
+- Returns a list of search results with titles, URLs and short snippets.
+- For any result URL that looks relevant, call WebFetch on that URL to read the full page before answering.
+- Do not cite or summarize a search result page without verifying its content via WebFetch when possible.
+- If no results are returned, tell the user clearly and suggest alternative search terms.`, nil
 }
 
 func performWebSearch(ctx context.Context, query string) ([]WebSearchResult, error) {

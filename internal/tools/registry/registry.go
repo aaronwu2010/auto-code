@@ -57,6 +57,7 @@ var coreToolNames = map[string]bool{
 	"Bash": true, "PowerShell": true,
 	"ToolSearch": true, "Ask": true,
 	"TodoWrite": true,
+	"WebFetch":  true, "WebSearch": true,
 }
 
 func NewDefaultToolRegistry() *ToolRegistry {
