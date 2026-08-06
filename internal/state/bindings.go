@@ -384,6 +384,7 @@ type ModelInfoUI struct {
 	Family        string `json:"family,omitempty"`
 	ParameterSize string `json:"parameter_size,omitempty"`
 	Quantization  string `json:"quantization,omitempty"`
+	ContextLength int    `json:"context_length,omitempty"`
 }
 
 // ListAvailableModels 获取可用模型列表
@@ -401,12 +402,14 @@ func (b *WailsBindings) ListAvailableModels() ListModelsResponse {
 
 	result := make([]ModelInfoUI, 0, len(models))
 	for _, m := range models {
+		ctxLen, _ := client.ShowModel(b.ctx, m.Name)
 		result = append(result, ModelInfoUI{
 			Name:          m.Name,
 			Size:          formatSize(m.Size),
 			Family:        m.Details.Family,
 			ParameterSize: m.Details.ParameterSize,
 			Quantization:  m.Details.QuantizationLevel,
+			ContextLength: ctxLen,
 		})
 	}
 

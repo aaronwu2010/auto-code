@@ -362,8 +362,14 @@ function App() {
             Auto Code
           </span>
           {appState?.mainLoopModel && (
-            <span className="text-xs text-slate-400 bg-slate-800/80 px-3 py-1 rounded-full border border-slate-700/50">
+            <span className="text-xs text-slate-400 bg-slate-800/80 px-3 py-1 rounded-full border border-slate-700/50 flex items-center gap-1.5">
               {appState.mainLoopModel}
+              {(() => {
+                const m = models.find((m) => m.name === appState.mainLoopModel);
+                return m?.context_length ? (
+                  <span className="text-sky-400">· {(m.context_length / 1024).toFixed(0)}K ctx</span>
+                ) : null;
+              })()}
             </span>
           )}
           {ollamaHealth && (
@@ -469,7 +475,7 @@ function App() {
                   <option value="">选择模型...</option>
                   {models.map((m) => (
                     <option key={m.name} value={m.name}>
-                      {m.name} {m.size && `(${m.size})`} {m.parameter_size && `- ${m.parameter_size}`}
+                      {m.name} {m.size && `(${m.size})`} {m.parameter_size && `- ${m.parameter_size}`} {m.context_length ? `- ${m.context_length.toLocaleString()} tokens` : ""}
                     </option>
                   ))}
                 </select>

@@ -524,7 +524,7 @@ func formatFriendlyError(apiErr *APIError) string {
 	case 401:
 		return "🔐 API Key 无效或已过期\n\n请在设置中检查你的 Ollama API Key 是否正确。"
 	case 404:
-		if IsModelNotLoaded(fmt.Errorf(apiErr.Message)) {
+		if IsModelNotLoaded(fmt.Errorf("%s", apiErr.Message)) {
 			return "📦 模型未找到\n\n该模型不存在或尚未下载。你可以：\n\n1. 在设置中选择其他可用模型\n2. 运行 `ollama pull <模型名>` 下载模型\n3. 检查模型名称是否正确"
 		}
 		return fmt.Sprintf("❌ 资源未找到 (404)\n\n%s", apiErr.Message)

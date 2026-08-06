@@ -480,6 +480,14 @@ func (qe *QueryEngine) ListModels(ctx context.Context) ([]api.ModelInfo, error) 
 	return qe.apiClient.ListModels(ctx)
 }
 
+// ShowModel 返回模型的最大上下文 token 数
+func (qe *QueryEngine) ShowModel(ctx context.Context, modelName string) (int, error) {
+	if qe.apiClient == nil {
+		return 0, fmt.Errorf("API client not initialized")
+	}
+	return qe.apiClient.ShowModel(ctx, modelName)
+}
+
 func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) (<-chan query.QueryOutput, error) {
 	println("callModel: 开始调用, model=", params.Model)
 	if qe.apiClient == nil {

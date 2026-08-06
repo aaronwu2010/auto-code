@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,24 +10,24 @@ import (
 	"strings"
 )
 
-
 type ModelInfo struct {
-	Name              string       `json:"name"`
-	Model             string       `json:"model"`
-	RemoteModel       string       `json:"remote_model,omitempty"`
-	RemoteHost        string       `json:"remote_host,omitempty"`
-	ModifiedAt        string       `json:"modified_at"`
-	Size              int64        `json:"size"`
-	Digest            string       `json:"digest"`
-	Details           ModelDetails `json:"details,omitempty"`
+	Name          string       `json:"name"`
+	Model         string       `json:"model"`
+	RemoteModel   string       `json:"remote_model,omitempty"`
+	RemoteHost    string       `json:"remote_host,omitempty"`
+	ModifiedAt    string       `json:"modified_at"`
+	Size          int64        `json:"size"`
+	Digest        string       `json:"digest"`
+	Details       ModelDetails `json:"details,omitempty"`
+	ContextLength int          `json:"context_length,omitempty"`
 }
 
 type ModelDetails struct {
-	Format           string   `json:"format,omitempty"`
-	Family           string   `json:"family,omitempty"`
-	Families         []string `json:"families,omitempty"`
-	ParameterSize    string   `json:"parameter_size,omitempty"`
-	QuantizationLevel string  `json:"quantization_level,omitempty"`
+	Format            string   `json:"format,omitempty"`
+	Family            string   `json:"family,omitempty"`
+	Families          []string `json:"families,omitempty"`
+	ParameterSize     string   `json:"parameter_size,omitempty"`
+	QuantizationLevel string   `json:"quantization_level,omitempty"`
 }
 
 type ListModelsResponse struct {
@@ -112,4 +113,58 @@ func NormalizeModelName(model string) string {
 		return model + ":latest"
 	}
 	return model
+}
+
+// showResponse 是 Ollama /api/show 端点的响应
+type showResponse struct {
+	ModelInfo map[string]any `json:"model_info,omitempty"`
+}
+
+// ShowModel 调用 Ollama /api/show 端点获取模型详情，返回 context_length（最大对话 token 数）
+func (c *Client) ShowModel(ctx context.Context, modelName string) (int, error) {
+	modelName = NormalizeModelName(modelName)
+
+	reqBody, _ := json.Marshal(map[string]string{"name": modelName})
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.config.BaseURL+"/show", bytes.NewReader(reqBody))
+	if err != nil {
+		return 0, fmt.Errorf("creating show request: %w", err)
+	}
+	c.setHeaders(httpReq)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return 0, fmt.Errorf("requesting show: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("reading show response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("show returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var showResp showResponse
+	if err := json.Unmarshal(respBody, &showResp); err != nil {
+		return 0, fmt.Errorf("unmarshaling show response: %w", err)
+	}
+
+	// 从 model_info 中查找 context_length
+	// Ollama 返回的 key 格式通常是 "<arch>.context_length"，如 "llama.context_length"
+	for key, val := range showResp.ModelInfo {
+		if strings.HasSuffix(key, ".context_length") {
+			switch v := val.(type) {
+			case float64:
+				return int(v), nil
+			case json.Number:
+				n, _ := v.Int64()
+				return int(n), nil
+			}
+		}
+	}
+
+	return 0, nil
 }

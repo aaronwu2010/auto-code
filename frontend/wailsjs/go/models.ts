@@ -233,6 +233,7 @@ export namespace state {
 	    family?: string;
 	    parameter_size?: string;
 	    quantization?: string;
+	    context_length?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ModelInfoUI(source);
@@ -245,6 +246,7 @@ export namespace state {
 	        this.family = source["family"];
 	        this.parameter_size = source["parameter_size"];
 	        this.quantization = source["quantization"];
+	        this.context_length = source["context_length"];
 	    }
 	}
 	export class ListModelsResponse {

@@ -31,6 +31,7 @@ type MessageSubmitter interface {
 	GetSessionID() types.SessionID
 	CheckHealth(ctx context.Context) *api.HealthStatus
 	ListModels(ctx context.Context) ([]api.ModelInfo, error)
+	ShowModel(ctx context.Context, modelName string) (int, error)
 }
 
 // EmitFunc 把事件推送到前端。由 StdioServer 注入。
@@ -291,6 +292,7 @@ type ModelInfoUI struct {
 	Family        string `json:"family,omitempty"`
 	ParameterSize string `json:"parameter_size,omitempty"`
 	Quantization  string `json:"quantization,omitempty"`
+	ContextLength int    `json:"context_length,omitempty"`
 }
 
 // ListAvailableModels 获取可用模型列表。
@@ -310,12 +312,14 @@ func (a *Adapter) ListAvailableModels(ctx context.Context) ListModelsResponse {
 
 	result := make([]ModelInfoUI, 0, len(models))
 	for _, m := range models {
+		ctxLen, _ := eng.ShowModel(ctx, m.Name)
 		result = append(result, ModelInfoUI{
 			Name:          m.Name,
 			Size:          formatSize(m.Size),
 			Family:        m.Details.Family,
 			ParameterSize: m.Details.ParameterSize,
 			Quantization:  m.Details.QuantizationLevel,
+			ContextLength: ctxLen,
 		})
 	}
 	return ListModelsResponse{Models: result}

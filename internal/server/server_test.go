@@ -97,6 +97,10 @@ func (e *fakeEngine) ListModels(ctx context.Context) ([]api.ModelInfo, error) {
 	}, nil
 }
 
+func (e *fakeEngine) ShowModel(ctx context.Context, modelName string) (int, error) {
+	return 32768, nil
+}
+
 // ========== 测试用例 ==========
 
 func newTestServer(t *testing.T) (*StdioServer, *strings.Builder) {

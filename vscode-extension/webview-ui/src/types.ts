@@ -102,6 +102,7 @@ export interface ModelInfo {
   family?: string;
   parameter_size?: string;
   quantization?: string;
+  context_length?: number;
 }
 
 // SDK 消息（query:message 事件 data 字段）
