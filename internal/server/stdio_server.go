@@ -225,6 +225,13 @@ func (s *StdioServer) dispatch(ctx context.Context, req *Request) (interface{}, 
 	case "list_models":
 		return s.adapter.ListAvailableModels(ctx), nil
 
+	case "get_context_usage":
+		usage, err := s.adapter.GetContextUsage(ctx)
+		if err != nil {
+			return nil, NewError(CodeInternal, err.Error())
+		}
+		return usage, nil
+
 	case "check_health":
 		return s.adapter.CheckOllamaHealth(ctx), nil
 

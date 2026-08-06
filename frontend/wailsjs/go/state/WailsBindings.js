@@ -18,6 +18,10 @@ export function GetAvailableTools() {
   return window['go']['state']['WailsBindings']['GetAvailableTools']();
 }
 
+export function GetContextUsage() {
+  return window['go']['state']['WailsBindings']['GetContextUsage']();
+}
+
 export function GetMCPStatus() {
   return window['go']['state']['WailsBindings']['GetMCPStatus']();
 }

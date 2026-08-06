@@ -488,6 +488,56 @@ func (qe *QueryEngine) ShowModel(ctx context.Context, modelName string) (int, er
 	return qe.apiClient.ShowModel(ctx, modelName)
 }
 
+// GetContextUsage 评估当前对话（system prompt + messages）占模型最大 token 窗口的比例
+func (qe *QueryEngine) GetContextUsage(ctx context.Context) (*types.ContextUsage, error) {
+	modelName := string(qe.config.UserSpecifiedModel)
+	if modelName == "" {
+		cfg := qe.apiClient.GetConfig()
+		modelName = cfg.Model
+	}
+
+	ctxLen, err := qe.ShowModel(ctx, modelName)
+	if err != nil || ctxLen <= 0 {
+		ctxLen = 8192 // 默认回退值
+	}
+
+	// 估算 system prompt token 数
+	systemTokens := 0
+	if sp, err := qe.buildSystemPrompt(ctx); err == nil && sp != nil {
+		systemTokens = len(sp.Content) / 4
+	}
+
+	// 估算对话消息 token 数
+	messages := qe.GetMessages()
+	messageTokens := 0
+	for i := range messages {
+		messageTokens += len(messages[i].Content) / 4
+		for _, tc := range messages[i].ToolCalls {
+			messageTokens += len(tc.Function.Name) / 4
+			messageTokens += len(string(tc.Function.Arguments)) / 4
+		}
+		if messages[i].Thinking != "" {
+			messageTokens += len(messages[i].Thinking) / 4
+		}
+	}
+
+	total := systemTokens + messageTokens
+	pct := 0
+	if ctxLen > 0 {
+		pct = total * 100 / ctxLen
+	}
+
+	return &types.ContextUsage{
+		ModelName:     modelName,
+		ContextLength: ctxLen,
+		SystemTokens:  systemTokens,
+		MessageTokens: messageTokens,
+		TotalTokens:   total,
+		UsagePercent:  pct,
+		MessageCount:  len(messages),
+	}, nil
+}
+
 func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) (<-chan query.QueryOutput, error) {
 	println("callModel: 开始调用, model=", params.Model)
 	if qe.apiClient == nil {

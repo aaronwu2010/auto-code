@@ -32,6 +32,7 @@ type MessageSubmitter interface {
 	CheckHealth(ctx context.Context) *api.HealthStatus
 	ListModels(ctx context.Context) ([]api.ModelInfo, error)
 	ShowModel(ctx context.Context, modelName string) (int, error)
+	GetContextUsage(ctx context.Context) (*types.ContextUsage, error)
 }
 
 // EmitFunc 把事件推送到前端。由 StdioServer 注入。
@@ -323,6 +324,15 @@ func (a *Adapter) ListAvailableModels(ctx context.Context) ListModelsResponse {
 		})
 	}
 	return ListModelsResponse{Models: result}
+}
+
+// GetContextUsage 获取当前对话上下文 token 占用情况
+func (a *Adapter) GetContextUsage(ctx context.Context) (*types.ContextUsage, error) {
+	eng, errResp := a.engineOrError()
+	if errResp != nil {
+		return nil, fmt.Errorf("%s", errResp.Message)
+	}
+	return eng.GetContextUsage(ctx)
 }
 
 // OllamaHealthResponse 表示健康检查响应。

@@ -22,6 +22,7 @@ type MessageSubmitter interface {
 	SetModel(model types.ModelSetting)
 	SetOllamaConfig(baseURL, apiKey, model string)
 	GetSessionID() types.SessionID
+	GetContextUsage(ctx stdctx.Context) (*types.ContextUsage, error)
 }
 
 type SDKMessage struct {
@@ -441,6 +442,17 @@ func (b *WailsBindings) CheckOllamaHealth() OllamaHealthResponse {
 		Model:           config.Model,
 		AvailableModels: status.AvailableModels,
 	}
+}
+
+// GetContextUsage 获取当前对话上下文 token 占用情况
+func (b *WailsBindings) GetContextUsage() (*types.ContextUsage, error) {
+	b.mu.RLock()
+	eng := b.engine
+	b.mu.RUnlock()
+	if eng == nil {
+		return nil, fmt.Errorf("engine not initialized")
+	}
+	return eng.GetContextUsage(b.ctx)
 }
 
 func (b *WailsBindings) createOllamaClient(config OllamaConfigRequest) *api.Client {

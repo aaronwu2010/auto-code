@@ -479,6 +479,30 @@ export namespace types {
 	        this.thinking = source["thinking"];
 	    }
 	}
+	export class ContextUsage {
+	    model_name: string;
+	    context_length: number;
+	    system_tokens: number;
+	    message_tokens: number;
+	    total_tokens: number;
+	    usage_percent: number;
+	    message_count: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ContextUsage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.model_name = source["model_name"];
+	        this.context_length = source["context_length"];
+	        this.system_tokens = source["system_tokens"];
+	        this.message_tokens = source["message_tokens"];
+	        this.total_tokens = source["total_tokens"];
+	        this.usage_percent = source["usage_percent"];
+	        this.message_count = source["message_count"];
+	    }
+	}
 	export class FunctionCall {
 	    name: string;
 	    arguments?: number[];

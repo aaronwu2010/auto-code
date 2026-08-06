@@ -101,6 +101,18 @@ func (e *fakeEngine) ShowModel(ctx context.Context, modelName string) (int, erro
 	return 32768, nil
 }
 
+func (e *fakeEngine) GetContextUsage(ctx context.Context) (*types.ContextUsage, error) {
+	return &types.ContextUsage{
+		ModelName:     "test-model",
+		ContextLength: 32768,
+		SystemTokens:  2000,
+		MessageTokens: 1000,
+		TotalTokens:   3000,
+		UsagePercent:  9,
+		MessageCount:  5,
+	}, nil
+}
+
 // ========== 测试用例 ==========
 
 func newTestServer(t *testing.T) (*StdioServer, *strings.Builder) {

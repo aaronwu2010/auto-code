@@ -12,6 +12,7 @@ import {
   SetProjectDirectory,
   GetProjectDirectory,
   ListDirectoryContents,
+  GetContextUsage,
 } from "../wailsjs/go/state/WailsBindings";
 import { state, types } from "../wailsjs/go/models";
 
@@ -23,6 +24,7 @@ type AppStateSnapshot = state.AppStateSnapshot;
 type OllamaConfig = state.OllamaConfigRequest;
 type OllamaHealth = state.OllamaHealthResponse;
 type ModelInfo = state.ModelInfoUI;
+type ContextUsage = types.ContextUsage;
 type FileInfo = state.FileInfo;
 
 interface SDKMessage {
@@ -66,6 +68,7 @@ function App() {
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState<Message | null>(null);
   const [isToolCalling, setIsToolCalling] = useState(false);
+  const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -225,6 +228,8 @@ function App() {
           setIsLoading(false);
           setStreamingMessage(null);
           setIsToolCalling(false);
+          // 对话结束后刷新 token 占用
+          GetContextUsage().then(setContextUsage).catch(() => {});
         }
       } catch {}
     });
@@ -249,6 +254,7 @@ function App() {
       await checkHealth();
       await loadModels();
       await loadProjectDir();
+      GetContextUsage().then(setContextUsage).catch(() => {});
     } catch {}
   };
 
@@ -391,6 +397,32 @@ function App() {
           {appState?.fastMode && (
             <span className="text-xs text-amber-400 bg-amber-900/30 px-3 py-1 rounded-full border border-amber-800/40">
               ⚡ Fast
+            </span>
+          )}
+          {contextUsage && contextUsage.context_length > 0 && (
+            <span
+              className={`text-xs px-2.5 py-1 rounded-full border flex items-center gap-1.5 ${
+                contextUsage.usage_percent >= 80
+                  ? "bg-red-900/30 text-red-400 border-red-800/40"
+                  : contextUsage.usage_percent >= 50
+                  ? "bg-amber-900/30 text-amber-400 border-amber-800/40"
+                  : "bg-slate-800/60 text-slate-400 border-slate-700/40"
+              }`}
+              title={`System: ${contextUsage.system_tokens} | Messages: ${contextUsage.message_tokens} | Max: ${contextUsage.context_length}`}
+            >
+              <span className="w-12 h-1.5 rounded-full bg-slate-700 overflow-hidden">
+                <span
+                  className={`block h-full rounded-full ${
+                    contextUsage.usage_percent >= 80
+                      ? "bg-red-400"
+                      : contextUsage.usage_percent >= 50
+                      ? "bg-amber-400"
+                      : "bg-sky-400"
+                  }`}
+                  style={{ width: `${Math.min(contextUsage.usage_percent, 100)}%` }}
+                ></span>
+              </span>
+              {contextUsage.usage_percent}% · {(contextUsage.total_tokens / 1000).toFixed(1)}K/{(contextUsage.context_length / 1024).toFixed(0)}K
             </span>
           )}
         </div>

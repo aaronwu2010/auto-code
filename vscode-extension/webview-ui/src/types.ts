@@ -105,6 +105,16 @@ export interface ModelInfo {
   context_length?: number;
 }
 
+export interface ContextUsage {
+  model_name: string;
+  context_length: number;
+  system_tokens: number;
+  message_tokens: number;
+  total_tokens: number;
+  usage_percent: number;
+  message_count: number;
+}
+
 // SDK 消息（query:message 事件 data 字段）
 export interface SDKMessage {
   type: string;

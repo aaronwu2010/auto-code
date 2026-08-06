@@ -3,6 +3,7 @@ import type {
   OllamaConfig,
   OllamaHealth,
   ModelInfo,
+  ContextUsage,
   Message,
   SDKMessage,
   StateChangeEvent,
@@ -170,6 +171,9 @@ export const api = {
   },
   listModels(): Promise<{ models: ModelInfo[]; error?: string }> {
     return request("list_models", {});
+  },
+  getContextUsage(): Promise<ContextUsage> {
+    return request("get_context_usage", {});
   },
   checkHealth(): Promise<OllamaHealth> {
     return request("check_health", {});
