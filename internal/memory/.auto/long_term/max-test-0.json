@@ -1,0 +1,12 @@
+{
+  "id": "max-test-0",
+  "type": "long_term",
+  "priority": "medium",
+  "scope": "private",
+  "content": "Memory 0",
+  "created_at": "2026-08-06T17:55:13.7606757+08:00",
+  "updated_at": "2026-08-06T18:55:13.7606757+08:00",
+  "expires_at": "2026-08-07T18:55:13.7606757+08:00",
+  "access_count": 5,
+  "importance": 0.8
+}

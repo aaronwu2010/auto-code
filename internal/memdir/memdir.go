@@ -57,25 +57,36 @@ const DirExistsGuidance = "A memory directory already exists. Read existing memo
 const DirsExistGuidance = "Memory directories already exist. Read existing memories before creating new ones to avoid duplication."
 
 func EnsureMemoryDirExists(memoryDir string) error {
-	return os.MkdirAll(memoryDir, 0o755)
+	if err := os.MkdirAll(memoryDir, 0o755); err != nil {
+		return err
+	}
+	return nil
+}
+
+// EnsureAutoDirStructure 确保 .auto 目录及其所有分类子目录存在
+func (m *Memdir) EnsureAutoDirStructure() error {
+	return m.paths.EnsureAutoDirStructure()
 }
 
 type Memdir struct {
-	mu             sync.RWMutex
-	projectRoot    string
-	additionalDirs []string
-	claudeMdFiles  []string
+	mu              sync.RWMutex
+	projectRoot     string
+	additionalDirs  []string
+	claudeMdFiles   []string
 	claudeMdContent string
-	paths          *Paths
+	paths           *Paths
 }
 
 func NewMemdir(projectRoot string) *Memdir {
-	return &Memdir{
+	m := &Memdir{
 		projectRoot:    projectRoot,
 		additionalDirs: make([]string, 0),
 		claudeMdFiles:  make([]string, 0),
 		paths:          NewPaths(projectRoot),
 	}
+	// 自动创建 .auto 目录结构
+	_ = m.paths.EnsureAutoDirStructure()
+	return m
 }
 
 func (m *Memdir) AddDirectory(dir string) {
@@ -155,10 +166,16 @@ func (m *Memdir) BuildMemoryLines() string {
 		return ""
 	}
 
+	autoBase := m.paths.GetAutoBaseDir()
 	var sb strings.Builder
-	sb.WriteString("The directory structure of your memories:\n")
-	sb.WriteString(fmt.Sprintf("  %s\n", memPath))
-	sb.WriteString(fmt.Sprintf("  └── %s (entrypoint — always read this first)\n", EntrypointName))
+	sb.WriteString("The directory structure of your memories (under the project's .auto hidden directory):\n")
+	sb.WriteString(fmt.Sprintf("  %s\n", autoBase))
+	sb.WriteString("  ├── memory/          (auto memories — MEMORY.md entrypoint, daily logs)\n")
+	sb.WriteString(fmt.Sprintf("  │   └── %s (entrypoint — always read this first)\n", EntrypointName))
+	sb.WriteString("  ├── short_term/      (short-term / working memory)\n")
+	sb.WriteString("  ├── long_term/       (long-term persisted memory)\n")
+	sb.WriteString("  ├── project_content/ (project content snapshots & summaries)\n")
+	sb.WriteString("  └── project_format/  (coding conventions & format rules)\n")
 	sb.WriteString("\n")
 	sb.WriteString(TypesSectionIndividual + "\n\n")
 	sb.WriteString(WhatNotToSaveSection + "\n\n")

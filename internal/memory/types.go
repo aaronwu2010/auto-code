@@ -150,7 +150,7 @@ func DefaultMemoryConfig() *MemoryConfig {
 		ConsolidationThreshold: 0.7,
 		EnableForgetting:       true,
 		ForgettingThreshold:    0.3,
-		StoragePath:            "./memories",
+		StoragePath:            ".auto", // 存储到项目目录下的 .auto 隐藏目录
 		EnableCache:            true,
 		CacheSize:              1000,
 	}
