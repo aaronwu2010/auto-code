@@ -69,6 +69,7 @@ function App() {
   const [streamingMessage, setStreamingMessage] = useState<Message | null>(null);
   const [isToolCalling, setIsToolCalling] = useState(false);
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; filePath: string } | null>(null);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -83,6 +84,39 @@ function App() {
       loadModels();
     }
   }, [showSettings]);
+
+  useEffect(() => {
+    const handleGlobalClick = () => setContextMenu(null);
+    window.addEventListener("click", handleGlobalClick);
+    window.addEventListener("scroll", handleGlobalClick, true);
+    return () => {
+      window.removeEventListener("click", handleGlobalClick);
+      window.removeEventListener("scroll", handleGlobalClick, true);
+    };
+  }, []);
+
+  const insertPathToInput = (path: string) => {
+    setInput((prev) => {
+      const textarea = inputRef.current;
+      const insertText = `\`${path}\``;
+      if (textarea) {
+        const start = textarea.selectionStart ?? prev.length;
+        const end = textarea.selectionEnd ?? prev.length;
+        const before = prev.slice(0, start);
+        const after = prev.slice(end);
+        const separator = before.length > 0 && !before.endsWith("\n") && !before.endsWith(" ") ? " " : "";
+        const newValue = before + separator + insertText + after;
+        requestAnimationFrame(() => {
+          const pos = (before + separator + insertText).length;
+          textarea.focus();
+          textarea.setSelectionRange(pos, pos);
+        });
+        return newValue;
+      }
+      return prev + (prev.length > 0 ? " " : "") + insertText;
+    });
+    setContextMenu(null);
+  };
 
   const loadConfig = async () => {
     try {
@@ -733,6 +767,11 @@ function App() {
                     <div
                       key={i}
                       onClick={() => handleFileClick(file)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setContextMenu({ x: e.clientX, y: e.clientY, filePath: file.path });
+                      }}
                       className={`px-4 py-2 cursor-pointer flex items-center gap-2.5 transition-all duration-150 group ${
                         selectedFile === file.path
                           ? "bg-sky-900/30 text-sky-400 border-l-2 border-sky-500"
@@ -760,6 +799,48 @@ function App() {
           </div>
         </div>
       </div>
+
+      {contextMenu && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          className="fixed z-50 min-w-[180px] py-1.5 rounded-lg bg-slate-800 border border-slate-700 shadow-2xl shadow-black/40 text-sm overflow-hidden"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            type="button"
+            onClick={() => insertPathToInput(contextMenu.filePath)}
+            className="w-full px-4 py-2 text-left text-slate-300 hover:bg-sky-600/20 hover:text-sky-400 transition-colors flex items-center gap-2.5"
+          >
+            📎 添加路径到对话框
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const name = contextMenu.filePath.split(/[\\/]/).pop() || contextMenu.filePath;
+              insertPathToInput(contextMenu.filePath);
+              setInput((prev) => prev + `\n请帮我分析一下这个文件：\`${name}\``);
+            }}
+            className="w-full px-4 py-2 text-left text-slate-300 hover:bg-sky-600/20 hover:text-sky-400 transition-colors flex items-center gap-2.5"
+          >
+            💬 引用并分析此文件
+          </button>
+          <div className="my-1 border-t border-slate-700/60" />
+          <button
+            type="button"
+            onClick={() => {
+              navigator.clipboard?.writeText(contextMenu.filePath).catch(() => {});
+              setContextMenu(null);
+            }}
+            className="w-full px-4 py-2 text-left text-slate-400 hover:bg-slate-700/50 hover:text-slate-200 transition-colors flex items-center gap-2.5"
+          >
+            📋 复制路径
+          </button>
+        </div>
+      )}
     </div>
   );
 }
