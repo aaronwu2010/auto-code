@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
 
@@ -99,50 +100,86 @@ type HistorySnipTrackingState struct {
 	Enabled          bool
 }
 
-type StreamingToolExecutor struct {
-	mu         sync.Mutex
-	pending    []toolExecution
-	results    chan *toolExecutionResult
-	toolCtx    *tools.ToolUseContext
-	canUseTool func(tool tools.Tool, input any) (types.PermissionResult, error)
-}
-
 type toolExecution struct {
-	tool      tools.Tool
-	input     any
-	toolUseID string
+	tool          tools.Tool
+	input         any
+	toolUseID     string
+	toolCallIndex int
 }
 
 type toolExecutionResult struct {
-	Message *types.Message
-	Result  *tools.ToolResult
-	Err     error
+	Message     *types.Message
+	Result      *tools.ToolResult
+	Err         error
+	ToolUseID   string
+	ToolCallIdx int
+}
+
+type StreamingToolExecutor struct {
+	mu         sync.Mutex
+	pending    map[string]*toolExecution
+	results    map[string]*toolExecutionResult
+	resultsCh  chan *toolExecutionResult
+	expected   int
+	doneCount  int
+	toolCtx    *tools.ToolUseContext
+	canUseTool func(tool tools.Tool, input any) (types.PermissionResult, error)
+	wg         sync.WaitGroup
 }
 
 func NewStreamingToolExecutor(toolCtx *tools.ToolUseContext, canUseTool func(tool tools.Tool, input any) (types.PermissionResult, error)) *StreamingToolExecutor {
 	return &StreamingToolExecutor{
-		results:    make(chan *toolExecutionResult, 64),
+		pending:    make(map[string]*toolExecution),
+		results:    make(map[string]*toolExecutionResult),
+		resultsCh:  make(chan *toolExecutionResult, 128),
 		toolCtx:    toolCtx,
 		canUseTool: canUseTool,
 	}
 }
 
-func (e *StreamingToolExecutor) AddTool(ctx context.Context, tool tools.Tool, input any, toolUseID string) {
+func (e *StreamingToolExecutor) AddTool(ctx context.Context, tool tools.Tool, input any, toolUseID string, toolCallIndex int) bool {
 	e.mu.Lock()
-	exec := toolExecution{tool: tool, input: input, toolUseID: toolUseID}
-	e.pending = append(e.pending, exec)
+	if _, exists := e.pending[toolUseID]; exists {
+		e.mu.Unlock()
+		return false
+	}
+	exec := &toolExecution{
+		tool:          tool,
+		input:         input,
+		toolUseID:     toolUseID,
+		toolCallIndex: toolCallIndex,
+	}
+	e.pending[toolUseID] = exec
+	e.expected++
+	e.wg.Add(1)
 	e.mu.Unlock()
 
 	go func() {
-		result := e.executeTool(ctx, tool, input, toolUseID)
-		e.results <- result
+		defer e.wg.Done()
+		result := e.executeTool(ctx, tool, input, toolUseID, toolCallIndex)
+		e.mu.Lock()
+		e.results[toolUseID] = result
+		e.doneCount++
+		e.mu.Unlock()
+		select {
+		case e.resultsCh <- result:
+		default:
+		}
 	}()
+	return true
 }
 
-func (e *StreamingToolExecutor) executeTool(ctx context.Context, tool tools.Tool, input any, toolUseID string) *toolExecutionResult {
+func (e *StreamingToolExecutor) IsScheduled(toolUseID string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_, ok := e.pending[toolUseID]
+	return ok
+}
+
+func (e *StreamingToolExecutor) executeTool(ctx context.Context, tool tools.Tool, input any, toolUseID string, toolCallIndex int) *toolExecutionResult {
 	permResult, err := e.canUseTool(tool, input)
 	if err != nil {
-		return &toolExecutionResult{Err: err}
+		return &toolExecutionResult{Err: err, ToolUseID: toolUseID, ToolCallIdx: toolCallIndex}
 	}
 	if permResult.Behavior == types.DecisionDeny {
 		return &toolExecutionResult{
@@ -151,6 +188,30 @@ func (e *StreamingToolExecutor) executeTool(ctx context.Context, tool tools.Tool
 				Content:   permResult.Message,
 				Timestamp: time.Now().Unix(),
 			},
+			ToolUseID:   toolUseID,
+			ToolCallIdx: toolCallIndex,
+		}
+	}
+
+	if e.toolCtx != nil {
+		innerPerm, innerErr := tool.CheckPermissions(ctx, input, e.toolCtx)
+		if innerErr != nil {
+			return &toolExecutionResult{Err: innerErr, ToolUseID: toolUseID, ToolCallIdx: toolCallIndex}
+		}
+		if innerPerm.Behavior == types.DecisionDeny {
+			msg := innerPerm.Message
+			if msg == "" {
+				msg = permResult.Message
+			}
+			return &toolExecutionResult{
+				Message: &types.Message{
+					Role:      types.RoleTool,
+					Content:   msg,
+					Timestamp: time.Now().Unix(),
+				},
+				ToolUseID:   toolUseID,
+				ToolCallIdx: toolCallIndex,
+			}
 		}
 	}
 
@@ -162,7 +223,9 @@ func (e *StreamingToolExecutor) executeTool(ctx context.Context, tool tools.Tool
 				Content:   err.Error(),
 				Timestamp: time.Now().Unix(),
 			},
-			Err: err,
+			Err:         err,
+			ToolUseID:   toolUseID,
+			ToolCallIdx: toolCallIndex,
 		}
 	}
 
@@ -173,26 +236,34 @@ func (e *StreamingToolExecutor) executeTool(ctx context.Context, tool tools.Tool
 			Content:   output,
 			Timestamp: time.Now().Unix(),
 		},
-		Result: toolResult,
+		Result:      toolResult,
+		ToolUseID:   toolUseID,
+		ToolCallIdx: toolCallIndex,
 	}
 }
 
-func (e *StreamingToolExecutor) GetRemainingResults() []*toolExecutionResult {
-	var results []*toolExecutionResult
-	for {
+func (e *StreamingToolExecutor) WaitForAllResults(timeoutMs int) map[int]*toolExecutionResult {
+	done := make(chan struct{})
+	go func() {
+		e.wg.Wait()
+		close(done)
+	}()
+	if timeoutMs > 0 {
 		select {
-		case r := <-e.results:
-			results = append(results, r)
-			e.mu.Lock()
-			e.pending = e.pending[1:]
-			e.mu.Unlock()
-			if len(e.pending) == 0 {
-				return results
-			}
-		default:
-			return results
+		case <-done:
+		case <-time.After(time.Duration(timeoutMs) * time.Millisecond):
 		}
+	} else {
+		<-done
 	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	byIdx := make(map[int]*toolExecutionResult, len(e.results))
+	for _, r := range e.results {
+		byIdx[r.ToolCallIdx] = r
+	}
+	return byIdx
 }
 
 func Query(ctx context.Context, params QueryParams, deps QueryDeps) <-chan QueryOutput {
@@ -292,11 +363,13 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		if len(messages) > 0 {
 			lastMsg := messages[len(messages)-1]
 			if lastMsg.Role == types.RoleUser || lastMsg.Role == types.RoleTool {
-				// ready to query
 			} else {
 				ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "no_follow_up_needed"}}
 				return
 			}
+		} else {
+			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "empty_messages"}}
+			return
 		}
 
 		ch <- QueryOutput{Type: "stream_request_start"}
@@ -322,9 +395,11 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		}
 
 		var (
-			needsFollowUp     bool
-			stopReason        string
-			streamingExecutor = NewStreamingToolExecutor(state.ToolUseContext, params.CanUseTool)
+			needsFollowUp        bool
+			stopReason           string
+			streamingExecutor    = NewStreamingToolExecutor(state.ToolUseContext, params.CanUseTool)
+			assistantBuffer      *types.Message
+			assistantHasAppended bool
 		)
 
 		for msg := range streamCh {
@@ -338,35 +413,38 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			switch msg.Type {
 			case "assistant":
 				if msg.Message != nil {
-					state.Messages = append(state.Messages, *msg.Message)
+					assistantBuffer = mergeAssistantFragment(assistantBuffer, msg.Message)
+					ch <- QueryOutput{Type: "assistant", Message: msg.Message}
 
-					if state.HistorySnipTracking != nil && state.HistorySnipTracking.Enabled {
-						compact.DetectToolReferences(
-							msg.Message.Content,
-							state.HistorySnipTracking.ToolMessageMetas,
-							state.TurnCount,
-						)
-					}
-
-					println("queryLoop: 收到assistant消息, contentLen=", len(msg.Message.Content), ", hasToolCalls=", msg.Message.HasToolCalls(), ", toolCallCount=", len(msg.Message.ToolCalls))
-
-					if msg.Message.HasToolCalls() {
+					if assistantBuffer.HasToolCalls() {
 						needsFollowUp = true
-						for i, tc := range msg.Message.ToolCalls {
+						for i, tc := range assistantBuffer.ToolCalls {
+							toolUseID := fmt.Sprintf("tool_%d", i)
+							if streamingExecutor.IsScheduled(toolUseID) {
+								continue
+							}
 							tool := tools.FindToolByName(currentTools, tc.Function.Name)
 							if tool != nil {
 								var input any
+								var parseErr error
 								if tc.Function.Arguments != nil {
-									_ = json.Unmarshal(tc.Function.Arguments, &input)
+									parseErr = json.Unmarshal(tc.Function.Arguments, &input)
+								}
+								if parseErr != nil {
+									state.Messages = append(state.Messages, types.Message{
+										Role:      types.RoleTool,
+										Content:   fmt.Sprintf("failed to parse arguments for tool %s: %v", tc.Function.Name, parseErr),
+										Timestamp: time.Now().Unix(),
+									})
+									ch <- QueryOutput{Type: "user", Message: &state.Messages[len(state.Messages)-1]}
+									continue
 								}
 								if tool.IsConcurrencySafe(input) {
-									streamingExecutor.AddTool(ctx, tool, input, fmt.Sprintf("tool_%d", i))
+									streamingExecutor.AddTool(ctx, tool, input, toolUseID, i)
 								}
 							}
 						}
 					}
-
-					ch <- QueryOutput{Type: "assistant", Message: msg.Message}
 				}
 
 			case "user":
@@ -381,6 +459,17 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			case "stream_event":
 				if streamMsg, ok := msg.Data.(*StreamMessageWrapper); ok {
 					stopReason = streamMsg.StopReason
+				} else if msg.Data != nil {
+					rv := reflect.ValueOf(msg.Data)
+					if rv.Kind() == reflect.Ptr {
+						rv = rv.Elem()
+					}
+					if rv.Kind() == reflect.Struct {
+						f := rv.FieldByName("StopReason")
+						if f.IsValid() && f.Kind() == reflect.String {
+							stopReason = f.String()
+						}
+					}
 				}
 
 			case "error":
@@ -391,41 +480,106 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			}
 		}
 
-		lastMsg := state.Messages[len(state.Messages)-1]
+		if assistantBuffer != nil && !assistantHasAppended {
+			state.Messages = append(state.Messages, *assistantBuffer)
+			assistantHasAppended = true
+
+			if state.HistorySnipTracking != nil && state.HistorySnipTracking.Enabled {
+				compact.DetectToolReferences(
+					assistantBuffer.Content,
+					state.HistorySnipTracking.ToolMessageMetas,
+					state.TurnCount,
+				)
+			}
+		}
+
+		var lastMsg types.Message
+		if len(state.Messages) > 0 {
+			lastMsg = state.Messages[len(state.Messages)-1]
+		}
 		println("queryLoop: stream结束, stopReason=", stopReason, ", needsFollowUp=", needsFollowUp, ", lastMsg.role=", string(lastMsg.Role), ", hasToolCalls=", lastMsg.HasToolCalls(), ", toolCallCount=", len(lastMsg.ToolCalls))
+
+		if stopReason == "max_output_tokens" && (assistantBuffer == nil || assistantBuffer.Content == "") {
+			println("queryLoop: 输出被截断且无有效内容, 已达到max_output_tokens, 终止")
+			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "max_output_tokens"}}
+			return
+		}
 
 		if !needsFollowUp {
 			println("queryLoop: 无需继续，发送 terminal completed")
-			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "completed"}}
+			if stopReason != "" {
+				ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: stopReason}}
+			} else {
+				ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "completed"}}
+			}
 			return
 		}
 		println("queryLoop: 需要继续，开始执行工具调用，工具数量=", len(getLastToolCalls(state.Messages)))
 
-		var toolResultMessages []types.Message
+		toolCalls := getLastToolCalls(state.Messages)
+		if len(toolCalls) == 0 {
+			println("queryLoop: needsFollowUp=true 但没有 tool calls，终止")
+			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "completed"}}
+			return
+		}
 
-		for i, tc := range getLastToolCalls(state.Messages) {
+		streamingResults := streamingExecutor.WaitForAllResults(0)
+
+		for i, tc := range toolCalls {
+			if result, ok := streamingResults[i]; ok {
+				if result.Message != nil {
+					msgIdx := len(state.Messages)
+					state.Messages = append(state.Messages, *result.Message)
+					ch <- QueryOutput{Type: "user", Message: result.Message}
+
+					if state.HistorySnipTracking != nil && state.HistorySnipTracking.Enabled {
+						state.HistorySnipTracking.ToolMessageMetas = append(state.HistorySnipTracking.ToolMessageMetas, compact.ToolMessageMeta{
+							Index:              msgIdx,
+							ToolName:           tc.Function.Name,
+							Content:            result.Message.Content,
+							TurnAdded:          state.TurnCount,
+							LastReferencedTurn: state.TurnCount,
+							IsReferenced:       false,
+						})
+					}
+				}
+				if result.Result != nil && deps.OnToolResult != nil {
+					deps.OnToolResult(result.Result, state.ToolUseContext)
+				}
+				continue
+			}
+
 			tool := tools.FindToolByName(currentTools, tc.Function.Name)
 			if tool == nil {
-				toolResultMessages = append(toolResultMessages, types.Message{
+				state.Messages = append(state.Messages, types.Message{
 					Role:      types.RoleTool,
 					Content:   fmt.Sprintf("Tool not found: %s", tc.Function.Name),
 					Timestamp: time.Now().Unix(),
 				})
+				ch <- QueryOutput{Type: "user", Message: &state.Messages[len(state.Messages)-1]}
 				continue
 			}
 
 			var input any
 			if tc.Function.Arguments != nil {
-				_ = json.Unmarshal(tc.Function.Arguments, &input)
+				if unmarshalErr := json.Unmarshal(tc.Function.Arguments, &input); unmarshalErr != nil {
+					state.Messages = append(state.Messages, types.Message{
+						Role:      types.RoleTool,
+						Content:   fmt.Sprintf("failed to parse arguments for tool %s: %v", tc.Function.Name, unmarshalErr),
+						Timestamp: time.Now().Unix(),
+					})
+					ch <- QueryOutput{Type: "user", Message: &state.Messages[len(state.Messages)-1]}
+					continue
+				}
 			}
 
-			if deps.OnPhaseChange != nil && tool != nil {
+			if deps.OnPhaseChange != nil {
 				deps.OnPhaseChange("tool_start", tool.Name(), input)
 			}
 
 			result := executeToolCall(ctx, tool, input, params.CanUseTool, state.ToolUseContext)
 
-			if deps.OnPhaseChange != nil && tool != nil {
+			if deps.OnPhaseChange != nil {
 				status := "done"
 				if result.Err != nil {
 					status = "error"
@@ -435,7 +589,6 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 
 			if result.Message != nil {
 				msgIdx := len(state.Messages)
-				toolResultMessages = append(toolResultMessages, *result.Message)
 				state.Messages = append(state.Messages, *result.Message)
 				ch <- QueryOutput{Type: "user", Message: result.Message}
 
@@ -453,34 +606,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			if result.Result != nil && deps.OnToolResult != nil {
 				deps.OnToolResult(result.Result, state.ToolUseContext)
 			}
-			_ = i
 		}
-
-		streamingResults := streamingExecutor.GetRemainingResults()
-		for _, result := range streamingResults {
-			if result.Message != nil {
-				msgIdx := len(state.Messages)
-				toolResultMessages = append(toolResultMessages, *result.Message)
-				state.Messages = append(state.Messages, *result.Message)
-				ch <- QueryOutput{Type: "user", Message: result.Message}
-
-				if state.HistorySnipTracking != nil && state.HistorySnipTracking.Enabled {
-					state.HistorySnipTracking.ToolMessageMetas = append(state.HistorySnipTracking.ToolMessageMetas, compact.ToolMessageMeta{
-						Index:              msgIdx,
-						ToolName:           "",
-						Content:            result.Message.Content,
-						TurnAdded:          state.TurnCount,
-						LastReferencedTurn: state.TurnCount,
-						IsReferenced:       false,
-					})
-				}
-			}
-			if result.Result != nil && deps.OnToolResult != nil {
-				deps.OnToolResult(result.Result, state.ToolUseContext)
-			}
-		}
-
-		_ = toolResultMessages
 
 		state.TurnCount++
 
@@ -503,6 +629,35 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 	}
 }
 
+func mergeAssistantFragment(prev, fragment *types.Message) *types.Message {
+	if fragment == nil {
+		return prev
+	}
+	if prev == nil {
+		cp := *fragment
+		if len(fragment.ToolCalls) > 0 {
+			cp.ToolCalls = make([]types.ToolCall, len(fragment.ToolCalls))
+			copy(cp.ToolCalls, fragment.ToolCalls)
+		}
+		return &cp
+	}
+
+	if fragment.Content != "" {
+		prev.Content = fragment.Content
+	}
+	if fragment.Thinking != "" {
+		prev.Thinking = fragment.Thinking
+	}
+	if len(fragment.ToolCalls) > 0 {
+		prev.ToolCalls = make([]types.ToolCall, len(fragment.ToolCalls))
+		copy(prev.ToolCalls, fragment.ToolCalls)
+	}
+	if fragment.Model != "" {
+		prev.Model = fragment.Model
+	}
+	return prev
+}
+
 type StreamMessageWrapper struct {
 	StopReason string
 }
@@ -520,13 +675,47 @@ func executeToolCall(ctx context.Context, tool tools.Tool, input any, canUseTool
 	if canUseTool != nil {
 		permResult, err := canUseTool(tool, input)
 		if err != nil {
-			return &toolExecutionResult{Err: err}
+			return &toolExecutionResult{
+				Message: &types.Message{
+					Role:      types.RoleTool,
+					Content:   fmt.Sprintf("permission check error: %v", err),
+					Timestamp: time.Now().Unix(),
+				},
+				Err: err,
+			}
 		}
 		if permResult.Behavior == types.DecisionDeny {
 			return &toolExecutionResult{
 				Message: &types.Message{
 					Role:      types.RoleTool,
 					Content:   permResult.Message,
+					Timestamp: time.Now().Unix(),
+				},
+			}
+		}
+	}
+
+	if toolCtx != nil {
+		innerPerm, innerErr := tool.CheckPermissions(ctx, input, toolCtx)
+		if innerErr != nil {
+			return &toolExecutionResult{
+				Message: &types.Message{
+					Role:      types.RoleTool,
+					Content:   fmt.Sprintf("tool permission error: %v", innerErr),
+					Timestamp: time.Now().Unix(),
+				},
+				Err: innerErr,
+			}
+		}
+		if innerPerm.Behavior == types.DecisionDeny {
+			msg := innerPerm.Message
+			if msg == "" {
+				msg = "tool permission denied"
+			}
+			return &toolExecutionResult{
+				Message: &types.Message{
+					Role:      types.RoleTool,
+					Content:   msg,
 					Timestamp: time.Now().Unix(),
 				},
 			}
@@ -602,20 +791,23 @@ func applyHistorySnip(messages []types.Message, tracking *HistorySnipTrackingSta
 	}
 
 	updatedMetas := make([]compact.ToolMessageMeta, 0, len(tracking.ToolMessageMetas))
-	snippedCount := 0
+	snippedBeforeCount := 0
+	snippedIdxSet := make(map[int]struct{}, len(snipResult.SnippedIndices))
+	for _, idx := range snipResult.SnippedIndices {
+		snippedIdxSet[idx] = struct{}{}
+	}
 	for _, meta := range tracking.ToolMessageMetas {
-		isSnipped := false
+		if _, snipped := snippedIdxSet[meta.Index]; snipped {
+			continue
+		}
+		snippedBeforeCount = 0
 		for _, idx := range snipResult.SnippedIndices {
-			if meta.Index == idx {
-				isSnipped = true
-				snippedCount++
-				break
+			if idx < meta.Index {
+				snippedBeforeCount++
 			}
 		}
-		if !isSnipped {
-			meta.Index -= snippedCount
-			updatedMetas = append(updatedMetas, meta)
-		}
+		meta.Index -= snippedBeforeCount
+		updatedMetas = append(updatedMetas, meta)
 	}
 	tracking.ToolMessageMetas = updatedMetas
 

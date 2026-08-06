@@ -137,7 +137,19 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 		onProgress(fmt.Sprintf("Sub-agent has %d tools available", len(subTools)))
 	}
 
-	systemPrompt, err := qe.buildSystemPrompt(ctx)
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
+	if qe.ctx != nil {
+		go func() {
+			select {
+			case <-qe.ctx.Done():
+				runCancel()
+			case <-runCtx.Done():
+			}
+		}()
+	}
+
+	systemPrompt, err := qe.buildSystemPrompt(runCtx)
 	if err != nil {
 		return "", fmt.Errorf("failed to build system prompt: %w", err)
 	}
@@ -171,10 +183,14 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 				return subTools
 			},
 		},
-		AbortCtx:         ctx,
+		AbortCtx:         runCtx,
 		ReadFileState:    readFileState,
 		Messages:         messages,
 		ProjectDirectory: qe.getProjectDirectory(),
+	}
+
+	if maxTurns <= 0 {
+		maxTurns = 15
 	}
 
 	queryParams := query.QueryParams{
@@ -188,12 +204,18 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 		Model:        qe.config.UserSpecifiedModel,
 	}
 
+	var mu sync.Mutex
 	turnCount := 0
+	mainToolUse := qe.appState.GetCurrentToolUse()
+	mainStatusText := qe.appState.GetStatusLineText()
 	deps := query.QueryDeps{
 		CallModel: func(callCtx context.Context, p query.QueryParams) (<-chan query.QueryOutput, error) {
+			mu.Lock()
 			turnCount++
+			localTurn := turnCount
+			mu.Unlock()
 			if onProgress != nil {
-				onProgress(fmt.Sprintf("Turn %d: calling model...", turnCount))
+				onProgress(fmt.Sprintf("Turn %d: calling model...", localTurn))
 			}
 			return qe.callModel(callCtx, p)
 		},
@@ -214,29 +236,26 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 			}
 		},
 		OnPhaseChange: func(phase string, toolName string, toolInput any) {
+			mu.Lock()
+			localTurn := turnCount
+			mu.Unlock()
 			switch phase {
 			case "call_model":
-				qe.appState.SetCurrentToolUse(nil)
-				qe.appState.SetStatusLineText(fmt.Sprintf("Turn %d: 正在思考中...", turnCount+1))
+				if onProgress != nil {
+					onProgress(fmt.Sprintf("[Sub-agent Turn %d] thinking...", localTurn+1))
+				}
 			case "tool_start":
-				qe.appState.SetCurrentToolUse(&state.ToolUseState{
-					ToolName:  toolName,
-					ToolUseID: fmt.Sprintf("tool_%d_%s", turnCount, toolName),
-					Input:     toolInput,
-					Status:    "running",
-				})
-				qe.appState.SetStatusLineText(fmt.Sprintf("正在执行工具: %s", toolName))
+				if onProgress != nil {
+					onProgress(fmt.Sprintf("[Sub-agent Turn %d] running tool: %s", localTurn, toolName))
+				}
 			case "tool_done":
-				prev := qe.appState.GetCurrentToolUse()
-				if prev != nil && prev.ToolName == toolName {
+				if onProgress != nil {
 					status := "done"
 					if s, ok := toolInput.(string); ok && s != "" {
 						status = s
 					}
-					prev.Status = status
-					qe.appState.SetCurrentToolUse(prev)
+					onProgress(fmt.Sprintf("[Sub-agent Turn %d] tool %s finished (%s)", localTurn, toolName, status))
 				}
-				qe.appState.SetStatusLineText(fmt.Sprintf("工具 %s 执行完成", toolName))
 			}
 		},
 	}
@@ -245,15 +264,21 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 		onProgress("Sub-agent starting execution...")
 	}
 
-	outputCh := query.Query(ctx, queryParams, deps)
+	outputCh := query.Query(runCtx, queryParams, deps)
+	defer func() {
+		qe.appState.SetCurrentToolUse(mainToolUse)
+		qe.appState.SetStatusLineText(mainStatusText)
+	}()
 
 	var lastAssistantContent string
 	var lastError error
-
+	var assistantAccum string
+	var assistantThinkingAccum string
+	var toolCallsAccum []types.ToolCall
 	for output := range outputCh {
 		select {
-		case <-ctx.Done():
-			return lastAssistantContent, ctx.Err()
+		case <-runCtx.Done():
+			return lastAssistantContent, runCtx.Err()
 		default:
 		}
 
@@ -261,8 +286,25 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 		case "assistant":
 			if output.Message != nil {
 				lastAssistantContent = output.Message.Content
+				assistantAccum = output.Message.Content
+				assistantThinkingAccum = output.Message.Thinking
+				if len(output.Message.ToolCalls) > 0 {
+					toolCallsAccum = output.Message.ToolCalls
+				}
 			}
+		case "stream_event":
+		case "tool_calls_start":
 		case "terminal":
+			if assistantAccum != "" || assistantThinkingAccum != "" || len(toolCallsAccum) > 0 {
+				messages = append(messages, types.Message{
+					ID:        generateMessageID(),
+					Role:      types.RoleAssistant,
+					Content:   assistantAccum,
+					Thinking:  assistantThinkingAccum,
+					ToolCalls: toolCallsAccum,
+					Timestamp: time.Now().Unix(),
+				})
+			}
 			if onProgress != nil {
 				onProgress("Sub-agent completed successfully")
 			}
@@ -273,7 +315,7 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 				onProgress(fmt.Sprintf("Sub-agent error: %v", output.Error))
 			}
 		case "interrupted":
-			return lastAssistantContent, ctx.Err()
+			return lastAssistantContent, runCtx.Err()
 		}
 	}
 
@@ -314,6 +356,12 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		println("SubmitMessage: goroutine 开始执行")
 
 		qe.mu.Lock()
+		if qe.streamMsgID != "" || qe.streamContent != "" {
+			qe.streamContent = ""
+			qe.streamThinking = ""
+			qe.streamToolCalls = nil
+			qe.streamMsgID = ""
+		}
 		userMsg := types.Message{
 			ID:        generateMessageID(),
 			Role:      types.RoleUser,
@@ -327,8 +375,20 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		ch <- SDKMessage{Type: "user", Message: &userMsg, SessionID: qe.sessionID}
 		println("SubmitMessage: 用户消息已发送到通道")
 
+		submitCtx, submitCancel := context.WithCancel(ctx)
+		defer submitCancel()
+		if qe.ctx != nil {
+			go func() {
+				select {
+				case <-qe.ctx.Done():
+					submitCancel()
+				case <-submitCtx.Done():
+				}
+			}()
+		}
+
 		println("SubmitMessage: 开始构建系统提示")
-		systemPrompt, err := qe.buildSystemPrompt(ctx)
+		systemPrompt, err := qe.buildSystemPrompt(submitCtx)
 		if err != nil {
 			println("SubmitMessage: 构建系统提示失败 - ", err.Error())
 			ch <- SDKMessage{Type: "error", Subtype: "system_prompt_error", Message: api.GetAssistantMessageFromError(err), SessionID: qe.sessionID}
@@ -368,7 +428,7 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 					return activeTools
 				},
 			},
-			AbortCtx:         ctx,
+			AbortCtx:         submitCtx,
 			ReadFileState:    qe.readFileState,
 			Messages:         qe.messages,
 			ProjectDirectory: qe.getProjectDirectory(),
@@ -385,6 +445,7 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 			Model:        qe.config.UserSpecifiedModel,
 		}
 
+		phaseTurnCount := 0
 		deps := query.QueryDeps{
 			CallModel: func(callCtx context.Context, p query.QueryParams) (<-chan query.QueryOutput, error) {
 				return qe.callModel(callCtx, p)
@@ -402,16 +463,43 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 					activeTools = toolCtx.Options.Tools
 				}
 			},
+			OnPhaseChange: func(phase string, toolName string, toolInput any) {
+				switch phase {
+				case "call_model":
+					phaseTurnCount++
+					qe.appState.SetCurrentToolUse(nil)
+					qe.appState.SetStatusLineText(fmt.Sprintf("Turn %d: 正在思考中...", phaseTurnCount))
+				case "tool_start":
+					qe.appState.SetCurrentToolUse(&state.ToolUseState{
+						ToolName:  toolName,
+						ToolUseID: fmt.Sprintf("tool_%d_%s", phaseTurnCount, toolName),
+						Input:     toolInput,
+						Status:    "running",
+					})
+					qe.appState.SetStatusLineText(fmt.Sprintf("正在执行工具: %s", toolName))
+				case "tool_done":
+					prev := qe.appState.GetCurrentToolUse()
+					if prev != nil && prev.ToolName == toolName {
+						status := "done"
+						if s, ok := toolInput.(string); ok && s != "" {
+							status = s
+						}
+						prev.Status = status
+						qe.appState.SetCurrentToolUse(prev)
+					}
+					qe.appState.SetStatusLineText(fmt.Sprintf("工具 %s 执行完成", toolName))
+				}
+			},
 		}
 
-		outputCh := query.Query(ctx, queryParams, deps)
+		outputCh := query.Query(submitCtx, queryParams, deps)
 		println("SubmitMessage: query.Query 返回，开始循环读取输出")
 
 		outputCount := 0
 		for output := range outputCh {
 			outputCount++
 			println("SubmitMessage: 收到输出 #", outputCount, ", type=", output.Type)
-			sdkMsgs := qe.processQueryOutput(ctx, output)
+			sdkMsgs := qe.processQueryOutput(submitCtx, output)
 			for _, sdkMsg := range sdkMsgs {
 				ch <- sdkMsg
 			}

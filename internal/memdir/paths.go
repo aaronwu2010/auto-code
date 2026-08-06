@@ -69,8 +69,9 @@ const (
 func (p *Paths) GetAutoMemPath() string {
 	p.mu.RLock()
 	if p.cached {
-		defer p.mu.RUnlock()
-		return p.cachedPath
+		cachedPath := p.cachedPath
+		p.mu.RUnlock()
+		return cachedPath
 	}
 	p.mu.RUnlock()
 
@@ -85,28 +86,31 @@ func (p *Paths) GetAutoMemPath() string {
 		if validated, err := validateMemoryPath(override); err == nil {
 			p.cachedPath = validated
 			p.cached = true
-			// 确保目录存在
 			_ = p.ensureAutoDirStructure()
 			return p.cachedPath
 		}
 	}
 
-	// 所有记忆都存放到项目目录下的 .auto/memory/
 	autoBase := p.GetAutoBaseDir()
 	p.cachedPath = filepath.Join(autoBase, SubDirMemory) + string(filepath.Separator)
 	p.cached = true
-	// 确保 .auto 目录结构存在
 	_ = p.ensureAutoDirStructure()
 	return p.cachedPath
 }
 
 // GetAutoBaseDir 返回项目目录下的 .auto 隐藏目录路径
 func (p *Paths) GetAutoBaseDir() string {
-	if p.projectRoot == "" {
-		cwd, _ := os.Getwd()
-		return filepath.Join(cwd, autoDirName)
+	root := p.projectRoot
+	if root == "" {
+		if cwd, err := os.Getwd(); err == nil && cwd != "" {
+			root = cwd
+		} else if p.homeDir != "" {
+			root = p.homeDir
+		} else {
+			root = "."
+		}
 	}
-	return filepath.Join(p.projectRoot, autoDirName)
+	return filepath.Join(root, autoDirName)
 }
 
 // GetShortTermMemPath 返回短期记忆目录路径

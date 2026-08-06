@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/auto-code/auto-code/internal/memdir"
 	"github.com/auto-code/auto-code/internal/types"
@@ -75,6 +77,21 @@ func NewExtractMemories(paths *memdir.Paths) *ExtractMemories {
 }
 
 func CreateAutoMemCanUseTool(memoryDir string) CanUseToolFn {
+	var cachedPaths *memdir.Paths
+	getMemPaths := func() *memdir.Paths {
+		if cachedPaths != nil {
+			return cachedPaths
+		}
+		baseClean := filepath.Clean(memoryDir)
+		parent := filepath.Dir(baseClean)
+		grandparent := filepath.Dir(parent)
+		candidateRoot := grandparent
+		if filepath.Base(parent) != memdirSubdirMemory {
+			candidateRoot = filepath.Dir(baseClean)
+		}
+		cachedPaths = memdir.NewPaths(candidateRoot)
+		return cachedPaths
+	}
 	return func(toolName string, input map[string]any) (bool, string) {
 		switch toolName {
 		case "REPL", "Read", "Grep", "Glob":
@@ -92,7 +109,13 @@ func CreateAutoMemCanUseTool(memoryDir string) CanUseToolFn {
 			return false, "only read-only bash commands allowed in memory extraction"
 		case "Edit", "Write":
 			if filePath, ok := input["file_path"].(string); ok {
-				paths := memdir.NewPaths("")
+				paths := getMemPaths()
+				clean := filepath.Clean(filePath)
+				memRoot := filepath.Clean(memoryDir)
+				sep := string(filepath.Separator)
+				if strings.HasPrefix(clean+sep, memRoot+sep) || clean == memRoot {
+					return true, ""
+				}
 				if paths.IsAutoMemPath(filePath) != "" || memdir.IsTeamMemPath(filePath) {
 					return true, ""
 				}
@@ -103,6 +126,8 @@ func CreateAutoMemCanUseTool(memoryDir string) CanUseToolFn {
 		}
 	}
 }
+
+const memdirSubdirMemory = "memory"
 
 func (e *ExtractMemories) ExecuteExtractMemories(ctx context.Context, messages []types.Message, appendSystemMsg string) error {
 	if !memdir.IsAutoMemoryEnabled() {
@@ -338,15 +363,28 @@ func (e *ExtractMemories) buildExtractPrompt(messages []types.Message, manifest 
 	return sb.String()
 }
 
-func (e *ExtractMemories) DrainPendingExtraction(_ int) {
+func (e *ExtractMemories) DrainPendingExtraction(timeoutMs int) {
+	deadline := time.Now().Add(time.Duration(timeoutMs) * time.Millisecond)
 	e.mu.Lock()
-	count := e.inFlightCount
+	if e.inFlightCount <= 0 {
+		e.mu.Unlock()
+		return
+	}
 	e.mu.Unlock()
 
-	if count > 0 {
+	for time.Now().Before(deadline) {
 		e.mu.Lock()
-		e.inProgress = false
-		e.pendingContext = nil
+		if e.inFlightCount <= 0 {
+			e.mu.Unlock()
+			return
+		}
 		e.mu.Unlock()
+		time.Sleep(20 * time.Millisecond)
 	}
+
+	e.mu.Lock()
+	e.inFlightCount = 0
+	e.inProgress = false
+	e.pendingContext = nil
+	e.mu.Unlock()
 }

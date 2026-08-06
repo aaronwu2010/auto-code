@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -69,13 +70,16 @@ func (m *Memdir) EnsureAutoDirStructure() error {
 }
 
 type Memdir struct {
-	mu              sync.RWMutex
-	projectRoot     string
-	additionalDirs  []string
-	claudeMdFiles   []string
-	claudeMdContent string
-	paths           *Paths
+	mu               sync.RWMutex
+	projectRoot      string
+	additionalDirs   []string
+	claudeMdFiles    []string
+	claudeMdContent  string
+	claudeMdCachedAt int64
+	paths            *Paths
 }
+
+const claudeMdCacheMaxAgeSeconds = 60
 
 func NewMemdir(projectRoot string) *Memdir {
 	m := &Memdir{
@@ -84,7 +88,6 @@ func NewMemdir(projectRoot string) *Memdir {
 		claudeMdFiles:  make([]string, 0),
 		paths:          NewPaths(projectRoot),
 	}
-	// 自动创建 .auto 目录结构
 	_ = m.paths.EnsureAutoDirStructure()
 	return m
 }
@@ -99,11 +102,17 @@ func (m *Memdir) GetPaths() *Paths {
 	return m.paths
 }
 
+func (m *Memdir) invalidateClaudeMdCacheLocked() {
+	m.claudeMdFiles = nil
+	m.claudeMdContent = ""
+	m.claudeMdCachedAt = 0
+}
+
 func (m *Memdir) ScanClaudeMdFiles(_ context.Context) ([]string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.claudeMdFiles = make([]string, 0)
+	m.invalidateClaudeMdCacheLocked()
 
 	dirs := append([]string{m.projectRoot}, m.additionalDirs...)
 	for _, dir := range dirs {
@@ -114,25 +123,49 @@ func (m *Memdir) ScanClaudeMdFiles(_ context.Context) ([]string, error) {
 		m.claudeMdFiles = append(m.claudeMdFiles, files...)
 	}
 
+	m.claudeMdCachedAt = time.Now().Unix()
 	return m.claudeMdFiles, nil
 }
 
 func (m *Memdir) LoadMemoryPrompt(ctx context.Context) (string, error) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	cachedContent := m.claudeMdContent
+	cachedAt := m.claudeMdCachedAt
+	filesCount := len(m.claudeMdFiles)
+	m.mu.RUnlock()
 
-	if m.claudeMdContent != "" {
-		return m.claudeMdContent, nil
+	now := time.Now().Unix()
+	if cachedContent != "" && cachedAt > 0 && (now-cachedAt) < claudeMdCacheMaxAgeSeconds && filesCount > 0 {
+		return cachedContent, nil
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if len(m.claudeMdFiles) == 0 || m.claudeMdCachedAt == 0 {
+		dirs := append([]string{m.projectRoot}, m.additionalDirs...)
+		m.claudeMdFiles = m.claudeMdFiles[:0]
+		for _, dir := range dirs {
+			files, err := m.scanDirectory(dir)
+			if err != nil {
+				continue
+			}
+			m.claudeMdFiles = append(m.claudeMdFiles, files...)
+		}
+		m.claudeMdCachedAt = time.Now().Unix()
 	}
 
 	if len(m.claudeMdFiles) == 0 {
+		m.claudeMdContent = ""
 		return "", nil
 	}
 
 	var sb strings.Builder
+	var readErrors []string
 	for _, file := range m.claudeMdFiles {
 		content, err := os.ReadFile(file)
 		if err != nil {
+			readErrors = append(readErrors, fmt.Sprintf("%s: %v", filepath.Base(file), err))
 			continue
 		}
 		sb.WriteString(fmt.Sprintf("--- %s ---\n", filepath.Base(file)))
@@ -140,8 +173,9 @@ func (m *Memdir) LoadMemoryPrompt(ctx context.Context) (string, error) {
 		sb.WriteString("\n\n")
 	}
 
-	m.claudeMdContent = sb.String()
-	return m.claudeMdContent, nil
+	result := sb.String()
+	m.claudeMdContent = result
+	return result, nil
 }
 
 func (m *Memdir) GetClaudeMdContent() string {

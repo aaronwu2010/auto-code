@@ -62,27 +62,31 @@ func (m *BaseLongTermMemory) Store(ctx context.Context, item *MemoryItem) error 
 		return ErrNilItem
 	}
 
+	if item.ID == "" {
+		return fmt.Errorf("memory item ID is required")
+	}
+
 	start := time.Now()
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// 序列化为JSON
+	if err := os.MkdirAll(m.storageDir, 0755); err != nil {
+		return fmt.Errorf("ensure storage directory: %w", err)
+	}
+
 	data, err := json.MarshalIndent(item, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal item: %w", err)
 	}
 
-	// 生成文件名
 	filename := fmt.Sprintf("%s.json", item.ID)
 	filePath := filepath.Join(m.storageDir, filename)
 
-	// 写入文件
 	if err := ioutil.WriteFile(filePath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
-	// 更新索引和缓存
 	m.index[item.ID] = filePath
 	if m.config.EnableCache {
 		m.cache[item.ID] = item
@@ -90,7 +94,6 @@ func (m *BaseLongTermMemory) Store(ctx context.Context, item *MemoryItem) error 
 
 	m.storeCount++
 
-	// 记录性能指标
 	duration := time.Since(start)
 	m.logOperation("store", item.ID, duration)
 
@@ -212,8 +215,31 @@ func (m *BaseLongTermMemory) Touch(ctx context.Context, id string) error {
 
 	item.Touch()
 
-	// 保存更新后的项
-	return m.saveItemNoLock(item)
+	if filePath, ok := m.index[item.ID]; ok && filePath != "" {
+		data, err := json.MarshalIndent(item, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := ioutil.WriteFile(filePath, data, 0644); err != nil {
+			return err
+		}
+	} else {
+		filename := fmt.Sprintf("%s.json", item.ID)
+		filePath := filepath.Join(m.storageDir, filename)
+		data, err := json.MarshalIndent(item, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := ioutil.WriteFile(filePath, data, 0644); err != nil {
+			return err
+		}
+		m.index[item.ID] = filePath
+	}
+
+	if m.config.EnableCache {
+		m.cache[item.ID] = item
+	}
+	return nil
 }
 
 // Delete 删除记忆项
@@ -499,12 +525,20 @@ func (m *BaseLongTermMemory) getItemNoLock(id string) (*MemoryItem, error) {
 
 // saveItemNoLock 保存项（不加锁）
 func (m *BaseLongTermMemory) saveItemNoLock(item *MemoryItem) error {
+	if item.ID == "" {
+		return fmt.Errorf("empty memory item ID")
+	}
 	data, err := json.MarshalIndent(item, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	filePath := m.index[item.ID]
+	filePath, exists := m.index[item.ID]
+	if !exists || filePath == "" {
+		filename := fmt.Sprintf("%s.json", item.ID)
+		filePath = filepath.Join(m.storageDir, filename)
+		m.index[item.ID] = filePath
+	}
 	return ioutil.WriteFile(filePath, data, 0644)
 }
 

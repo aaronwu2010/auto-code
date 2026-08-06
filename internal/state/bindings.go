@@ -84,6 +84,11 @@ type SendMessageResponse struct {
 func (b *WailsBindings) SendMessage(request SendMessageRequest) SendMessageResponse {
 	println("SendMessage: 收到请求, prompt=", request.Prompt)
 
+	if b.appState.GetIsProcessing() {
+		println("SendMessage: 警告 - 已有正在处理的请求，拒绝并发提交")
+		return SendMessageResponse{Success: false, Error: "a request is already in progress, please wait"}
+	}
+
 	b.mu.RLock()
 	eng := b.engine
 	b.mu.RUnlock()
@@ -103,7 +108,6 @@ func (b *WailsBindings) SendMessage(request SendMessageRequest) SendMessageRespo
 	println("SendMessage: 准备调用 SetIsProcessing(true)")
 	b.appState.SetIsProcessing(true)
 	println("SendMessage: SetIsProcessing(true) 返回")
-	defer b.appState.SetIsProcessing(false)
 
 	println("SendMessage: 准备调用 eng.SubmitMessage, ctx=", b.ctx != nil)
 	println("SendMessage: engine type=", fmt.Sprintf("%T", eng))
@@ -114,6 +118,10 @@ func (b *WailsBindings) SendMessage(request SendMessageRequest) SendMessageRespo
 	println("SendMessage: 调用后，channel=", outputCh != nil)
 
 	go func() {
+		defer func() {
+			b.appState.SetIsProcessing(false)
+			println("SendMessage: goroutine 结束，SetIsProcessing(false)")
+		}()
 		msgCount := 0
 		for msg := range outputCh {
 			msgCount++
