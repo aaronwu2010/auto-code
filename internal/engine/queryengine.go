@@ -213,6 +213,32 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 				onProgress(fmt.Sprintf("Tool result: %s", truncateString(fmt.Sprintf("%v", result.Data), 100)))
 			}
 		},
+		OnPhaseChange: func(phase string, toolName string, toolInput any) {
+			switch phase {
+			case "call_model":
+				qe.appState.SetCurrentToolUse(nil)
+				qe.appState.SetStatusLineText(fmt.Sprintf("Turn %d: 正在思考中...", turnCount+1))
+			case "tool_start":
+				qe.appState.SetCurrentToolUse(&state.ToolUseState{
+					ToolName:  toolName,
+					ToolUseID: fmt.Sprintf("tool_%d_%s", turnCount, toolName),
+					Input:     toolInput,
+					Status:    "running",
+				})
+				qe.appState.SetStatusLineText(fmt.Sprintf("正在执行工具: %s", toolName))
+			case "tool_done":
+				prev := qe.appState.GetCurrentToolUse()
+				if prev != nil && prev.ToolName == toolName {
+					status := "done"
+					if s, ok := toolInput.(string); ok && s != "" {
+						status = s
+					}
+					prev.Status = status
+					qe.appState.SetCurrentToolUse(prev)
+				}
+				qe.appState.SetStatusLineText(fmt.Sprintf("工具 %s 执行完成", toolName))
+			}
+		},
 	}
 
 	if onProgress != nil {
@@ -392,6 +418,8 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 
 			if output.Type == "terminal" || output.Type == "error" || output.Type == "interrupted" {
 				println("SubmitMessage: 终止输出，退出循环")
+				qe.appState.SetCurrentToolUse(nil)
+				qe.appState.SetStatusLineText("")
 				return
 			}
 		}

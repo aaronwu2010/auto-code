@@ -41,13 +41,14 @@ type QueryParams struct {
 }
 
 type QueryDeps struct {
-	CallModel    func(ctx context.Context, params QueryParams) (<-chan QueryOutput, error)
-	Microcompact func(messages []types.Message) []types.Message
-	AutoCompact  func(messages []types.Message) (*CompactionResult, error)
-	GenerateUUID func() string
-	GetCostUSD   func() float64
-	OnToolResult func(result *tools.ToolResult, toolCtx *tools.ToolUseContext)
-	GetTools     func() []tools.Tool
+	CallModel     func(ctx context.Context, params QueryParams) (<-chan QueryOutput, error)
+	Microcompact  func(messages []types.Message) []types.Message
+	AutoCompact   func(messages []types.Message) (*CompactionResult, error)
+	GenerateUUID  func() string
+	GetCostUSD    func() float64
+	OnToolResult  func(result *tools.ToolResult, toolCtx *tools.ToolUseContext)
+	GetTools      func() []tools.Tool
+	OnPhaseChange func(phase string, toolName string, toolInput any)
 }
 
 type CompactionResult struct {
@@ -305,6 +306,9 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			currentTools = deps.GetTools()
 		}
 
+		if deps.OnPhaseChange != nil {
+			deps.OnPhaseChange("call_model", "", nil)
+		}
 		streamCh, err := deps.CallModel(ctx, QueryParams{
 			Messages:     messages,
 			SystemPrompt: params.SystemPrompt,
@@ -415,7 +419,20 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 				_ = json.Unmarshal(tc.Function.Arguments, &input)
 			}
 
+			if deps.OnPhaseChange != nil && tool != nil {
+				deps.OnPhaseChange("tool_start", tool.Name(), input)
+			}
+
 			result := executeToolCall(ctx, tool, input, params.CanUseTool, state.ToolUseContext)
+
+			if deps.OnPhaseChange != nil && tool != nil {
+				status := "done"
+				if result.Err != nil {
+					status = "error"
+				}
+				deps.OnPhaseChange("tool_done", tool.Name(), status)
+			}
+
 			if result.Message != nil {
 				msgIdx := len(state.Messages)
 				toolResultMessages = append(toolResultMessages, *result.Message)

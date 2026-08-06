@@ -71,6 +71,40 @@ function App() {
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; filePath: string } | null>(null);
 
+  const [currentToolUse, setCurrentToolUse] = useState<{
+    tool_name: string;
+    tool_use_id?: string;
+    input?: unknown;
+    status: string;
+  } | null>(null);
+
+  type ActivityPhase = "call_model" | "tool_start" | "tool_done" | "thinking";
+  interface ActivityEntry {
+    id: string;
+    timestamp: number;
+    phase: ActivityPhase;
+    toolName?: string;
+    status?: string;
+    detail?: string;
+  }
+  const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
+  const sessionActivityRef = useRef<ActivityEntry[]>([]);
+
+  const appendActivity = useCallback((entry: Omit<ActivityEntry, "id" | "timestamp">) => {
+    const newEntry: ActivityEntry = {
+      ...entry,
+      id: Math.random().toString(36).slice(2) + Date.now().toString(36),
+      timestamp: Date.now(),
+    };
+    sessionActivityRef.current = [...sessionActivityRef.current, newEntry].slice(-100);
+    setActivityLog([...sessionActivityRef.current]);
+  }, []);
+
+  const resetSessionActivity = useCallback(() => {
+    sessionActivityRef.current = [];
+    setActivityLog([]);
+  }, []);
+
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
@@ -226,10 +260,41 @@ function App() {
         const event: StateChangeEvent =
           typeof data === "string" ? JSON.parse(data) : (data as StateChangeEvent);
         if (event.type === "status_update") {
-          setStatusText(event.value as string);
+          const v = event.value as string;
+          setStatusText(v);
+          if (v && v.includes("思考")) {
+            appendActivity({ phase: "call_model", detail: v });
+          } else if (v && v.includes("完成")) {
+            // done
+          }
         }
         if (event.type === "processing_update") {
-          setIsLoading(event.value as boolean);
+          const v = event.value as boolean;
+          setIsLoading(v);
+          if (v) {
+            resetSessionActivity();
+          }
+        }
+        if (event.type === "tool_use_update") {
+          const v = event.value as { tool_name: string; status: string; input?: unknown } | null;
+          setCurrentToolUse(v);
+          if (v) {
+            if (v.status === "running") {
+              appendActivity({
+                phase: "tool_start",
+                toolName: v.tool_name,
+                status: "running",
+                detail: formatToolDetail(v.tool_name, v.input),
+              });
+              setIsToolCalling(true);
+            } else if (v.status === "done" || v.status === "error") {
+              appendActivity({
+                phase: "tool_done",
+                toolName: v.tool_name,
+                status: v.status,
+              });
+            }
+          }
         }
       } catch {}
     });
@@ -251,7 +316,7 @@ function App() {
             if (exists) return prev;
             return [...prev, msg.message!];
           });
-        } else if (msg.message) {
+        } else if (msg.message && msg.message.role !== "tool") {
           setMessages((prev) => {
             const exists = prev.some((m) => m.id === msg.message!.id);
             if (exists) return prev;
@@ -262,6 +327,8 @@ function App() {
           setIsLoading(false);
           setStreamingMessage(null);
           setIsToolCalling(false);
+          setCurrentToolUse(null);
+          setStatusText("");
           // 对话结束后刷新 token 占用
           GetContextUsage().then(setContextUsage).catch(() => {});
         }
@@ -319,6 +386,111 @@ function App() {
     }
   };
 
+  const formatToolDetail = (_toolName: string, input?: unknown): string => {
+    if (!input) return "";
+    try {
+      const obj = typeof input === "string" ? JSON.parse(input) : input;
+      const parts: string[] = [];
+      for (const key of Object.keys(obj)) {
+        const val = obj[key];
+        let s = typeof val === "string" ? val : JSON.stringify(val);
+        if (s.length > 60) s = s.slice(0, 60) + "…";
+        parts.push(`${key}: ${s}`);
+        if (parts.length >= 2) break;
+      }
+      return parts.join(" · ");
+    } catch {
+      return "";
+    }
+  };
+
+  const getToolIcon = (toolName: string): string => {
+    const n = toolName.toLowerCase();
+    if (n.includes("read") || n.includes("file")) return "📄";
+    if (n.includes("write")) return "✍️";
+    if (n.includes("edit") || n.includes("patch")) return "🔧";
+    if (n.includes("bash") || n.includes("shell") || n.includes("powershell")) return "🖥️";
+    if (n.includes("search") || n.includes("grep") || n.includes("glob")) return "🔍";
+    if (n.includes("list") || n.includes("dir")) return "📂";
+    if (n.includes("agent") || n.includes("sub") || n.includes("delegate")) return "🧠";
+    if (n.includes("http") || n.includes("fetch") || n.includes("web")) return "🌐";
+    return "🛠️";
+  };
+
+  const renderActivityTimeline = (entries: ActivityEntry[]) => {
+    if (!entries || entries.length === 0) return null;
+    return (
+      <div className="mt-3 border-t border-slate-700/40 pt-3 space-y-1.5">
+        <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5 font-semibold">
+          ⏱️ Agent 活动
+        </div>
+        {entries.slice(-12).map((e) => {
+          const isRunning = e.status === "running" && e.phase !== "tool_done";
+          const isError = e.status === "error";
+          return (
+            <div
+              key={e.id}
+              className={`flex items-start gap-2 text-xs py-0.5 ${
+                isRunning ? "text-sky-300" : isError ? "text-red-300" : "text-slate-400"
+              }`}
+            >
+              <span className="mt-0.5 shrink-0">
+                {e.phase === "call_model" ? (
+                  isRunning ? (
+                    <span className="inline-flex gap-0.5">
+                      <span className="w-1.5 h-1.5 bg-sky-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                      <span className="w-1.5 h-1.5 bg-sky-400 rounded-full animate-bounce" style={{ animationDelay: '100ms' }}></span>
+                      <span className="w-1.5 h-1.5 bg-sky-400 rounded-full animate-bounce" style={{ animationDelay: '200ms' }}></span>
+                    </span>
+                  ) : (
+                    "💭"
+                  )
+                ) : e.phase === "tool_start" ? (
+                  isRunning ? (
+                    <span className="inline-block w-3 h-3 rounded-full border-2 border-amber-400 border-t-transparent animate-spin"></span>
+                  ) : (
+                    "▶"
+                  )
+                ) : e.phase === "tool_done" ? (
+                  isError ? "❌" : "✅"
+                ) : "•"}
+              </span>
+              <span className="flex-1 break-all">
+                {e.phase === "call_model" && (
+                  <span>
+                    <span className="font-semibold text-slate-300">思考中</span>
+                    {e.detail && <span className="text-slate-500 ml-1">{e.detail}</span>}
+                  </span>
+                )}
+                {e.phase === "tool_start" && (
+                  <span>
+                    <span className="inline-flex items-center gap-1">
+                      <span>{getToolIcon(e.toolName || "")}</span>
+                      <span className="font-semibold text-slate-300">{e.toolName}</span>
+                    </span>
+                    {isRunning && <span className="ml-1 text-amber-400">运行中…</span>}
+                    {e.detail && (
+                      <span className="ml-1.5 text-slate-500">({e.detail})</span>
+                    )}
+                  </span>
+                )}
+                {e.phase === "tool_done" && (
+                  <span className="text-slate-500">
+                    {getToolIcon(e.toolName || "")} {e.toolName}{" "}
+                    {isError ? "失败" : "完成"}
+                  </span>
+                )}
+              </span>
+              <span className="text-slate-600 tabular-nums shrink-0 ml-1">
+                {new Date(e.timestamp).toLocaleTimeString("zh-CN", { hour12: false })}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   const renderContentBlock = (block: ContentBlock, idx: number) => {
     switch (block.type) {
       case "text":
@@ -330,20 +502,7 @@ function App() {
       case "tool_use":
         return null;
       case "tool_result":
-        return (
-          <div
-            key={idx}
-            className={`rounded-lg px-3 py-2 my-1.5 text-sm ${
-              block.is_error
-                ? "bg-red-900/20 border border-red-800/40"
-                : "bg-emerald-900/20 border border-emerald-800/40"
-            }`}
-          >
-            <pre className="whitespace-pre-wrap break-words text-slate-300">
-              {block.tool_output}
-            </pre>
-          </div>
-        );
+        return null;
       case "thinking":
         return (
           <details
@@ -366,6 +525,8 @@ function App() {
   const renderMessage = (msg: Message) => {
     const isUser = msg.role === "user";
     const isSystem = msg.role === "system";
+    const isTool = msg.role === "tool";
+    if (isTool) return null;
 
     return (
       <div
@@ -634,16 +795,7 @@ function App() {
                 </div>
                 <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
                   {streamingMessage.content}
-                  {!streamingMessage.content && isToolCalling ? (
-                    <span className="flex items-center gap-2 text-amber-400">
-                      <span className="flex gap-1">
-                        <span className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
-                        <span className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                        <span className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
-                      </span>
-                      正在调用工具...
-                    </span>
-                  ) : (
+                  {!streamingMessage.content && (
                     <span className="inline-block w-2 h-4 bg-sky-400 ml-0.5 align-middle animate-pulse rounded-sm"></span>
                   )}
                 </div>
@@ -657,31 +809,42 @@ function App() {
                     </pre>
                   </details>
                 )}
+                {renderActivityTimeline(activityLog)}
               </div>
             )}
-            {isToolCalling && !streamingMessage && (
+            {!streamingMessage && (isLoading || isToolCalling) && (
               <div className="mb-4 px-4 py-3 rounded-2xl max-w-[85%] bg-slate-800/60 border border-slate-700/50 text-slate-200 shadow-sm">
                 <div className="text-[10px] mb-2 font-semibold uppercase tracking-wider text-slate-500">
                   assistant
                 </div>
-                <div className="flex items-center gap-2 text-amber-400 text-sm">
-                  <span className="flex gap-1">
-                    <span className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
-                    <span className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                    <span className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
-                  </span>
-                  正在调用工具...
+                <div className="flex items-center gap-2 text-sm text-slate-300 mb-1">
+                  {currentToolUse ? (
+                    <>
+                      <span className="inline-block w-3 h-3 rounded-full border-2 border-amber-400 border-t-transparent animate-spin"></span>
+                      <span className="font-semibold">
+                        {getToolIcon(currentToolUse.tool_name)} {currentToolUse.tool_name}
+                      </span>
+                      <span className="text-amber-400">运行中…</span>
+                      {formatToolDetail(currentToolUse.tool_name, currentToolUse.input) && (
+                        <span className="text-slate-500 text-xs ml-1">
+                          ({formatToolDetail(currentToolUse.tool_name, currentToolUse.input)})
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <span className="flex gap-1">
+                        <span className="w-2 h-2 bg-sky-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                        <span className="w-2 h-2 bg-sky-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                        <span className="w-2 h-2 bg-sky-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                      </span>
+                      <span className="font-semibold text-slate-300">
+                        {statusText || "正在思考中…"}
+                      </span>
+                    </>
+                  )}
                 </div>
-              </div>
-            )}
-            {isLoading && !streamingMessage && (
-              <div className="flex items-center gap-3 text-slate-500 text-sm px-4 py-3">
-                <div className="flex gap-1">
-                  <span className="w-2 h-2 bg-sky-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
-                  <span className="w-2 h-2 bg-sky-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                  <span className="w-2 h-2 bg-sky-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
-                </div>
-                <span>正在思考中...</span>
+                {renderActivityTimeline(activityLog)}
               </div>
             )}
             <div ref={messagesEndRef} />

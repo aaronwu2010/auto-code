@@ -101,6 +101,145 @@ function App() {
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
   const [phaseHint, setPhaseHint] = useState<string>("");
 
+  const [currentToolUse, setCurrentToolUse] = useState<{
+    tool_name: string;
+    tool_use_id?: string;
+    input?: unknown;
+    status: string;
+  } | null>(null);
+
+  type ActivityPhase = "call_model" | "tool_start" | "tool_done" | "thinking";
+  interface ActivityEntry {
+    id: string;
+    timestamp: number;
+    phase: ActivityPhase;
+    toolName?: string;
+    status?: string;
+    detail?: string;
+  }
+  const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
+  const sessionActivityRef = useRef<ActivityEntry[]>([]);
+
+  const appendActivity = useCallback((entry: Omit<ActivityEntry, "id" | "timestamp">) => {
+    const newEntry: ActivityEntry = {
+      ...entry,
+      id: Math.random().toString(36).slice(2) + Date.now().toString(36),
+      timestamp: Date.now(),
+    };
+    sessionActivityRef.current = [...sessionActivityRef.current, newEntry].slice(-100);
+    setActivityLog([...sessionActivityRef.current]);
+  }, []);
+
+  const resetSessionActivity = useCallback(() => {
+    sessionActivityRef.current = [];
+    setActivityLog([]);
+  }, []);
+
+  const formatToolDetail = (toolName: string, input?: unknown): string => {
+    if (!input) return "";
+    try {
+      const obj = typeof input === "string" ? JSON.parse(input) : input;
+      const parts: string[] = [];
+      for (const key of Object.keys(obj)) {
+        const val = (obj as Record<string, unknown>)[key];
+        let s = typeof val === "string" ? val : JSON.stringify(val);
+        if (s.length > 60) s = s.slice(0, 60) + "…";
+        parts.push(`${key}: ${s}`);
+        if (parts.length >= 2) break;
+      }
+      return parts.join(" · ");
+    } catch {
+      return "";
+    }
+  };
+
+  const getToolIcon = (toolName: string): string => {
+    const n = toolName.toLowerCase();
+    if (n.includes("read") || n.includes("file")) return "📄";
+    if (n.includes("write")) return "✍️";
+    if (n.includes("edit") || n.includes("patch")) return "🔧";
+    if (n.includes("bash") || n.includes("shell") || n.includes("powershell")) return "🖥️";
+    if (n.includes("search") || n.includes("grep") || n.includes("glob")) return "🔍";
+    if (n.includes("list") || n.includes("dir")) return "📂";
+    if (n.includes("agent") || n.includes("sub") || n.includes("delegate")) return "🧠";
+    if (n.includes("http") || n.includes("fetch") || n.includes("web")) return "🌐";
+    return "🛠️";
+  };
+
+  const renderActivityTimeline = (entries: ActivityEntry[]) => {
+    if (!entries || entries.length === 0) return null;
+    return (
+      <div className="mt-3 border-t border-slate-700/40 pt-3 space-y-1.5">
+        <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5 font-semibold">
+          ⏱️ Agent 活动
+        </div>
+        {entries.slice(-12).map((e) => {
+          const isRunning = e.status === "running" && e.phase !== "tool_done";
+          const isError = e.status === "error";
+          return (
+            <div
+              key={e.id}
+              className={`flex items-start gap-2 text-xs py-0.5 ${
+                isRunning ? "text-sky-300" : isError ? "text-red-300" : "text-slate-400"
+              }`}
+            >
+              <span className="mt-0.5 shrink-0">
+                {e.phase === "call_model" ? (
+                  isRunning ? (
+                    <span className="inline-flex gap-0.5">
+                      <span className="w-1.5 h-1.5 bg-sky-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                      <span className="w-1.5 h-1.5 bg-sky-400 rounded-full animate-bounce" style={{ animationDelay: '100ms' }}></span>
+                      <span className="w-1.5 h-1.5 bg-sky-400 rounded-full animate-bounce" style={{ animationDelay: '200ms' }}></span>
+                    </span>
+                  ) : (
+                    "💭"
+                  )
+                ) : e.phase === "tool_start" ? (
+                  isRunning ? (
+                    <span className="inline-block w-3 h-3 rounded-full border-2 border-amber-400 border-t-transparent animate-spin"></span>
+                  ) : (
+                    "▶"
+                  )
+                ) : e.phase === "tool_done" ? (
+                  isError ? "❌" : "✅"
+                ) : "•"}
+              </span>
+              <span className="flex-1 break-all">
+                {e.phase === "call_model" && (
+                  <span>
+                    <span className="font-semibold text-slate-300">思考中</span>
+                    {e.detail && <span className="text-slate-500 ml-1">{e.detail}</span>}
+                  </span>
+                )}
+                {e.phase === "tool_start" && (
+                  <span>
+                    <span className="inline-flex items-center gap-1">
+                      <span>{getToolIcon(e.toolName || "")}</span>
+                      <span className="font-semibold text-slate-300">{e.toolName}</span>
+                    </span>
+                    {isRunning && <span className="ml-1 text-amber-400">运行中…</span>}
+                    {e.detail && (
+                      <span className="ml-1.5 text-slate-500">({e.detail})</span>
+                    )}
+                  </span>
+                )}
+                {e.phase === "tool_done" && (
+                  <span className="text-slate-500">
+                    {getToolIcon(e.toolName || "")} {e.toolName}{" "}
+                    {isError ? "失败" : "完成"}
+                  </span>
+                )}
+              </span>
+              <span className="text-slate-600 tabular-nums shrink-0 ml-1">
+                {new Date(e.timestamp).toLocaleTimeString("zh-CN", { hour12: false })}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, []);
@@ -191,7 +330,13 @@ function App() {
       try {
         if (msg.type === "stream_chunk" && msg.message) {
           setStreamingMessage((prev) => {
-            // 只有在内容/思考变长（或首条）时才替换，避免覆盖"更长的版本"
+            if (!prev) {
+              appendActivity({
+                phase: "call_model",
+                status: "running",
+                detail: msg.message!.model ? `(${msg.message!.model})` : "",
+              });
+            }
             if (!prev) return msg.message!;
             const newContent = msg.message!.content ?? "";
             const oldContent = prev.content ?? "";
@@ -213,6 +358,7 @@ function App() {
           setIsToolCalling(true);
           setPhaseHint("正在调用工具（读取文件/执行命令）...");
         } else if (msg.type === "user" && msg.message) {
+          resetSessionActivity();
           setMessages((prev) => {
             const exists = prev.some((m) => m.id === msg.message!.id);
             if (exists) return prev;
@@ -251,6 +397,7 @@ function App() {
           setStreamingMessage(null);
           setIsToolCalling(false);
           setPhaseHint("");
+          setCurrentToolUse(null);
           // 对话结束后刷新 token 占用
           api.getContextUsage().then(setContextUsage).catch(() => {});
         }
@@ -261,10 +408,41 @@ function App() {
 
     const offState = api.onStateChange((event: StateChangeEvent) => {
       if (event.type === "status_update") {
-        setStatusText(String(event.value ?? ""));
+        const v = String(event.value ?? "");
+        setStatusText(v);
+        if (v && v.includes("思考")) {
+          appendActivity({ phase: "call_model", detail: v });
+        }
       }
       if (event.type === "processing_update") {
-        setIsLoading(Boolean(event.value));
+        const v = Boolean(event.value);
+        setIsLoading(v);
+        if (v) resetSessionActivity();
+      }
+      if (event.type === "tool_use_update") {
+        const v = event.value as {
+          tool_name: string;
+          status: string;
+          input?: unknown;
+        } | null;
+        setCurrentToolUse(v);
+        if (v) {
+          if (v.status === "running") {
+            appendActivity({
+              phase: "tool_start",
+              toolName: v.tool_name,
+              status: "running",
+              detail: formatToolDetail(v.tool_name, v.input),
+            });
+            setIsToolCalling(true);
+          } else if (v.status === "done" || v.status === "error") {
+            appendActivity({
+              phase: "tool_done",
+              toolName: v.tool_name,
+              status: v.status,
+            });
+          }
+        }
       }
     });
 
@@ -342,20 +520,7 @@ function App() {
       case "tool_use":
         return null;
       case "tool_result":
-        return (
-          <div
-            key={idx}
-            className={`rounded-lg px-3 py-2 my-1.5 text-sm ${
-              block.is_error
-                ? "bg-red-900/20 border border-red-800/40"
-                : "bg-emerald-900/20 border border-emerald-800/40"
-            }`}
-          >
-            <pre className="whitespace-pre-wrap break-words text-slate-300">
-              {block.tool_output}
-            </pre>
-          </div>
-        );
+        return null;
       case "thinking":
         return (
           <details
@@ -378,6 +543,8 @@ function App() {
   const renderMessage = (msg: Message) => {
     const isUser = msg.role === "user";
     const isSystem = msg.role === "system";
+    const isTool = msg.role === "tool";
+    if (isTool) return null;
 
     return (
       <div
@@ -416,6 +583,7 @@ function App() {
           : (
             <MarkdownContent text={msg.content} />
           )}
+        {!isUser && !isSystem && renderActivityTimeline(activityLog)}
       </div>
     );
   };
@@ -785,6 +953,7 @@ function App() {
                     <span>{phaseHint || "正在处理..."}</span>
                   </div>
                 )}
+                {renderActivityTimeline(activityLog)}
               </div>
             )}
             <div ref={messagesEndRef} />
