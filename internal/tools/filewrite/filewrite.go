@@ -50,7 +50,7 @@ func buildInputSchema() map[string]any {
 		"properties": map[string]any{
 			"file_path": map[string]any{
 				"type":        "string",
-				"description": "The absolute path to the file to write (must be absolute, not relative)",
+				"description": "The absolute or relative path to the file to write. Relative paths are resolved against the project directory. For new files, prefer placing them inside the current project directory.",
 			},
 			"content": map[string]any{
 				"type":        "string",
@@ -170,9 +170,18 @@ func (t *FileWriteTool) Prompt(_ context.Context, _ tools.PromptOptions) (string
 Usage:
 - This tool will overwrite the existing file if there is one at the path provided.
 - If this is an existing file, you MUST use the Read tool first to read the file's contents. This tool will fail if you did not read the file first.
-- ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.
+- The file_path parameter supports BOTH absolute paths and relative paths. Relative paths are resolved against the project directory automatically, so you can simply write 'report.xlsx' or 'scripts/gen.py' and it will be placed correctly.
+- When the user EXPLICITLY asks you to generate files (e.g. data exports, reports, scripts, logs, compiled output), you are encouraged to create new files directly under the project directory. For example, if the user says '整理数据并写入 xls', write a Python script to an appropriate location in the project.
+- For binary / structured output formats, use the Write + Bash/PowerShell pattern:
+  - .xlsx / .xls:  write a Python script that uses 'openpyxl' or 'xlsxwriter' (pip install openpyxl xlsxwriter)
+  - .docx / .doc:  write a Python script that uses 'python-docx' (pip install python-docx)
+  - .pptx:         write a Python script that uses 'python-pptx' (pip install python-pptx)
+  - .png / .jpg:   write a Python script that uses 'Pillow' or 'matplotlib' (pip install pillow matplotlib)
+  - .pdf:          write a Python script that uses 'fpdf' or 'reportlab' (pip install fpdf reportlab)
+  - .csv / .json:  can be written directly via this tool (they are text), no script needed
+- ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required by the user's request.
 - NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
-- The file_path must be an absolute path, not a relative path.`, nil
+- Even if you use a relative path, it is automatically resolved to an absolute path anchored at the project directory.`, nil
 }
 
 func isUNCPath(path string) bool {

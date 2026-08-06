@@ -86,7 +86,7 @@ func buildInputSchema() map[string]any {
 		"properties": map[string]any{
 			"file_path": map[string]any{
 				"type":        "string",
-				"description": "The absolute path to the file to read",
+				"description": "The absolute or relative path to the file to read. Relative paths are resolved against the project directory.",
 			},
 			"offset": map[string]any{
 				"type":        "integer",
@@ -229,7 +229,7 @@ func (t *FileReadTool) Prompt(_ context.Context, _ tools.PromptOptions) (string,
 Assume this tool is able to read all files on the machine. If the User provides a path to a file assume that path is valid. It is okay to read a file that does not exist; an error will be returned.
 
 Usage:
-- The file_path parameter must be an absolute path, not a relative path
+- The file_path parameter supports BOTH absolute paths and relative paths. Relative paths are automatically resolved against the project directory, so you can write e.g. 'README.md' or 'src/main.go' without an absolute prefix.
 - By default, it reads up to %d lines starting from the beginning of the file
 - You can optionally specify a line offset and limit (especially handy for long files), but it's recommended to read the whole file by not providing these parameters
 - Results are returned using cat -n format, with line numbers starting at 1

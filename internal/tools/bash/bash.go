@@ -66,7 +66,7 @@ func buildInputSchema() map[string]any {
 			},
 			"workdir": map[string]any{
 				"type":        "string",
-				"description": "The working directory for the command. Defaults to current directory.",
+				"description": "The working directory for the command. Defaults to the project directory if not specified.",
 			},
 		},
 		"required":             []string{"command"},
@@ -217,9 +217,18 @@ func (t *BashTool) Prompt(_ context.Context, _ tools.PromptOptions) (string, err
 Usage:
 - The command parameter is the bash command to execute
 - The timeout parameter is optional (defaults to 120 seconds)
-- The workdir parameter sets the working directory for the command
+- The workdir parameter sets the working directory for the command; if omitted, it defaults to the current project directory, so you usually don't need to set it for project-local operations.
 - Commands run in a non-interactive shell; avoid commands requiring user input
-- Be aware: OS is ` + runtime.GOOS + `, Shell: ` + getShell(), nil
+- Be aware: OS is ` + runtime.GOOS + `, Shell: ` + getShell() + `
+
+Common recipes:
+- Install Python libraries for file generation:
+    pip install openpyxl xlsxwriter python-docx python-pptx pillow matplotlib fpdf reportlab
+- Run a Python script you wrote (e.g. to generate XLSX/DOCX/PPTX/PNG/PDF):
+    python scripts/gen_report.py
+- Pip install + run in one shot:
+    pip install openpyxl && python scripts/gen_xlsx.py
+- If a file was just written via the Write tool, the default workdir (project directory) can directly reference the relative path.`, nil
 }
 
 func getShell() string {

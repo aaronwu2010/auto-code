@@ -55,7 +55,7 @@ func buildInputSchema() map[string]any {
 		"properties": map[string]any{
 			"file_path": map[string]any{
 				"type":        "string",
-				"description": "The absolute path to the file to modify",
+				"description": "The absolute or relative path to the file to modify. Relative paths are resolved against the project directory.",
 			},
 			"old_string": map[string]any{
 				"type":        "string",
@@ -210,9 +210,8 @@ func (t *FileEditTool) Prompt(_ context.Context, _ tools.PromptOptions) (string,
 Usage:
 - You must use your Read tool at least once in the conversation before editing. This tool will error if you attempt an edit without reading the file.
 - When editing text from Read tool output, ensure you preserve the exact indentation and formatting (tabs/spaces, newlines, etc.)
-- ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.
+- The file_path parameter supports BOTH absolute paths and relative paths. Relative paths are automatically resolved against the project directory.
 - Use replace_all for replacing and renaming strings across the file.
-- The file_path must be an absolute path, not a relative path.
 - old_string must match the file content exactly — including all whitespace, indentation, and line endings.
 - new_string must be different from old_string.`, nil
 }

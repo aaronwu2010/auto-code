@@ -65,6 +65,10 @@ func buildInputSchema() map[string]any {
 				"type":        "integer",
 				"description": "Optional timeout in milliseconds (default 120000)",
 			},
+			"workdir": map[string]any{
+				"type":        "string",
+				"description": "The working directory for the command. Defaults to the project directory if not specified.",
+			},
 		},
 		"required":             []string{"command"},
 		"additionalProperties": false,
@@ -201,7 +205,17 @@ func (t *PowerShellTool) Prompt(_ context.Context, _ tools.PromptOptions) (strin
 	return `Executes a PowerShell command on Windows.
 - The command parameter is the PowerShell command to execute
 - This tool is only available on Windows platforms
-- Commands run with -NoProfile flag for faster startup`, nil
+- Commands run with -NoProfile flag for faster startup
+- The workdir parameter sets the working directory; if omitted, it defaults to the current project directory, so you usually don't need to set it for project-local operations.
+
+Common recipes (Windows):
+- Install Python libraries for file generation:
+    pip install openpyxl xlsxwriter python-docx python-pptx pillow matplotlib fpdf reportlab
+- Run a Python script (e.g. to generate XLSX/DOCX/PPTX/PNG/PDF):
+    python scripts\gen_report.py
+- Pip install + run in one shot:
+    pip install openpyxl; python scripts\gen_xlsx.py
+- Write tool writes relative to the project directory; this tool's default workdir matches, so the relative path will work directly.`, nil
 }
 
 func ParsePowerShellInput(raw map[string]any) (PowerShellInput, error) {
