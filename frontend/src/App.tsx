@@ -630,20 +630,23 @@ function App() {
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleSubmit()}
-                  disabled={isLoading || !input.trim()}
-                  className="bg-gradient-to-r from-sky-600 to-indigo-600 text-white rounded-2xl px-6 py-3.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed hover:from-sky-500 hover:to-indigo-500 text-sm font-medium transition-all duration-200 shadow-lg shadow-sky-900/30 hover:shadow-sky-800/40 flex items-center gap-2"
-                >
-                  {isLoading ? "⏳ 发送中" : "发送 →"}
-                </button>
-                {isLoading && (
+                {isLoading ? (
                   <button
+                    type="button"
                     onClick={handleInterrupt}
-                    className="bg-red-900/40 text-red-400 rounded-2xl px-6 py-2 cursor-pointer hover:bg-red-900/60 text-xs border border-red-800/40 transition-all duration-200"
+                    className="bg-gradient-to-r from-red-600 to-red-700 text-white rounded-2xl px-6 py-3.5 cursor-pointer hover:from-red-500 hover:to-red-600 text-sm font-medium transition-all duration-200 shadow-lg shadow-red-900/30 hover:shadow-red-800/40 flex items-center gap-2 animate-pulse"
                   >
-                    取消
+                    <span className="w-3 h-3 rounded-sm bg-white inline-block"></span>
+                    停止
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleSubmit()}
+                    disabled={!input.trim()}
+                    className="bg-gradient-to-r from-sky-600 to-indigo-600 text-white rounded-2xl px-6 py-3.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed hover:from-sky-500 hover:to-indigo-500 text-sm font-medium transition-all duration-200 shadow-lg shadow-sky-900/30 hover:shadow-sky-800/40 flex items-center gap-2"
+                  >
+                    发送 →
                   </button>
                 )}
               </div>
