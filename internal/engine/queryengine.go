@@ -3,13 +3,13 @@ package engine
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/auto-code/auto-code/internal/api"
 	"github.com/auto-code/auto-code/internal/compact"
+	engineContext "github.com/auto-code/auto-code/internal/engine/context"
 	"github.com/auto-code/auto-code/internal/engine/query"
 	"github.com/auto-code/auto-code/internal/prompts"
 	"github.com/auto-code/auto-code/internal/services/extractmemories"
@@ -34,6 +34,7 @@ type QueryEngine struct {
 	config          *QueryEngineConfig
 	usage           api.Usage
 	readFileState   *tools.FileStateCache
+	ctxBuilder      *engineContext.ContextBuilder
 	streamContent   string
 	streamThinking  string
 	streamToolCalls []types.ToolCall
@@ -95,6 +96,11 @@ func NewQueryEngine(appState *state.AppState, config *QueryEngineConfig) *QueryE
 func (qe *QueryEngine) Startup(ctx context.Context) {
 	qe.ctx, qe.cancel = context.WithCancel(ctx)
 	qe.setupAgentTool()
+}
+
+// SetContextBuilder 注入上下文构建器，用于在系统提示中包含记忆文件和 Git 状态
+func (qe *QueryEngine) SetContextBuilder(cb *engineContext.ContextBuilder) {
+	qe.ctxBuilder = cb
 }
 
 func (qe *QueryEngine) setupAgentTool() {
@@ -285,9 +291,9 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 		switch output.Type {
 		case "assistant":
 			if output.Message != nil {
-				lastAssistantContent = output.Message.Content
-				assistantAccum = output.Message.Content
-				assistantThinkingAccum = output.Message.Thinking
+				lastAssistantContent += output.Message.Content
+				assistantAccum += output.Message.Content
+				assistantThinkingAccum += output.Message.Thinking
 				if len(output.Message.ToolCalls) > 0 {
 					toolCallsAccum = output.Message.ToolCalls
 				}
@@ -340,20 +346,13 @@ func (qe *QueryEngine) Shutdown(_ context.Context) {
 }
 
 func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan SDKMessage {
-	println("SubmitMessage: 开始处理, prompt=", prompt)
 	ch := make(chan SDKMessage, 256)
 
 	go func() {
 		defer close(ch)
 		defer func() {
-			if r := recover(); r != nil {
-				buf := make([]byte, 4096)
-				n := runtime.Stack(buf, false)
-				println("SubmitMessage: panic recovered - ", fmt.Sprint(r))
-				println("Stack trace:\n", string(buf[:n]))
-			}
+			recover()
 		}()
-		println("SubmitMessage: goroutine 开始执行")
 
 		qe.mu.Lock()
 		if qe.streamMsgID != "" || qe.streamContent != "" {
@@ -370,10 +369,8 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		}
 		qe.messages = append(qe.messages, userMsg)
 		qe.mu.Unlock()
-		println("SubmitMessage: 用户消息已添加, id=", userMsg.ID)
 
 		ch <- SDKMessage{Type: "user", Message: &userMsg, SessionID: qe.sessionID}
-		println("SubmitMessage: 用户消息已发送到通道")
 
 		submitCtx, submitCancel := context.WithCancel(ctx)
 		defer submitCancel()
@@ -387,19 +384,15 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 			}()
 		}
 
-		println("SubmitMessage: 开始构建系统提示")
 		systemPrompt, err := qe.buildSystemPrompt(submitCtx)
 		if err != nil {
-			println("SubmitMessage: 构建系统提示失败 - ", err.Error())
 			ch <- SDKMessage{Type: "error", Subtype: "system_prompt_error", Message: api.GetAssistantMessageFromError(err), SessionID: qe.sessionID}
 			return
 		}
-		println("SubmitMessage: 系统提示构建完成")
 
 		permissionCtx := qe.appState.GetToolPermissionContext()
 		allTools := qe.toolReg.AssembleToolPool(permissionCtx, nil)
 		coreTools := qe.toolReg.GetCoreTools(permissionCtx, nil)
-		println("SubmitMessage: 核心工具数量=", len(coreTools), ", 全部工具数量=", len(allTools))
 
 		canUseTool := qe.config.CanUseTool
 		if canUseTool == nil {
@@ -493,28 +486,23 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		}
 
 		outputCh := query.Query(submitCtx, queryParams, deps)
-		println("SubmitMessage: query.Query 返回，开始循环读取输出")
 
 		outputCount := 0
 		for output := range outputCh {
 			outputCount++
-			println("SubmitMessage: 收到输出 #", outputCount, ", type=", output.Type)
 			sdkMsgs := qe.processQueryOutput(submitCtx, output)
 			for _, sdkMsg := range sdkMsgs {
 				ch <- sdkMsg
 			}
 
 			if output.Type == "terminal" || output.Type == "error" || output.Type == "interrupted" {
-				println("SubmitMessage: 终止输出，退出循环")
 				qe.appState.SetCurrentToolUse(nil)
 				qe.appState.SetStatusLineText("")
 				return
 			}
 		}
-		println("SubmitMessage: 输出通道关闭，共处理 ", outputCount, " 个输出")
 	}()
 
-	println("SubmitMessage: 返回通道")
 	return ch
 }
 
@@ -655,18 +643,14 @@ func (qe *QueryEngine) GetContextUsage(ctx context.Context) (*types.ContextUsage
 }
 
 func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) (<-chan query.QueryOutput, error) {
-	println("callModel: 开始调用, model=", params.Model)
 	if qe.apiClient == nil {
-		println("callModel: 错误 - apiClient 为 nil")
 		ch := make(chan query.QueryOutput, 1)
 		ch <- query.QueryOutput{Type: "error", Error: fmt.Errorf("Ollama 客户端未配置")}
 		close(ch)
 		return ch, nil
 	}
-	println("callModel: apiClient 已就绪")
 
 	ollamaMessages := api.ConvertMessagesToOllama(params.Messages, params.SystemPrompt.Content)
-	println("callModel: 消息转换完成, 消息数量=", len(ollamaMessages))
 
 	toolDefs := make([]api.ToolFunction, 0, len(params.Tools))
 	for _, t := range params.Tools {
@@ -677,7 +661,6 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 			Parameters:  t.InputSchema(),
 		})
 	}
-	println("callModel: 工具定义完成, 工具数量=", len(toolDefs))
 
 	req := api.OllamaChatRequest{
 		Model:    api.NormalizeModelName(string(params.Model)),
@@ -685,7 +668,6 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 		Stream:   true,
 		Options:  qe.config.ModelOptions,
 	}
-	println("callModel: 请求创建完成, model=", req.Model)
 
 	if len(toolDefs) > 0 {
 		req.Tools = api.ConvertToolsToOllama(toolDefs)
@@ -695,13 +677,10 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 		req.Think = true
 	}
 
-	println("callModel: 调用 ChatWithStreaming...")
 	streamCh, err := qe.apiClient.ChatWithStreaming(ctx, req)
 	if err != nil {
-		println("callModel: ChatWithStreaming 错误 - ", err.Error())
 		return nil, err
 	}
-	println("callModel: ChatWithStreaming 返回成功")
 
 	outputCh := make(chan query.QueryOutput, 256)
 	go func() {
@@ -716,7 +695,9 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 				outputCh <- query.QueryOutput{Type: "tool_calls_start"}
 			case "done":
 				if msg.Usage != nil {
+					qe.mu.Lock()
 					qe.usage = *msg.Usage
+					qe.mu.Unlock()
 				}
 				outputCh <- query.QueryOutput{Type: "stream_event", Data: msg}
 			case "error":
@@ -778,7 +759,6 @@ func (qe *QueryEngine) processQueryOutput(ctx context.Context, output query.Quer
 		if t, ok := output.Data.(*query.Terminal); ok {
 			reason = t.Reason
 		}
-		println("processQueryOutput: 收到 terminal, reason=", reason, ", streamContentLen=", len(qe.streamContent), ", streamToolCalls=", len(qe.streamToolCalls))
 		if qe.streamContent != "" || qe.streamThinking != "" || len(qe.streamToolCalls) > 0 {
 			modelName := ""
 			if output.Message != nil {
@@ -841,6 +821,18 @@ func (qe *QueryEngine) buildSystemPrompt(ctx context.Context) (*types.SystemProm
 
 	content := prompts.BuildSystemPrompt(ctx, config)
 
+	// 注入上下文构建器中的记忆文件和 Git 状态
+	if qe.ctxBuilder != nil {
+		if gitStatus, err := qe.ctxBuilder.GetGitStatus(ctx); err == nil && gitStatus != "" {
+			content += "\n\n# Git Status\n" + gitStatus
+		}
+		if userCtx, err := qe.ctxBuilder.GetUserContext(ctx); err == nil {
+			if claudeMd, ok := userCtx["claudeMd"]; ok && claudeMd != "" {
+				content += "\n\n# Project Memory\n" + claudeMd
+			}
+		}
+	}
+
 	// 添加项目目录信息（关键：告诉 AI 使用这个目录）
 	projectDir := qe.config.CWD
 	if projectDir == "" {
@@ -902,7 +894,6 @@ func (qe *QueryEngine) microcompact(messages []types.Message) []types.Message {
 		return messages
 	}
 
-	// 保留系统消息和最后的用户消息
 	var kept []types.Message
 	var hasSystem bool
 
@@ -917,6 +908,26 @@ func (qe *QueryEngine) microcompact(messages []types.Message) []types.Message {
 
 	// 计算需要保留的消息数量（从末尾开始）
 	keepFromIndex := len(messages) - 10 // 保留最后10条消息
+	if keepFromIndex < 0 {
+		keepFromIndex = 0
+	}
+	if hasSystem && keepFromIndex == 0 {
+		keepFromIndex = 1 // 跳过系统消息
+	}
+
+	// 向前扩展保留窗口：如果保留的第一条消息是 tool 类型，
+	// 需要向前找到对应的带 tool_calls 的 assistant 消息，否则 API 会报错
+	for keepFromIndex > 0 && messages[keepFromIndex].Role == types.RoleTool {
+		keepFromIndex--
+		// 跳过连续的 tool 消息，找到触发它们的 assistant 消息
+		for keepFromIndex > 0 && messages[keepFromIndex].Role == types.RoleTool {
+			keepFromIndex--
+		}
+		// 如果找到了带 tool_calls 的 assistant 消息，保持它
+		if keepFromIndex >= 0 && messages[keepFromIndex].HasToolCalls() {
+			break
+		}
+	}
 	if keepFromIndex < 0 {
 		keepFromIndex = 0
 	}
@@ -964,6 +975,11 @@ func (qe *QueryEngine) autoCompact(messages []types.Message) (*query.CompactionR
 	}
 
 	result := compact.MicrocompactMessages(compactMessages)
+
+	// 边界检查：确保 MessagesAfter 不超过 compactMessages 长度
+	if result.MessagesAfter < 0 || result.MessagesAfter > len(compactMessages) {
+		return nil, nil
+	}
 
 	// 转换回 types.Message
 	var compactedTypes []types.Message

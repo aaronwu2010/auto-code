@@ -361,12 +361,10 @@ func (e *BasePlanExecutor) orderTasksByDependencies(plan *Plan) ([]*Task, error)
 		return nil
 	}
 
-	// 访问所有任务
+	// 访问所有任务，确保每个任务都被处理（visit 内部会跳过已访问的任务）
 	for _, task := range plan.Tasks {
-		if !visited[task.ID] {
-			if err := visit(task.ID); err != nil {
-				return nil, err
-			}
+		if err := visit(task.ID); err != nil {
+			return nil, err
 		}
 	}
 

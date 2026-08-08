@@ -73,6 +73,7 @@ func main() {
 	}
 
 	queryEngine := engine.NewQueryEngine(app, engineConfig)
+	queryEngine.SetContextBuilder(ctxBuilder)
 
 	bindings.SetEngine(queryEngine)
 

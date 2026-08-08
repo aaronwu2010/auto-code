@@ -148,6 +148,11 @@ func (s *StdioServer) handleLine(ctx context.Context, line []byte) {
 // dispatch 根据方法名路由到 Adapter 对应处理函数。
 // 返回值 result 为成功结果，err 为 *RPCError。
 func (s *StdioServer) dispatch(ctx context.Context, req *Request) (interface{}, *RPCError) {
+	// 验证请求方法是否为已知合法方法
+	if !ValidateMethod(req.Method) {
+		return nil, NewError(CodeMethodNotFound, "method not found: "+req.Method)
+	}
+
 	// 解析 params 的辅助函数
 	parseParams := func(dst interface{}) *RPCError {
 		if len(req.Params) == 0 {

@@ -200,7 +200,8 @@ func (t *CoordinatorTool) executeSubTasks(ctx context.Context, tasks []SubTaskDe
 	completed := make(map[string]bool)
 	started := make(map[string]bool)
 
-	canStart := func(task SubTaskDef) bool {
+	// tryStart 原子地检查依赖并标记为已启动，避免竞态条件
+	tryStart := func(task SubTaskDef) bool {
 		mu.Lock()
 		defer mu.Unlock()
 		if started[task.ID] {
@@ -211,13 +212,8 @@ func (t *CoordinatorTool) executeSubTasks(ctx context.Context, tasks []SubTaskDe
 				return false
 			}
 		}
+		started[task.ID] = true
 		return true
-	}
-
-	markStarted := func(id string) {
-		mu.Lock()
-		defer mu.Unlock()
-		started[id] = true
 	}
 
 	markCompleted := func(id string) {
@@ -253,7 +249,6 @@ func (t *CoordinatorTool) executeSubTasks(ctx context.Context, tasks []SubTaskDe
 		semaphore <- struct{}{}
 		defer func() { <-semaphore }()
 
-		markStarted(task.ID)
 		resultIdx := -1
 		for i, t := range tasks {
 			if t.ID == task.ID {
@@ -305,7 +300,7 @@ func (t *CoordinatorTool) executeSubTasks(ctx context.Context, tasks []SubTaskDe
 
 		launched := false
 		for _, task := range tasks {
-			if canStart(task) {
+			if tryStart(task) {
 				wg.Add(1)
 				go runTask(task)
 				launched = true
@@ -313,6 +308,14 @@ func (t *CoordinatorTool) executeSubTasks(ctx context.Context, tasks []SubTaskDe
 		}
 
 		if !launched && !allDone() {
+			// 检测死锁：没有新任务启动且没有正在运行的任务
+			mu.Lock()
+			runningCount := len(started) - len(completed)
+			mu.Unlock()
+			if runningCount == 0 {
+				progressFn("[Coordinator] Deadlock detected: circular dependency or all remaining tasks blocked")
+				break
+			}
 			time.Sleep(100 * time.Millisecond)
 		}
 	}

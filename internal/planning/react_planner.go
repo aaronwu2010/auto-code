@@ -106,6 +106,10 @@ func (p *ReActPlanner) Run(ctx context.Context, goal string) (*ReActTrace, error
 // runLoop 执行 ReAct 循环
 func (p *ReActPlanner) runLoop(ctx context.Context, trace *ReActTrace) error {
 	iteration := 0
+	maxIterations := p.config.MaxIterations
+	if maxIterations <= 0 {
+		maxIterations = 10 // MaxIterations 为 0 或负数时使用默认值，避免无法执行或失去上限保护
+	}
 
 	for {
 		// 检查上下文
@@ -116,10 +120,10 @@ func (p *ReActPlanner) runLoop(ctx context.Context, trace *ReActTrace) error {
 		default:
 		}
 
-		// 检查迭代次数
-		if iteration >= p.config.MaxIterations {
+		// 硬性上限检查：每次迭代开始时校验，防止无限循环
+		if iteration >= maxIterations {
 			trace.Fail("max iterations reached")
-			return fmt.Errorf("max iterations %d reached", p.config.MaxIterations)
+			return fmt.Errorf("max iterations %d reached", maxIterations)
 		}
 
 		// 检查步骤数

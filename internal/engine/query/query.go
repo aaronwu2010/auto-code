@@ -493,20 +493,12 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			}
 		}
 
-		var lastMsg types.Message
-		if len(state.Messages) > 0 {
-			lastMsg = state.Messages[len(state.Messages)-1]
-		}
-		println("queryLoop: stream结束, stopReason=", stopReason, ", needsFollowUp=", needsFollowUp, ", lastMsg.role=", string(lastMsg.Role), ", hasToolCalls=", lastMsg.HasToolCalls(), ", toolCallCount=", len(lastMsg.ToolCalls))
-
 		if stopReason == "max_output_tokens" && (assistantBuffer == nil || assistantBuffer.Content == "") {
-			println("queryLoop: 输出被截断且无有效内容, 已达到max_output_tokens, 终止")
 			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "max_output_tokens"}}
 			return
 		}
 
 		if !needsFollowUp {
-			println("queryLoop: 无需继续，发送 terminal completed")
 			if stopReason != "" {
 				ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: stopReason}}
 			} else {
@@ -514,11 +506,8 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			}
 			return
 		}
-		println("queryLoop: 需要继续，开始执行工具调用，工具数量=", len(getLastToolCalls(state.Messages)))
-
 		toolCalls := getLastToolCalls(state.Messages)
 		if len(toolCalls) == 0 {
-			println("queryLoop: needsFollowUp=true 但没有 tool calls，终止")
 			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "completed"}}
 			return
 		}
@@ -610,21 +599,16 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 
 		state.TurnCount++
 
-		println("queryLoop: 工具执行完成, turnCount=", state.TurnCount, ", maxTurns=", params.MaxTurns, ", 消息总数=", len(state.Messages))
-
 		if params.MaxBudgetUsd > 0 && deps.GetCostUSD != nil && deps.GetCostUSD() >= params.MaxBudgetUsd {
-			println("queryLoop: 达到预算上限，终止")
 			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "max_budget_usd"}}
 			return
 		}
 
 		if state.TurnCount >= params.MaxTurns {
-			println("queryLoop: 达到最大轮数，终止, turnCount=", state.TurnCount)
 			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "max_turns_reached"}}
 			return
 		}
 
-		println("queryLoop: 进入下一轮循环...")
 		state.Transition = &Continue{Reason: ContinueNextTurn}
 	}
 }
@@ -643,10 +627,10 @@ func mergeAssistantFragment(prev, fragment *types.Message) *types.Message {
 	}
 
 	if fragment.Content != "" {
-		prev.Content = fragment.Content
+		prev.Content += fragment.Content
 	}
 	if fragment.Thinking != "" {
-		prev.Thinking = fragment.Thinking
+		prev.Thinking += fragment.Thinking
 	}
 	if len(fragment.ToolCalls) > 0 {
 		prev.ToolCalls = make([]types.ToolCall, len(fragment.ToolCalls))

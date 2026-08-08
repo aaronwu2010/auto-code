@@ -1,9 +1,12 @@
 package hooks
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os/exec"
 	"strings"
 	"time"
@@ -184,17 +187,30 @@ func (e *HookExecutor) executePromptHook(ctx context.Context, hook *PromptHook, 
 		timeout = hook.Timeout * 1000
 	}
 
-	_, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
+	hookCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
 	defer cancel()
 
 	inputJSON, _ := json.Marshal(input)
 	promptText := strings.ReplaceAll(hook.Prompt, "$ARGUMENTS", string(inputJSON))
 
-	_ = promptText
+	cmd := executil.CommandContext(hookCtx, "sh", "-c", promptText)
+	cmd.Stdin = strings.NewReader(string(inputJSON))
 
-	return &HookResult{
-		Outcome: HookOutcomeSuccess,
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if hookCtx.Err() == context.DeadlineExceeded {
+			return &HookResult{
+				Outcome: HookOutcomeNonBlockingError,
+				Message: fmt.Sprintf("Hook timed out: %s", hook.Prompt),
+			}
+		}
+		return &HookResult{
+			Outcome: HookOutcomeNonBlockingError,
+			Message: fmt.Sprintf("Hook failed: %s", err.Error()),
+		}
 	}
+
+	return parseHookOutput(hook.Prompt, string(output))
 }
 
 func (e *HookExecutor) executeHTTPHook(ctx context.Context, hook *HTTPHook, input HookInput) *HookResult {
@@ -203,14 +219,47 @@ func (e *HookExecutor) executeHTTPHook(ctx context.Context, hook *HTTPHook, inpu
 		timeout = hook.Timeout * 1000
 	}
 
-	_, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
+	hookCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
 	defer cancel()
 
-	_ = hook.URL
+	inputJSON, _ := json.Marshal(input)
 
-	return &HookResult{
-		Outcome: HookOutcomeSuccess,
+	req, err := http.NewRequestWithContext(hookCtx, http.MethodPost, hook.URL, bytes.NewReader(inputJSON))
+	if err != nil {
+		return &HookResult{
+			Outcome: HookOutcomeNonBlockingError,
+			Message: fmt.Sprintf("Hook failed: %s", err.Error()),
+		}
 	}
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range hook.Headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		if hookCtx.Err() == context.DeadlineExceeded {
+			return &HookResult{
+				Outcome: HookOutcomeNonBlockingError,
+				Message: fmt.Sprintf("Hook timed out: %s", hook.URL),
+			}
+		}
+		return &HookResult{
+			Outcome: HookOutcomeNonBlockingError,
+			Message: fmt.Sprintf("Hook failed: %s", err.Error()),
+		}
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return &HookResult{
+			Outcome: HookOutcomeNonBlockingError,
+			Message: fmt.Sprintf("Hook failed: %s", err.Error()),
+		}
+	}
+
+	return parseHookOutput(hook.URL, string(body))
 }
 
 func (e *HookExecutor) executeAgentHook(ctx context.Context, hook *AgentHook, input HookInput) *HookResult {
@@ -219,17 +268,30 @@ func (e *HookExecutor) executeAgentHook(ctx context.Context, hook *AgentHook, in
 		timeout = hook.Timeout * 1000
 	}
 
-	_, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
+	hookCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
 	defer cancel()
 
 	inputJSON, _ := json.Marshal(input)
 	promptText := strings.ReplaceAll(hook.Prompt, "$ARGUMENTS", string(inputJSON))
 
-	_ = promptText
+	cmd := executil.CommandContext(hookCtx, "sh", "-c", promptText)
+	cmd.Stdin = strings.NewReader(string(inputJSON))
 
-	return &HookResult{
-		Outcome: HookOutcomeSuccess,
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if hookCtx.Err() == context.DeadlineExceeded {
+			return &HookResult{
+				Outcome: HookOutcomeNonBlockingError,
+				Message: fmt.Sprintf("Hook timed out: %s", hook.Prompt),
+			}
+		}
+		return &HookResult{
+			Outcome: HookOutcomeNonBlockingError,
+			Message: fmt.Sprintf("Hook failed: %s", err.Error()),
+		}
 	}
+
+	return parseHookOutput(hook.Prompt, string(output))
 }
 
 func (e *HookExecutor) executeFunctionHook(ctx context.Context, hook *FunctionHook, input HookInput) *HookResult {

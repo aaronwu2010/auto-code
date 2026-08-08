@@ -51,3 +51,30 @@ const (
 	CodeInvalidParam   = -32602
 	CodeMethodNotFound = -32601
 )
+
+// validMethods 列出所有已知的合法请求方法。
+var validMethods = map[string]bool{
+	"send_message":        true,
+	"interrupt":           true,
+	"get_messages":        true,
+	"get_app_state":       true,
+	"set_model":           true,
+	"set_thinking":        true,
+	"set_fast_mode":       true,
+	"set_permission_mode": true,
+	"set_ollama_config":   true,
+	"get_ollama_config":   true,
+	"list_models":         true,
+	"get_context_usage":   true,
+	"check_health":        true,
+	"get_session_id":      true,
+	"get_available_tools": true,
+	"refresh_context":     true,
+	"set_workspace":       true,
+	"get_workspace":       true,
+}
+
+// ValidateMethod 检查请求方法是否为已知合法方法。
+func ValidateMethod(method string) bool {
+	return validMethods[method]
+}

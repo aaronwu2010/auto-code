@@ -95,6 +95,7 @@ func main() {
 	}
 
 	eng := engine.NewQueryEngine(app, engineConfig)
+	eng.SetContextBuilder(ctxBuilder)
 	eng.Startup(ctx)
 	defer eng.Shutdown(ctx)
 

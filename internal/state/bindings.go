@@ -82,10 +82,7 @@ type SendMessageResponse struct {
 }
 
 func (b *WailsBindings) SendMessage(request SendMessageRequest) SendMessageResponse {
-	println("SendMessage: 收到请求, prompt=", request.Prompt)
-
-	if b.appState.GetIsProcessing() {
-		println("SendMessage: 警告 - 已有正在处理的请求，拒绝并发提交")
+	if !b.appState.CompareAndSetIsProcessing(false, true) {
 		return SendMessageResponse{Success: false, Error: "a request is already in progress, please wait"}
 	}
 
@@ -94,50 +91,32 @@ func (b *WailsBindings) SendMessage(request SendMessageRequest) SendMessageRespo
 	b.mu.RUnlock()
 
 	if eng == nil {
-		println("SendMessage: 错误 - engine 未初始化")
 		return SendMessageResponse{Success: false, Error: "engine not initialized"}
 	}
 
 	if b.ctx == nil {
-		println("SendMessage: 错误 - ctx 为 nil")
 		return SendMessageResponse{Success: false, Error: "context is nil"}
 	}
 
-	println("SendMessage: engine 已就绪，开始处理消息")
-
-	println("SendMessage: 准备调用 SetIsProcessing(true)")
-	b.appState.SetIsProcessing(true)
-	println("SendMessage: SetIsProcessing(true) 返回")
-
-	println("SendMessage: 准备调用 eng.SubmitMessage, ctx=", b.ctx != nil)
-	println("SendMessage: engine type=", fmt.Sprintf("%T", eng))
-
 	// 检查 engine 是否实现了正确的方法
-	println("SendMessage: 调用前...")
 	outputCh := eng.SubmitMessage(b.ctx, request.Prompt)
-	println("SendMessage: 调用后，channel=", outputCh != nil)
 
 	go func() {
 		defer func() {
 			b.appState.SetIsProcessing(false)
-			println("SendMessage: goroutine 结束，SetIsProcessing(false)")
 		}()
 		msgCount := 0
 		for msg := range outputCh {
 			msgCount++
-			println("SendMessage: 收到消息 #", msgCount, ", type=", msg.Type)
 			data, _ := json.Marshal(msg)
 			wailsRuntime.EventsEmit(b.ctx, "query:message", string(data))
 
 			if msg.Type == "result" || msg.Type == "error" {
-				println("SendMessage: 消息处理完成，退出 goroutine")
 				return
 			}
 		}
-		println("SendMessage: 消息通道关闭，共处理", msgCount, "条消息")
 	}()
 
-	println("SendMessage: 返回响应给前端")
 	return SendMessageResponse{
 		Success:   true,
 		SessionID: string(eng.GetSessionID()),

@@ -348,7 +348,6 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 		if len(event.Message.ToolCalls) > 0 {
 			if !toolCallsSent {
 				toolCallsSent = true
-				println("parseNDJSONStream: 检测到 tool_calls 开始, 数量=", len(event.Message.ToolCalls))
 				ch <- StreamMessage{Type: "tool_calls_start"}
 			}
 			toolCallsAcc = append(toolCallsAcc, event.Message.ToolCalls...)
@@ -372,7 +371,6 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 			}
 
 			if len(toolCallsAcc) > 0 {
-				println("parseNDJSONStream: done时发送 tool_calls 消息, 数量=", len(toolCallsAcc))
 				msg := &types.Message{
 					Role:      types.RoleAssistant,
 					ToolCalls: toolCallsAcc,
@@ -382,7 +380,6 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 				ch <- StreamMessage{Type: "tool_calls", Message: msg}
 			}
 
-			println("parseNDJSONStream: 流式结束, stopReason=", stopReason, ", contentLen=", len(assistantContent), ", toolCalls总数=", len(toolCallsAcc))
 			ch <- StreamMessage{
 				Type:       "done",
 				StopReason: stopReason,

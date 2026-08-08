@@ -422,14 +422,17 @@ func (m *BaseLongTermMemory) Archive(ctx context.Context, query *MemoryQuery) er
 	if err != nil {
 		return err
 	}
-	defer file.Close()
 
 	gzWriter := gzip.NewWriter(file)
-	defer gzWriter.Close()
-
 	encoder := json.NewEncoder(gzWriter)
 
-	// 归档匹配的记忆
+	// 先将匹配项写入归档，记录成功写入的项，暂不删除源文件
+	type archivedItem struct {
+		id       string
+		filePath string
+	}
+	var archived []archivedItem
+
 	for id, filePath := range m.index {
 		item, err := m.loadItem(id, filePath)
 		if err != nil {
@@ -438,15 +441,33 @@ func (m *BaseLongTermMemory) Archive(ctx context.Context, query *MemoryQuery) er
 
 		if item.Matches(query) {
 			if err := encoder.Encode(item); err != nil {
+				// 写入失败，记录日志并保留源文件
+				m.logOperation("archive_write_error", id, 0)
 				continue
 			}
-
-			// 从主存储中删除
-			os.Remove(filePath)
-			delete(m.index, id)
-			delete(m.cache, id)
-			m.deleteCount++
+			archived = append(archived, archivedItem{id: id, filePath: filePath})
 		}
+	}
+
+	// 关闭 gzip 写入器和文件，确保数据落盘
+	if err := gzWriter.Close(); err != nil {
+		m.logOperation("archive_close_error", "", 0)
+		file.Close()
+		os.Remove(archiveFile) // 删除可能不完整的归档文件
+		return fmt.Errorf("failed to close archive writer: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		m.logOperation("archive_close_error", "", 0)
+		os.Remove(archiveFile)
+		return fmt.Errorf("failed to close archive file: %w", err)
+	}
+
+	// 归档写入成功，删除源文件
+	for _, a := range archived {
+		os.Remove(a.filePath)
+		delete(m.index, a.id)
+		delete(m.cache, a.id)
+		m.deleteCount++
 	}
 
 	return nil

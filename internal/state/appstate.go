@@ -208,10 +208,31 @@ func (s *AppState) emit(event StateChangeEvent) {
 	}
 }
 
+// GetSnapshot 返回 AppState 的只读快照副本，避免外部无锁访问内部字段
+func (s *AppState) GetSnapshot() AppStateSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return AppStateSnapshot{
+		MainLoopModel:          string(s.MainLoopModel),
+		IsProcessing:           s.IsProcessing,
+		CurrentToolUse:         s.CurrentToolUse,
+		StatusLineText:         s.StatusLineText,
+		RemoteConnectionStatus: s.RemoteConnectionStatus,
+		ThinkingEnabled:        s.ThinkingEnabled,
+		FastMode:               s.FastMode,
+		Tasks:                  s.Tasks,
+		Todos:                  s.Todos,
+		MCP:                    s.MCP,
+		ToolPermissionMode:     string(s.ToolPermissionCtx.Mode),
+	}
+}
+
+// Get 保留向后兼容，但标记为已废弃，应使用 GetSnapshot
 func (s *AppState) Get() *AppState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s
+	cp := *s
+	return &cp
 }
 
 func (s *AppState) Set(f func(prev *AppState) *AppState) {
@@ -339,6 +360,19 @@ func (s *AppState) SetIsProcessing(processing bool) {
 	s.mu.Unlock()
 
 	s.emit(StateChangeEvent{Type: "processing_update", Value: processing})
+}
+
+// CompareAndSetIsProcessing 原子地检查当前状态并在匹配时设置新值。
+// 如果当前状态等于 expected，则设置为 new 并返回 true；否则返回 false。
+func (s *AppState) CompareAndSetIsProcessing(expected, new bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.IsProcessing != expected {
+		return false
+	}
+	s.IsProcessing = new
+	s.emit(StateChangeEvent{Type: "processing_update", Value: new})
+	return true
 }
 
 func (s *AppState) GetIsProcessing() bool {
