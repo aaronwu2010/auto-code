@@ -518,6 +518,8 @@ export namespace types {
 	    }
 	}
 	export class ToolCall {
+	    id?: string;
+	    type?: string;
 	    function: FunctionCall;
 	
 	    static createFrom(source: any = {}) {
@@ -526,6 +528,8 @@ export namespace types {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.type = source["type"];
 	        this.function = this.convertValues(source["function"], FunctionCall);
 	    }
 	
@@ -552,6 +556,7 @@ export namespace types {
 	    role: string;
 	    content: string;
 	    tool_calls?: ToolCall[];
+	    tool_call_id?: string;
 	    thinking?: string;
 	    images?: string[];
 	    model?: string;
@@ -570,6 +575,7 @@ export namespace types {
 	        this.role = source["role"];
 	        this.content = source["content"];
 	        this.tool_calls = this.convertValues(source["tool_calls"], ToolCall);
+	        this.tool_call_id = source["tool_call_id"];
 	        this.thinking = source["thinking"];
 	        this.images = source["images"];
 	        this.model = source["model"];

@@ -189,9 +189,10 @@ func (e *StreamingToolExecutor) executeTool(ctx context.Context, tool tools.Tool
 	if permResult.Behavior == types.DecisionDeny {
 		return &toolExecutionResult{
 			Message: &types.Message{
-				Role:      types.RoleTool,
-				Content:   permResult.Message,
-				Timestamp: time.Now().Unix(),
+				Role:       types.RoleTool,
+				Content:    permResult.Message,
+				ToolCallID: toolUseID,
+				Timestamp:  time.Now().Unix(),
 			},
 			ToolUseID:   toolUseID,
 			ToolCallIdx: toolCallIndex,
@@ -211,9 +212,10 @@ func (e *StreamingToolExecutor) executeTool(ctx context.Context, tool tools.Tool
 			}
 			return &toolExecutionResult{
 				Message: &types.Message{
-					Role:      types.RoleTool,
-					Content:   msg,
-					Timestamp: time.Now().Unix(),
+					Role:       types.RoleTool,
+					Content:    msg,
+					ToolCallID: toolUseID,
+					Timestamp:  time.Now().Unix(),
 				},
 				ToolUseID:   toolUseID,
 				ToolCallIdx: toolCallIndex,
@@ -226,9 +228,10 @@ func (e *StreamingToolExecutor) executeTool(ctx context.Context, tool tools.Tool
 		log.Printf("[Query] tool.Call error for %s: %v", tool.Name(), err)
 		return &toolExecutionResult{
 			Message: &types.Message{
-				Role:      types.RoleTool,
-				Content:   err.Error(),
-				Timestamp: time.Now().Unix(),
+				Role:       types.RoleTool,
+				Content:    err.Error(),
+				ToolCallID: toolUseID,
+				Timestamp:  time.Now().Unix(),
 			},
 			Err:         err,
 			ToolUseID:   toolUseID,
@@ -239,9 +242,10 @@ func (e *StreamingToolExecutor) executeTool(ctx context.Context, tool tools.Tool
 	output := formatToolOutput(toolResult)
 	return &toolExecutionResult{
 		Message: &types.Message{
-			Role:      types.RoleTool,
-			Content:   output,
-			Timestamp: time.Now().Unix(),
+			Role:       types.RoleTool,
+			Content:    output,
+			ToolCallID: toolUseID,
+			Timestamp:  time.Now().Unix(),
 		},
 		Result:      toolResult,
 		ToolUseID:   toolUseID,
@@ -455,8 +459,17 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 
 					if assistantBuffer.HasToolCalls() {
 						needsFollowUp = true
+						// 确保每个tool_call有唯一ID
+						for i := range assistantBuffer.ToolCalls {
+							if assistantBuffer.ToolCalls[i].ID == "" {
+								assistantBuffer.ToolCalls[i].ID = fmt.Sprintf("call_%d", i)
+							}
+							if assistantBuffer.ToolCalls[i].Type == "" {
+								assistantBuffer.ToolCalls[i].Type = "function"
+							}
+						}
 						for i, tc := range assistantBuffer.ToolCalls {
-							toolUseID := fmt.Sprintf("tool_%d", i)
+							toolUseID := tc.ID
 							if streamingExecutor.IsScheduled(toolUseID) {
 								continue
 							}
@@ -470,9 +483,10 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 								if parseErr != nil {
 									log.Printf("[Query] failed to parse args for %s: %v", tc.Function.Name, parseErr)
 									state.Messages = append(state.Messages, types.Message{
-										Role:      types.RoleTool,
-										Content:   fmt.Sprintf("failed to parse arguments for tool %s: %v", tc.Function.Name, parseErr),
-										Timestamp: time.Now().Unix(),
+										Role:       types.RoleTool,
+										Content:    fmt.Sprintf("failed to parse arguments for tool %s: %v", tc.Function.Name, parseErr),
+										ToolCallID: toolUseID,
+										Timestamp:  time.Now().Unix(),
 									})
 									ch <- QueryOutput{Type: "user", Message: &state.Messages[len(state.Messages)-1]}
 									continue
@@ -554,8 +568,15 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		streamingResults := streamingExecutor.WaitForAllResults(0)
 
 		for i, tc := range toolCalls {
+			toolUseID := tc.ID
+			if toolUseID == "" {
+				toolUseID = fmt.Sprintf("call_%d", i)
+			}
+
 			if result, ok := streamingResults[i]; ok {
 				if result.Message != nil {
+					// 确保tool消息有正确的ToolCallID
+					result.Message.ToolCallID = toolUseID
 					msgIdx := len(state.Messages)
 					state.Messages = append(state.Messages, *result.Message)
 					ch <- QueryOutput{Type: "user", Message: result.Message}
@@ -581,9 +602,10 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			if tool == nil {
 				log.Printf("[Query] tool not found: %s", tc.Function.Name)
 				state.Messages = append(state.Messages, types.Message{
-					Role:      types.RoleTool,
-					Content:   fmt.Sprintf("Tool not found: %s", tc.Function.Name),
-					Timestamp: time.Now().Unix(),
+					Role:       types.RoleTool,
+					Content:    fmt.Sprintf("Tool not found: %s", tc.Function.Name),
+					ToolCallID: toolUseID,
+					Timestamp:  time.Now().Unix(),
 				})
 				ch <- QueryOutput{Type: "user", Message: &state.Messages[len(state.Messages)-1]}
 				continue
@@ -594,9 +616,10 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 				if unmarshalErr := json.Unmarshal(tc.Function.Arguments, &input); unmarshalErr != nil {
 					log.Printf("[Query] failed to unmarshal args for %s: %v", tc.Function.Name, unmarshalErr)
 					state.Messages = append(state.Messages, types.Message{
-						Role:      types.RoleTool,
-						Content:   fmt.Sprintf("failed to parse arguments for tool %s: %v", tc.Function.Name, unmarshalErr),
-						Timestamp: time.Now().Unix(),
+						Role:       types.RoleTool,
+						Content:    fmt.Sprintf("failed to parse arguments for tool %s: %v", tc.Function.Name, unmarshalErr),
+						ToolCallID: toolUseID,
+						Timestamp:  time.Now().Unix(),
 					})
 					ch <- QueryOutput{Type: "user", Message: &state.Messages[len(state.Messages)-1]}
 					continue
@@ -607,7 +630,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 				deps.OnPhaseChange("tool_start", tool.Name(), input)
 			}
 
-			result := executeToolCall(ctx, tool, input, params.CanUseTool, state.ToolUseContext)
+			result := executeToolCall(ctx, tool, input, toolUseID, params.CanUseTool, state.ToolUseContext)
 
 			if deps.OnPhaseChange != nil {
 				status := "done"
@@ -696,7 +719,7 @@ func getLastToolCalls(messages []types.Message) []types.ToolCall {
 	return nil
 }
 
-func executeToolCall(ctx context.Context, tool tools.Tool, input any, canUseTool func(tool tools.Tool, input any) (types.PermissionResult, error), toolCtx *tools.ToolUseContext) *toolExecutionResult {
+func executeToolCall(ctx context.Context, tool tools.Tool, input any, toolUseID string, canUseTool func(tool tools.Tool, input any) (types.PermissionResult, error), toolCtx *tools.ToolUseContext) *toolExecutionResult {
 	log.Printf("[Query] executeToolCall: tool='%s'", tool.Name())
 	if canUseTool != nil {
 		permResult, err := canUseTool(tool, input)
@@ -704,21 +727,25 @@ func executeToolCall(ctx context.Context, tool tools.Tool, input any, canUseTool
 			log.Printf("[Query] executeToolCall canUseTool error for %s: %v", tool.Name(), err)
 			return &toolExecutionResult{
 				Message: &types.Message{
-					Role:      types.RoleTool,
-					Content:   fmt.Sprintf("permission check error: %v", err),
-					Timestamp: time.Now().Unix(),
+					Role:       types.RoleTool,
+					Content:    fmt.Sprintf("permission check error: %v", err),
+					ToolCallID: toolUseID,
+					Timestamp:  time.Now().Unix(),
 				},
-				Err: err,
+				Err:       err,
+				ToolUseID: toolUseID,
 			}
 		}
 		if permResult.Behavior == types.DecisionDeny {
 			log.Printf("[Query] executeToolCall: permission denied for %s", tool.Name())
 			return &toolExecutionResult{
 				Message: &types.Message{
-					Role:      types.RoleTool,
-					Content:   permResult.Message,
-					Timestamp: time.Now().Unix(),
+					Role:       types.RoleTool,
+					Content:    permResult.Message,
+					ToolCallID: toolUseID,
+					Timestamp:  time.Now().Unix(),
 				},
+				ToolUseID: toolUseID,
 			}
 		}
 	}
@@ -729,11 +756,13 @@ func executeToolCall(ctx context.Context, tool tools.Tool, input any, canUseTool
 			log.Printf("[Query] executeToolCall CheckPermissions error for %s: %v", tool.Name(), innerErr)
 			return &toolExecutionResult{
 				Message: &types.Message{
-					Role:      types.RoleTool,
-					Content:   fmt.Sprintf("tool permission error: %v", innerErr),
-					Timestamp: time.Now().Unix(),
+					Role:       types.RoleTool,
+					Content:    fmt.Sprintf("tool permission error: %v", innerErr),
+					ToolCallID: toolUseID,
+					Timestamp:  time.Now().Unix(),
 				},
-				Err: innerErr,
+				Err:       innerErr,
+				ToolUseID: toolUseID,
 			}
 		}
 		if innerPerm.Behavior == types.DecisionDeny {
@@ -744,10 +773,12 @@ func executeToolCall(ctx context.Context, tool tools.Tool, input any, canUseTool
 			log.Printf("[Query] executeToolCall: CheckPermissions denied for %s", tool.Name())
 			return &toolExecutionResult{
 				Message: &types.Message{
-					Role:      types.RoleTool,
-					Content:   msg,
-					Timestamp: time.Now().Unix(),
+					Role:       types.RoleTool,
+					Content:    msg,
+					ToolCallID: toolUseID,
+					Timestamp:  time.Now().Unix(),
 				},
+				ToolUseID: toolUseID,
 			}
 		}
 	}
@@ -758,11 +789,13 @@ func executeToolCall(ctx context.Context, tool tools.Tool, input any, canUseTool
 		log.Printf("[Query] executeToolCall tool.Call error for %s: %v", tool.Name(), err)
 		return &toolExecutionResult{
 			Message: &types.Message{
-				Role:      types.RoleTool,
-				Content:   err.Error(),
-				Timestamp: time.Now().Unix(),
+				Role:       types.RoleTool,
+				Content:    err.Error(),
+				ToolCallID: toolUseID,
+				Timestamp:  time.Now().Unix(),
 			},
-			Err: err,
+			Err:       err,
+			ToolUseID: toolUseID,
 		}
 	}
 
@@ -770,11 +803,13 @@ func executeToolCall(ctx context.Context, tool tools.Tool, input any, canUseTool
 	log.Printf("[Query] executeToolCall: tool '%s' completed, output_len=%d", tool.Name(), len(output))
 	return &toolExecutionResult{
 		Message: &types.Message{
-			Role:      types.RoleTool,
-			Content:   output,
-			Timestamp: time.Now().Unix(),
+			Role:       types.RoleTool,
+			Content:    output,
+			ToolCallID: toolUseID,
+			Timestamp:  time.Now().Unix(),
 		},
-		Result: toolResult,
+		Result:    toolResult,
+		ToolUseID: toolUseID,
 	}
 }
 

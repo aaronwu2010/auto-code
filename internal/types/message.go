@@ -25,19 +25,21 @@ const (
 )
 
 type ContentBlock struct {
-	Type  ContentType `json:"type"`
-	Text  string      `json:"text,omitempty"`
+	Type ContentType `json:"type"`
+	Text string      `json:"text,omitempty"`
 
-	ToolUseID   string          `json:"tool_use_id,omitempty"`
-	ToolName    string          `json:"tool_name,omitempty"`
-	ToolInput   json.RawMessage `json:"tool_input,omitempty"`
-	ToolOutput  string          `json:"tool_output,omitempty"`
-	IsError     bool            `json:"is_error,omitempty"`
+	ToolUseID  string          `json:"tool_use_id,omitempty"`
+	ToolName   string          `json:"tool_name,omitempty"`
+	ToolInput  json.RawMessage `json:"tool_input,omitempty"`
+	ToolOutput string          `json:"tool_output,omitempty"`
+	IsError    bool            `json:"is_error,omitempty"`
 
 	Thinking string `json:"thinking,omitempty"`
 }
 
 type ToolCall struct {
+	ID       string       `json:"id,omitempty"`
+	Type     string       `json:"type,omitempty"`
 	Function FunctionCall `json:"function"`
 }
 
@@ -47,16 +49,17 @@ type FunctionCall struct {
 }
 
 type Message struct {
-	ID        string        `json:"id"`
-	Role      MessageRole   `json:"role"`
-	Content   string        `json:"content"`
-	ToolCalls []ToolCall    `json:"tool_calls,omitempty"`
-	Thinking  string        `json:"thinking,omitempty"`
-	Images    []string      `json:"images,omitempty"`
-	Model     string        `json:"model,omitempty"`
-	Timestamp int64         `json:"timestamp"`
-	IsMeta    bool          `json:"is_meta,omitempty"`
-	UUID      string        `json:"uuid,omitempty"`
+	ID         string      `json:"id"`
+	Role       MessageRole `json:"role"`
+	Content    string      `json:"content"`
+	ToolCalls  []ToolCall  `json:"tool_calls,omitempty"`
+	ToolCallID string      `json:"tool_call_id,omitempty"`
+	Thinking   string      `json:"thinking,omitempty"`
+	Images     []string    `json:"images,omitempty"`
+	Model      string      `json:"model,omitempty"`
+	Timestamp  int64       `json:"timestamp"`
+	IsMeta     bool        `json:"is_meta,omitempty"`
+	UUID       string      `json:"uuid,omitempty"`
 
 	ContentBlocks []ContentBlock `json:"content_blocks,omitempty"`
 }
@@ -91,9 +94,13 @@ func (m *Message) ToContentBlocks() []ContentBlock {
 	}
 
 	for i, tc := range m.ToolCalls {
+		toolUseID := tc.ID
+		if toolUseID == "" {
+			toolUseID = fmt.Sprintf("tool_%d", i)
+		}
 		blocks = append(blocks, ContentBlock{
 			Type:      ContentToolUse,
-			ToolUseID: fmt.Sprintf("tool_%d", i),
+			ToolUseID: toolUseID,
 			ToolName:  tc.Function.Name,
 			ToolInput: tc.Function.Arguments,
 		})

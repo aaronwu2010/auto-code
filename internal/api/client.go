@@ -99,10 +99,11 @@ type OllamaChatRequest struct {
 }
 
 type OllamaMessage struct {
-	Role      string           `json:"role"`
-	Content   string           `json:"content"`
-	Images    []string         `json:"images,omitempty"`
-	ToolCalls []types.ToolCall `json:"tool_calls,omitempty"`
+	Role       string           `json:"role"`
+	Content    string           `json:"content"`
+	Images     []string         `json:"images,omitempty"`
+	ToolCalls  []types.ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
 }
 
 type OllamaToolDef struct {
@@ -591,7 +592,19 @@ func ConvertMessagesToOllama(messages []types.Message, systemPrompt string) []Ol
 		}
 
 		if len(msg.ToolCalls) > 0 {
-			ollamaMsg.ToolCalls = msg.ToolCalls
+			// 确保每个tool_call有ID和Type
+			toolCalls := make([]types.ToolCall, len(msg.ToolCalls))
+			for i, tc := range msg.ToolCalls {
+				tcCopy := tc
+				if tcCopy.ID == "" {
+					tcCopy.ID = fmt.Sprintf("call_%d", i)
+				}
+				if tcCopy.Type == "" {
+					tcCopy.Type = "function"
+				}
+				toolCalls[i] = tcCopy
+			}
+			ollamaMsg.ToolCalls = toolCalls
 		}
 
 		if len(msg.Images) > 0 {
@@ -600,6 +613,7 @@ func ConvertMessagesToOllama(messages []types.Message, systemPrompt string) []Ol
 
 		if msg.Role == types.RoleTool {
 			ollamaMsg.Role = "tool"
+			ollamaMsg.ToolCallID = msg.ToolCallID
 		}
 
 		result = append(result, ollamaMsg)
