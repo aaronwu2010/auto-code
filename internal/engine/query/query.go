@@ -379,6 +379,20 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			}
 		}
 
+		// 估算当前 token 数量，判断是否需要自动压缩
+		if state.AutoCompactTracking != nil {
+			estimatedTokens := 0
+			for _, msg := range messages {
+				estimatedTokens += len(msg.Content) / 4
+			}
+			windowSize := 200000
+			threshold := windowSize - 10000
+			state.AutoCompactTracking.ShouldAutoCompact = estimatedTokens >= threshold
+			if state.AutoCompactTracking.ShouldAutoCompact {
+				log.Printf("[Query] auto-compact 触发: estimated %d tokens >= threshold %d", estimatedTokens, threshold)
+			}
+		}
+
 		if deps.AutoCompact != nil && state.AutoCompactTracking != nil && state.AutoCompactTracking.ShouldAutoCompact {
 			result, err := deps.AutoCompact(messages)
 			if err == nil && result != nil {

@@ -98,6 +98,7 @@ func NewQueryEngine(appState *state.AppState, config *QueryEngineConfig) *QueryE
 func (qe *QueryEngine) Startup(ctx context.Context) {
 	qe.ctx, qe.cancel = context.WithCancel(ctx)
 	qe.setupAgentTool()
+	compact.SetSummarizeFunc(qe.summarizeWithLLM)
 }
 
 // SetContextBuilder 注入上下文构建器，用于在系统提示中包含记忆文件和 Git 状态
@@ -1025,8 +1026,68 @@ func (qe *QueryEngine) microcompact(messages []types.Message) []types.Message {
 	return kept
 }
 
+// summarizeWithLLM 使用 LLM 对对话消息进行智能摘要
+// 实现 compact.SummarizeFunc 接口，通过 API 客户端调用模型生成结构化摘要
+func (qe *QueryEngine) summarizeWithLLM(ctx any, messages []compact.CompactMessage, prompt string) (string, error) {
+	if len(messages) == 0 {
+		log.Printf("[Compact] 消息为空, 跳过摘要")
+		return "", nil
+	}
+
+	// 构建 API 请求消息：先放对话消息，最后放摘要指令
+	ollamaMessages := make([]api.OllamaMessage, 0, len(messages)+1)
+	for _, msg := range messages {
+		role := msg.Role
+		if role == "" {
+			role = "user"
+		}
+		ollamaMessages = append(ollamaMessages, api.OllamaMessage{
+			Role:    role,
+			Content: msg.Content,
+		})
+	}
+	// 摘要指令作为最后一条 user 消息
+	ollamaMessages = append(ollamaMessages, api.OllamaMessage{
+		Role:    "user",
+		Content: prompt,
+	})
+
+	// 摘要任务使用确定性参数：temperature=0，限制输出长度
+	temp := 0.0
+	numPredict := 4096
+	req := api.OllamaChatRequest{
+		Messages: ollamaMessages,
+		Stream:   false,
+		Options: &api.ModelOptions{
+			Temperature: &temp,
+			NumPredict:  &numPredict,
+		},
+	}
+
+	// 使用引擎上下文，确保取消时能级联
+	callCtx := qe.ctx
+	if callCtx == nil {
+		callCtx = context.Background()
+	}
+
+	resp, err := qe.apiClient.ChatWithoutStreaming(callCtx, req)
+	if err != nil {
+		log.Printf("[Compact] LLM 摘要调用失败: %v", err)
+		return "", err
+	}
+
+	if strings.TrimSpace(resp.Content) == "" {
+		log.Printf("[Compact] LLM 返回空内容")
+		return "", fmt.Errorf("LLM 返回空摘要")
+	}
+
+	log.Printf("[Compact] LLM 摘要成功")
+	return resp.Content, nil
+}
+
 func (qe *QueryEngine) autoCompact(messages []types.Message) (*query.CompactionResult, error) {
 	if len(messages) <= 4 {
+		log.Printf("[Compact] 消息数不足, 跳过压缩")
 		return nil, nil // 不需要压缩
 	}
 
@@ -1038,10 +1099,12 @@ func (qe *QueryEngine) autoCompact(messages []types.Message) (*query.CompactionR
 
 	windowSize := 200000 // 默认上下文窗口大小
 	if !ShouldAutoCompact(totalTokens, windowSize) {
+		log.Printf("[Compact] token 未达阈值, 跳过压缩")
 		return nil, nil
 	}
+	log.Printf("[Compact] token 达到阈值, 触发压缩")
 
-	// 执行压缩
+	// 转换为 CompactMessage
 	compactMessages := make([]compact.CompactMessage, len(messages))
 	for i, msg := range messages {
 		compactMessages[i] = compact.CompactMessage{
@@ -1051,6 +1114,66 @@ func (qe *QueryEngine) autoCompact(messages []types.Message) (*query.CompactionR
 		}
 	}
 
+	// === 第一策略：LLM 智能摘要 ===
+	// 保留最近一半消息，对较早的消息进行 LLM 摘要
+	keepCount := len(compactMessages) / 2
+	if keepCount < 2 {
+		keepCount = 2
+	}
+
+	if len(compactMessages) > keepCount {
+		// 调整切分点：避免在 tool 消息处截断（缺少对应 assistant 消息会导致 API 错误）
+		cutPoint := len(compactMessages) - keepCount
+		for cutPoint < len(compactMessages) && compactMessages[cutPoint].Role == "tool" {
+			log.Printf("[Compact] 切分点调整: 避免 tool 消息截断")
+			cutPoint--
+		}
+		if cutPoint < 1 {
+			cutPoint = 1
+		}
+
+		olderMessages := compactMessages[:cutPoint]
+
+		if len(olderMessages) > 0 {
+			log.Printf("[Compact] 开始 LLM 智能摘要")
+			summary, err := qe.summarizeWithLLM(nil, olderMessages, compact.GetCompactPrompt())
+			if err == nil && summary != "" {
+				// 构建压缩后的消息列表
+				var compactedTypes []types.Message
+
+				// 添加摘要消息（user 角色，包含会话延续上下文）
+				compactedTypes = append(compactedTypes, types.Message{
+					ID:        generateMessageID(),
+					Role:      types.RoleUser,
+					Content:   compact.GetCompactUserSummaryMessage(summary, false, "", true),
+					Timestamp: time.Now().Unix(),
+				})
+
+				// 保留切分点之后的最近消息
+				compactedTypes = append(compactedTypes, messages[cutPoint:]...)
+
+				tokensAfter := 0
+				for _, m := range compactedTypes {
+					tokensAfter += len(m.Content) / 4
+				}
+
+				summaryText := fmt.Sprintf("LLM 智能摘要: 压缩 %d 条消息为摘要, 保留 %d 条近期消息, 节省 ~%d tokens",
+					len(olderMessages), len(messages[cutPoint:]), totalTokens-tokensAfter)
+				log.Printf("[Compact] %s", summaryText)
+
+				return &query.CompactionResult{
+					Messages:       compactedTypes,
+					BoundaryMarker: "llm_compact",
+					Summary:        summaryText,
+				}, nil
+			}
+
+			log.Printf("[Compact] LLM 摘要失败，回退到微压缩: %v", err)
+		}
+	}
+
+	// === 第二策略（回退）：微压缩 - 仅过滤空消息、保留 system 和最新 user 消息 ===
+	log.Printf("[Compact] 回退到微压缩策略")
 	result := compact.MicrocompactMessages(compactMessages)
 
 	// 边界检查：确保 MessagesAfter 不超过 compactMessages 长度
@@ -1085,7 +1208,7 @@ func (qe *QueryEngine) autoCompact(messages []types.Message) (*query.CompactionR
 	// 生成压缩摘要
 	summary := ""
 	if result.DidCompact {
-		summary = fmt.Sprintf("Compacted %d messages, saved ~%d tokens", result.MessagesBefore-result.MessagesAfter, result.TokensSaved)
+		summary = fmt.Sprintf("微压缩 %d 条消息, 节省 ~%d tokens", result.MessagesBefore-result.MessagesAfter, result.TokensSaved)
 	}
 
 	return &query.CompactionResult{
