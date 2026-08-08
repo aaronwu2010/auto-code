@@ -186,10 +186,23 @@ func (c *Client) ChatWithStreaming(ctx context.Context, req OllamaChatRequest) (
 			}
 
 			if attempt > 0 {
-				delay := retryConfig.BaseDelay * time.Duration(1<<uint(attempt-1))
+				// 模型加载时使用更长的等待时间
+				baseDelay := retryConfig.BaseDelay
+				if lastErr != nil {
+					if apiErr, ok := lastErr.(*APIError); ok && apiErr.Type == "model_loading" {
+						baseDelay = 2 * time.Second
+					}
+				}
+				delay := baseDelay * time.Duration(1<<uint(attempt-1))
 				if delay > retryConfig.MaxDelay {
 					delay = retryConfig.MaxDelay
 				}
+				if lastErr != nil {
+					if apiErr, ok := lastErr.(*APIError); ok && apiErr.Type == "model_loading" {
+						delay = 3 * time.Second // 模型加载时固定等待3秒
+					}
+				}
+				log.Printf("[API] retry attempt %d after %v delay", attempt, delay)
 				select {
 				case <-ctx.Done():
 					log.Printf("[API] stream cancelled during retry backoff: %v", ctx.Err())
@@ -349,7 +362,7 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 	for scanner.Scan() {
 		line := scanner.Text()
 		if firstLine {
-			log.Printf("[API] parseNDJSONStream: first line received (%d bytes)", len(line))
+			log.Printf("[API] parseNDJSONStream: first line received (%d bytes): %s", len(line), truncateStr(line, 500))
 			firstLine = false
 		}
 		if line == "" {
@@ -360,6 +373,11 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
 			log.Printf("[API] stream: skipping malformed NDJSON line (%d bytes): %v", len(line), err)
 			continue
+		}
+
+		if firstLine == false {
+			log.Printf("[API] stream event: done=%v, role=%q, content_len=%d, thinking_len=%d, tool_calls=%d, done_reason=%q",
+				event.Done, event.Message.Role, len(event.Message.Content), len(event.Message.Thinking), len(event.Message.ToolCalls), event.DoneReason)
 		}
 
 		if event.Message.Content != "" {
@@ -395,6 +413,22 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 			stopReason = event.DoneReason
 			if stopReason == "" {
 				stopReason = "stop"
+			}
+
+			log.Printf("[API] stream done: stop_reason=%s, msg_content_len=%d, tool_calls=%d, thinking_len=%d",
+				stopReason, len(event.Message.Content), len(event.Message.ToolCalls), len(event.Message.Thinking))
+
+			// 如果是模型加载中，返回可重试错误
+			if stopReason == "load" {
+				log.Printf("[API] model is loading, will retry after delay")
+				return &APIError{StatusCode: 0, Message: "model is loading", Type: "model_loading", Retryable: true}
+			}
+			if len(event.Message.Content) > 0 {
+				preview := event.Message.Content
+				if len(preview) > 200 {
+					preview = preview[:200] + "..."
+				}
+				log.Printf("[API] stream done content preview: %q", preview)
 			}
 
 			usage = Usage{
@@ -521,15 +555,15 @@ type RetryConfig struct {
 func (c *Client) retryConfig() RetryConfig {
 	if c.config.IsLocal {
 		return RetryConfig{
-			MaxRetries: 2,
+			MaxRetries: 5,
 			BaseDelay:  500 * time.Millisecond,
-			MaxDelay:   3 * time.Second,
+			MaxDelay:   10 * time.Second,
 		}
 	}
 	return RetryConfig{
-		MaxRetries: 3,
-		BaseDelay:  500 * time.Millisecond,
-		MaxDelay:   10 * time.Second,
+		MaxRetries: 10,
+		BaseDelay:  1 * time.Second,
+		MaxDelay:   30 * time.Second,
 	}
 }
 

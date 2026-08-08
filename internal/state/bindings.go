@@ -130,10 +130,14 @@ func (b *WailsBindings) SendMessage(request SendMessageRequest) SendMessageRespo
 
 			if msg.Type == "result" || msg.Type == "error" {
 				log.Printf("[Bindings] message stream ended: type=%s, count=%d", msg.Type, msgCount)
+				// 对话结束，发送文件列表刷新事件
+				wailsRuntime.EventsEmit(b.ctx, "files:refresh", "")
 				return
 			}
 		}
 		log.Printf("[Bindings] message stream channel closed without terminal event, count=%d", msgCount)
+		// 通道异常关闭时也刷新文件列表
+		wailsRuntime.EventsEmit(b.ctx, "files:refresh", "")
 	}()
 
 	log.Printf("[Bindings] SendMessage: returning success, session=%s", eng.GetSessionID())

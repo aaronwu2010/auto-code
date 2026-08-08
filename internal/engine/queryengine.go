@@ -698,6 +698,26 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 
 	ollamaMessages := api.ConvertMessagesToOllama(params.Messages, params.SystemPrompt.Content)
 	log.Printf("[Engine] callModel: model=%s, ollama_msgs=%d, tools=%d", params.Model, len(ollamaMessages), len(params.Tools))
+	for i, m := range ollamaMessages {
+		toolCallsInfo := ""
+		if len(m.ToolCalls) > 0 {
+			tcNames := make([]string, 0, len(m.ToolCalls))
+			for _, tc := range m.ToolCalls {
+				tcNames = append(tcNames, fmt.Sprintf("%s(id=%s)", tc.Function.Name, tc.ID))
+			}
+			toolCallsInfo = fmt.Sprintf(", tool_calls=[%s]", strings.Join(tcNames, ", "))
+		}
+		toolCallIDInfo := ""
+		if m.ToolCallID != "" {
+			toolCallIDInfo = fmt.Sprintf(", tool_call_id=%s", m.ToolCallID)
+		}
+		contentPreview := m.Content
+		if len(contentPreview) > 80 {
+			contentPreview = contentPreview[:80] + "..."
+		}
+		log.Printf("[Engine] callModel: msg[%d] role=%s, content_len=%d%s%s, preview=%q",
+			i, m.Role, len(m.Content), toolCallsInfo, toolCallIDInfo, contentPreview)
+	}
 
 	toolDefs := make([]api.ToolFunction, 0, len(params.Tools))
 	for _, t := range params.Tools {

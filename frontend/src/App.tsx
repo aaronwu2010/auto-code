@@ -70,6 +70,7 @@ function App() {
   const [isToolCalling, setIsToolCalling] = useState(false);
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; filePath: string } | null>(null);
+  const projectDirRef = useRef<string>("");
 
   const [currentToolUse, setCurrentToolUse] = useState<{
     tool_name: string;
@@ -112,6 +113,10 @@ function App() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
+
+  useEffect(() => {
+    projectDirRef.current = projectDir;
+  }, [projectDir]);
 
   useEffect(() => {
     if (showSettings && models.length === 0 && !loadingModels) {
@@ -335,11 +340,19 @@ function App() {
       } catch {}
     });
 
+    EventsOn("files:refresh", () => {
+      const dir = projectDirRef.current;
+      if (dir) {
+        loadFiles(dir);
+      }
+    });
+
     loadInitialState();
 
     return () => {
       EventsOff("state:change");
       EventsOff("query:message");
+      EventsOff("files:refresh");
     };
   }, []);
 
