@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -157,6 +158,7 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 
 	systemPrompt, err := qe.buildSystemPrompt(runCtx)
 	if err != nil {
+		log.Printf("[SubAgent] buildSystemPrompt failed: %v", err)
 		return "", fmt.Errorf("failed to build system prompt: %w", err)
 	}
 
@@ -317,15 +319,18 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 			return lastAssistantContent, nil
 		case "error":
 			lastError = output.Error
+			log.Printf("[SubAgent] query output error: %v", output.Error)
 			if onProgress != nil {
 				onProgress(fmt.Sprintf("Sub-agent error: %v", output.Error))
 			}
 		case "interrupted":
+			log.Printf("[SubAgent] interrupted")
 			return lastAssistantContent, runCtx.Err()
 		}
 	}
 
 	if lastError != nil {
+		log.Printf("[SubAgent] ended with error: %v", lastError)
 		return lastAssistantContent, lastError
 	}
 
@@ -351,7 +356,9 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 	go func() {
 		defer close(ch)
 		defer func() {
-			recover()
+			if r := recover(); r != nil {
+				log.Printf("[Engine] panic recovered: %v", r)
+			}
 		}()
 
 		qe.mu.Lock()
@@ -386,6 +393,7 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 
 		systemPrompt, err := qe.buildSystemPrompt(submitCtx)
 		if err != nil {
+			log.Printf("[Engine] buildSystemPrompt failed: %v", err)
 			ch <- SDKMessage{Type: "error", Subtype: "system_prompt_error", Message: api.GetAssistantMessageFromError(err), SessionID: qe.sessionID}
 			return
 		}
@@ -644,6 +652,7 @@ func (qe *QueryEngine) GetContextUsage(ctx context.Context) (*types.ContextUsage
 
 func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) (<-chan query.QueryOutput, error) {
 	if qe.apiClient == nil {
+		log.Printf("[Engine] apiClient not configured")
 		ch := make(chan query.QueryOutput, 1)
 		ch <- query.QueryOutput{Type: "error", Error: fmt.Errorf("Ollama 客户端未配置")}
 		close(ch)
@@ -679,6 +688,7 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 
 	streamCh, err := qe.apiClient.ChatWithStreaming(ctx, req)
 	if err != nil {
+		log.Printf("[Engine] ChatWithStreaming failed: %v", err)
 		return nil, err
 	}
 
@@ -701,6 +711,7 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 				}
 				outputCh <- query.QueryOutput{Type: "stream_event", Data: msg}
 			case "error":
+				log.Printf("[Engine] stream error: %v", msg.Error)
 				outputCh <- query.QueryOutput{Type: "error", Error: msg.Error}
 				return
 			}

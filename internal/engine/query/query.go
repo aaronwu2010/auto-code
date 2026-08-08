@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"reflect"
 	"sync"
 	"time"
@@ -179,6 +180,7 @@ func (e *StreamingToolExecutor) IsScheduled(toolUseID string) bool {
 func (e *StreamingToolExecutor) executeTool(ctx context.Context, tool tools.Tool, input any, toolUseID string, toolCallIndex int) *toolExecutionResult {
 	permResult, err := e.canUseTool(tool, input)
 	if err != nil {
+		log.Printf("[Query] canUseTool error for %s: %v", tool.Name(), err)
 		return &toolExecutionResult{Err: err, ToolUseID: toolUseID, ToolCallIdx: toolCallIndex}
 	}
 	if permResult.Behavior == types.DecisionDeny {
@@ -196,6 +198,7 @@ func (e *StreamingToolExecutor) executeTool(ctx context.Context, tool tools.Tool
 	if e.toolCtx != nil {
 		innerPerm, innerErr := tool.CheckPermissions(ctx, input, e.toolCtx)
 		if innerErr != nil {
+			log.Printf("[Query] CheckPermissions error for %s: %v", tool.Name(), innerErr)
 			return &toolExecutionResult{Err: innerErr, ToolUseID: toolUseID, ToolCallIdx: toolCallIndex}
 		}
 		if innerPerm.Behavior == types.DecisionDeny {
@@ -217,6 +220,7 @@ func (e *StreamingToolExecutor) executeTool(ctx context.Context, tool tools.Tool
 
 	toolResult, err := tool.Call(ctx, input, e.toolCtx, func(progress any) {})
 	if err != nil {
+		log.Printf("[Query] tool.Call error for %s: %v", tool.Name(), err)
 		return &toolExecutionResult{
 			Message: &types.Message{
 				Role:      types.RoleTool,
@@ -390,6 +394,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			Thinking:     params.Thinking,
 		})
 		if err != nil {
+			log.Printf("[Query] CallModel failed: %v", err)
 			ch <- QueryOutput{Type: "error", Error: err}
 			return
 		}
@@ -431,6 +436,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 									parseErr = json.Unmarshal(tc.Function.Arguments, &input)
 								}
 								if parseErr != nil {
+									log.Printf("[Query] failed to parse args for %s: %v", tc.Function.Name, parseErr)
 									state.Messages = append(state.Messages, types.Message{
 										Role:      types.RoleTool,
 										Content:   fmt.Sprintf("failed to parse arguments for tool %s: %v", tc.Function.Name, parseErr),
@@ -474,6 +480,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 
 			case "error":
 				if msg.Error != nil {
+					log.Printf("[Query] stream error: %v", msg.Error)
 					ch <- QueryOutput{Type: "error", Error: msg.Error}
 					return
 				}
@@ -540,6 +547,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 
 			tool := tools.FindToolByName(currentTools, tc.Function.Name)
 			if tool == nil {
+				log.Printf("[Query] tool not found: %s", tc.Function.Name)
 				state.Messages = append(state.Messages, types.Message{
 					Role:      types.RoleTool,
 					Content:   fmt.Sprintf("Tool not found: %s", tc.Function.Name),
@@ -552,6 +560,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			var input any
 			if tc.Function.Arguments != nil {
 				if unmarshalErr := json.Unmarshal(tc.Function.Arguments, &input); unmarshalErr != nil {
+					log.Printf("[Query] failed to unmarshal args for %s: %v", tc.Function.Name, unmarshalErr)
 					state.Messages = append(state.Messages, types.Message{
 						Role:      types.RoleTool,
 						Content:   fmt.Sprintf("failed to parse arguments for tool %s: %v", tc.Function.Name, unmarshalErr),
@@ -659,6 +668,7 @@ func executeToolCall(ctx context.Context, tool tools.Tool, input any, canUseTool
 	if canUseTool != nil {
 		permResult, err := canUseTool(tool, input)
 		if err != nil {
+			log.Printf("[Query] executeToolCall canUseTool error for %s: %v", tool.Name(), err)
 			return &toolExecutionResult{
 				Message: &types.Message{
 					Role:      types.RoleTool,
@@ -682,6 +692,7 @@ func executeToolCall(ctx context.Context, tool tools.Tool, input any, canUseTool
 	if toolCtx != nil {
 		innerPerm, innerErr := tool.CheckPermissions(ctx, input, toolCtx)
 		if innerErr != nil {
+			log.Printf("[Query] executeToolCall CheckPermissions error for %s: %v", tool.Name(), innerErr)
 			return &toolExecutionResult{
 				Message: &types.Message{
 					Role:      types.RoleTool,
@@ -708,6 +719,7 @@ func executeToolCall(ctx context.Context, tool tools.Tool, input any, canUseTool
 
 	toolResult, err := tool.Call(ctx, input, toolCtx, func(progress any) {})
 	if err != nil {
+		log.Printf("[Query] executeToolCall tool.Call error for %s: %v", tool.Name(), err)
 		return &toolExecutionResult{
 			Message: &types.Message{
 				Role:      types.RoleTool,

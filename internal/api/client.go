@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -203,6 +204,7 @@ func (c *Client) ChatWithStreaming(ctx context.Context, req OllamaChatRequest) (
 			lastErr = err
 			if apiErr, ok := err.(*APIError); ok {
 				if !apiErr.Retryable {
+					log.Printf("[API] non-retryable error %d: %s", apiErr.StatusCode, apiErr.Message)
 					ch <- StreamMessage{Type: "error", Error: apiErr}
 					return
 				}
@@ -213,6 +215,7 @@ func (c *Client) ChatWithStreaming(ctx context.Context, req OllamaChatRequest) (
 			Type:  "error",
 			Error: fmt.Errorf("max retries exceeded: %w", lastErr),
 		}
+		log.Printf("[API] max retries exceeded: %v", lastErr)
 	}()
 
 	return ch, nil
@@ -276,6 +279,7 @@ func (c *Client) executeChatStream(ctx context.Context, req OllamaChatRequest, c
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		log.Printf("[API] HTTP request failed: %v", err)
 		return &APIError{StatusCode: 0, Message: err.Error(), Type: "connection_error", Retryable: true}
 	}
 	defer resp.Body.Close()
@@ -287,6 +291,7 @@ func (c *Client) executeChatStream(ctx context.Context, req OllamaChatRequest, c
 			Message:    string(respBody),
 		}
 		apiErr.Retryable, apiErr.Type = CategorizeRetryableError(resp.StatusCode, c.config.IsLocal)
+		log.Printf("[API] HTTP %d: %s", resp.StatusCode, apiErr.Type)
 		return apiErr
 	}
 
@@ -391,6 +396,7 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 	}
 
 	if err := scanner.Err(); err != nil {
+		log.Printf("[API] stream scanner error: %v", err)
 		return &APIError{StatusCode: 0, Message: err.Error(), Type: "stream_error", Retryable: true}
 	}
 

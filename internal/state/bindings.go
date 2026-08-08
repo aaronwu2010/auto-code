@@ -4,6 +4,7 @@ import (
 	stdctx "context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sync"
 
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -91,10 +92,12 @@ func (b *WailsBindings) SendMessage(request SendMessageRequest) SendMessageRespo
 	b.mu.RUnlock()
 
 	if eng == nil {
+		log.Printf("[Bindings] SendMessage: engine not initialized")
 		return SendMessageResponse{Success: false, Error: "engine not initialized"}
 	}
 
 	if b.ctx == nil {
+		log.Printf("[Bindings] SendMessage: context is nil")
 		return SendMessageResponse{Success: false, Error: "context is nil"}
 	}
 
@@ -383,6 +386,7 @@ func (b *WailsBindings) ListAvailableModels() ListModelsResponse {
 
 	models, err := client.ListModels(b.ctx)
 	if err != nil {
+		log.Printf("[Bindings] ListModels failed: %v", err)
 		return ListModelsResponse{
 			Error: err.Error(),
 		}

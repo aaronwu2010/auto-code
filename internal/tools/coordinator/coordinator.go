@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -282,6 +283,7 @@ func (t *CoordinatorTool) executeSubTasks(ctx context.Context, tasks []SubTaskDe
 		mu.Unlock()
 
 		if err != nil {
+			log.Printf("[Coordinator] subtask %s failed: %v", task.ID, err)
 			progressFn(fmt.Sprintf("[Coordinator] Subtask %s failed after %s: %v", task.ID, duration, err))
 		} else {
 			progressFn(fmt.Sprintf("[Coordinator] Subtask %s completed in %s", task.ID, duration))
@@ -293,6 +295,7 @@ func (t *CoordinatorTool) executeSubTasks(ctx context.Context, tasks []SubTaskDe
 	for !allDone() {
 		select {
 		case <-ctx.Done():
+			log.Printf("[Coordinator] cancelled by context")
 			progressFn("[Coordinator] Cancelled")
 			return results
 		default:
@@ -313,6 +316,7 @@ func (t *CoordinatorTool) executeSubTasks(ctx context.Context, tasks []SubTaskDe
 			runningCount := len(started) - len(completed)
 			mu.Unlock()
 			if runningCount == 0 {
+				log.Printf("[Coordinator] deadlock detected: circular dependency among remaining tasks")
 				progressFn("[Coordinator] Deadlock detected: circular dependency or all remaining tasks blocked")
 				break
 			}
