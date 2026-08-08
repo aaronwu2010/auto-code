@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -203,8 +204,9 @@ func (s *AppState) emit(event StateChangeEvent) {
 	copy(listeners, s.listeners)
 	s.mu.RUnlock()
 
-	for _, l := range listeners {
+	for i, l := range listeners {
 		l(event)
+		_ = i
 	}
 }
 
@@ -237,7 +239,6 @@ func (s *AppState) Get() *AppState {
 
 func (s *AppState) Set(f func(prev *AppState) *AppState) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	newState := f(s)
 	if newState != nil && newState != s {
 		s.Settings = newState.Settings
@@ -270,6 +271,7 @@ func (s *AppState) Set(f func(prev *AppState) *AppState) {
 		s.IsProcessing = newState.IsProcessing
 		s.CurrentToolUse = newState.CurrentToolUse
 	}
+	s.mu.Unlock()
 	s.emit(StateChangeEvent{Type: "state_update"})
 }
 
@@ -365,13 +367,18 @@ func (s *AppState) SetIsProcessing(processing bool) {
 // CompareAndSetIsProcessing 原子地检查当前状态并在匹配时设置新值。
 // 如果当前状态等于 expected，则设置为 new 并返回 true；否则返回 false。
 func (s *AppState) CompareAndSetIsProcessing(expected, new bool) bool {
+	log.Printf("[AppState] CompareAndSetIsProcessing: expected=%v, new=%v", expected, new)
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.IsProcessing != expected {
+		s.mu.Unlock()
+		log.Printf("[AppState] CompareAndSetIsProcessing: mismatch (current=%v), returning false", s.IsProcessing)
 		return false
 	}
 	s.IsProcessing = new
+	s.mu.Unlock()
+	log.Printf("[AppState] CompareAndSetIsProcessing: set to %v, emitting event", new)
 	s.emit(StateChangeEvent{Type: "processing_update", Value: new})
+	log.Printf("[AppState] CompareAndSetIsProcessing: done, returning true")
 	return true
 }
 

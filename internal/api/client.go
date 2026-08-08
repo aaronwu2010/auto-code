@@ -334,6 +334,7 @@ func (c *Client) setHeaders(req *http.Request) {
 func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) error {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+	log.Printf("[API] parseNDJSONStream: waiting for first line...")
 
 	var (
 		usage            Usage
@@ -341,10 +342,15 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 		toolCallsAcc     []types.ToolCall
 		toolCallsSent    bool
 		assistantContent string
+		firstLine        = true
 	)
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		if firstLine {
+			log.Printf("[API] parseNDJSONStream: first line received (%d bytes)", len(line))
+			firstLine = false
+		}
 		if line == "" {
 			continue
 		}

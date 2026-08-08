@@ -154,10 +154,13 @@ func (e *StreamingToolExecutor) AddTool(ctx context.Context, tool tools.Tool, in
 	e.expected++
 	e.wg.Add(1)
 	e.mu.Unlock()
+	log.Printf("[Query] AddTool: starting tool '%s' idx=%d", tool.Name(), toolCallIndex)
 
 	go func() {
 		defer e.wg.Done()
+		log.Printf("[Query] tool '%s' executing...", tool.Name())
 		result := e.executeTool(ctx, tool, input, toolUseID, toolCallIndex)
+		log.Printf("[Query] tool '%s' done, err=%v", tool.Name(), result.Err)
 		e.mu.Lock()
 		e.results[toolUseID] = result
 		e.doneCount++
@@ -247,6 +250,12 @@ func (e *StreamingToolExecutor) executeTool(ctx context.Context, tool tools.Tool
 }
 
 func (e *StreamingToolExecutor) WaitForAllResults(timeoutMs int) map[int]*toolExecutionResult {
+	e.mu.Lock()
+	expected := e.expected
+	doneCnt := e.doneCount
+	e.mu.Unlock()
+	log.Printf("[Query] WaitForAllResults: expected=%d, done=%d, timeout=%dms", expected, doneCnt, timeoutMs)
+
 	done := make(chan struct{})
 	go func() {
 		e.wg.Wait()
@@ -255,10 +264,13 @@ func (e *StreamingToolExecutor) WaitForAllResults(timeoutMs int) map[int]*toolEx
 	if timeoutMs > 0 {
 		select {
 		case <-done:
+			log.Printf("[Query] WaitForAllResults: all tools completed")
 		case <-time.After(time.Duration(timeoutMs) * time.Millisecond):
+			log.Printf("[Query] WaitForAllResults: timeout after %dms", timeoutMs)
 		}
 	} else {
 		<-done
+		log.Printf("[Query] WaitForAllResults: all tools completed (no timeout)")
 	}
 
 	e.mu.Lock()
@@ -420,9 +432,14 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			streamingExecutor    = NewStreamingToolExecutor(state.ToolUseContext, params.CanUseTool)
 			assistantBuffer      *types.Message
 			assistantHasAppended bool
+			firstStreamMsg       = true
 		)
 
 		for msg := range streamCh {
+			if firstStreamMsg {
+				log.Printf("[Query] first stream msg received, type=%s", msg.Type)
+				firstStreamMsg = false
+			}
 			select {
 			case <-ctx.Done():
 				ch <- QueryOutput{Type: "interrupted", Error: ctx.Err()}
@@ -680,6 +697,7 @@ func getLastToolCalls(messages []types.Message) []types.ToolCall {
 }
 
 func executeToolCall(ctx context.Context, tool tools.Tool, input any, canUseTool func(tool tools.Tool, input any) (types.PermissionResult, error), toolCtx *tools.ToolUseContext) *toolExecutionResult {
+	log.Printf("[Query] executeToolCall: tool='%s'", tool.Name())
 	if canUseTool != nil {
 		permResult, err := canUseTool(tool, input)
 		if err != nil {
@@ -694,6 +712,7 @@ func executeToolCall(ctx context.Context, tool tools.Tool, input any, canUseTool
 			}
 		}
 		if permResult.Behavior == types.DecisionDeny {
+			log.Printf("[Query] executeToolCall: permission denied for %s", tool.Name())
 			return &toolExecutionResult{
 				Message: &types.Message{
 					Role:      types.RoleTool,
@@ -722,6 +741,7 @@ func executeToolCall(ctx context.Context, tool tools.Tool, input any, canUseTool
 			if msg == "" {
 				msg = "tool permission denied"
 			}
+			log.Printf("[Query] executeToolCall: CheckPermissions denied for %s", tool.Name())
 			return &toolExecutionResult{
 				Message: &types.Message{
 					Role:      types.RoleTool,
@@ -732,6 +752,7 @@ func executeToolCall(ctx context.Context, tool tools.Tool, input any, canUseTool
 		}
 	}
 
+	log.Printf("[Query] executeToolCall: calling tool.Call for '%s'...", tool.Name())
 	toolResult, err := tool.Call(ctx, input, toolCtx, func(progress any) {})
 	if err != nil {
 		log.Printf("[Query] executeToolCall tool.Call error for %s: %v", tool.Name(), err)
@@ -746,6 +767,7 @@ func executeToolCall(ctx context.Context, tool tools.Tool, input any, canUseTool
 	}
 
 	output := formatToolOutput(toolResult)
+	log.Printf("[Query] executeToolCall: tool '%s' completed, output_len=%d", tool.Name(), len(output))
 	return &toolExecutionResult{
 		Message: &types.Message{
 			Role:      types.RoleTool,

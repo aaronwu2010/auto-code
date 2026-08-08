@@ -84,14 +84,18 @@ type SendMessageResponse struct {
 
 func (b *WailsBindings) SendMessage(request SendMessageRequest) SendMessageResponse {
 	log.Printf("[Bindings] SendMessage: received, prompt_len=%d", len(request.Prompt))
+	log.Printf("[Bindings] SendMessage: step1 - calling CompareAndSetIsProcessing...")
 	if !b.appState.CompareAndSetIsProcessing(false, true) {
 		log.Printf("[Bindings] SendMessage: rejected, already processing")
 		return SendMessageResponse{Success: false, Error: "a request is already in progress, please wait"}
 	}
+	log.Printf("[Bindings] SendMessage: step2 - CompareAndSetIsProcessing ok")
 
+	log.Printf("[Bindings] SendMessage: step3 - acquiring RLock...")
 	b.mu.RLock()
 	eng := b.engine
 	b.mu.RUnlock()
+	log.Printf("[Bindings] SendMessage: step4 - engine retrieved, eng=%v", eng != nil)
 
 	if eng == nil {
 		log.Printf("[Bindings] SendMessage: engine not initialized")
@@ -105,17 +109,22 @@ func (b *WailsBindings) SendMessage(request SendMessageRequest) SendMessageRespo
 		return SendMessageResponse{Success: false, Error: "context is nil"}
 	}
 
-	log.Printf("[Bindings] SendMessage: calling SubmitMessage...")
+	log.Printf("[Bindings] SendMessage: step5 - calling SubmitMessage...")
 	outputCh := eng.SubmitMessage(b.ctx, request.Prompt)
-	log.Printf("[Bindings] SendMessage: SubmitMessage returned, starting forwarder goroutine")
+	log.Printf("[Bindings] SendMessage: step6 - SubmitMessage returned, ch=%v", outputCh != nil)
 
 	go func() {
+		log.Printf("[Bindings] forwarder goroutine started")
 		defer func() {
+			log.Printf("[Bindings] forwarder: resetting isProcessing")
 			b.appState.SetIsProcessing(false)
 		}()
 		msgCount := 0
 		for msg := range outputCh {
 			msgCount++
+			if msgCount <= 5 || msg.Type == "result" || msg.Type == "error" {
+				log.Printf("[Bindings] forwarder: msg #%d, type=%s", msgCount, msg.Type)
+			}
 			data, _ := json.Marshal(msg)
 			wailsRuntime.EventsEmit(b.ctx, "query:message", string(data))
 
@@ -127,6 +136,7 @@ func (b *WailsBindings) SendMessage(request SendMessageRequest) SendMessageRespo
 		log.Printf("[Bindings] message stream channel closed without terminal event, count=%d", msgCount)
 	}()
 
+	log.Printf("[Bindings] SendMessage: returning success, session=%s", eng.GetSessionID())
 	return SendMessageResponse{
 		Success:   true,
 		SessionID: string(eng.GetSessionID()),
