@@ -272,8 +272,10 @@ func (e *StreamingToolExecutor) WaitForAllResults(timeoutMs int) map[int]*toolEx
 
 func Query(ctx context.Context, params QueryParams, deps QueryDeps) <-chan QueryOutput {
 	ch := make(chan QueryOutput, 256)
+	log.Printf("[Query] Query called, msgs=%d, tools=%d", len(params.Messages), len(params.Tools))
 
 	go func() {
+		log.Printf("[Query] goroutine started")
 		defer close(ch)
 
 		state := State{
@@ -292,6 +294,7 @@ func Query(ctx context.Context, params QueryParams, deps QueryDeps) <-chan Query
 		}
 
 		queryLoop(ctx, params, deps, state, ch)
+		log.Printf("[Query] queryLoop exited")
 	}()
 
 	return ch
@@ -299,16 +302,24 @@ func Query(ctx context.Context, params QueryParams, deps QueryDeps) <-chan Query
 
 func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialState State, ch chan<- QueryOutput) {
 	state := initialState
+	log.Printf("[Query] queryLoop started, turn=%d", state.TurnCount)
 
 	for {
 		select {
 		case <-ctx.Done():
+			log.Printf("[Query] context done, exiting loop: %v", ctx.Err())
 			ch <- QueryOutput{Type: "interrupted", Error: ctx.Err()}
 			return
 		default:
 		}
 
 		messages := state.Messages
+		log.Printf("[Query] loop turn=%d, msgs=%d, last_role=%s", state.TurnCount, len(messages), func() string {
+			if len(messages) > 0 {
+				return string(messages[len(messages)-1].Role)
+			}
+			return "none"
+		}())
 
 		if deps.Microcompact != nil {
 			messages = deps.Microcompact(messages)
@@ -368,10 +379,12 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			lastMsg := messages[len(messages)-1]
 			if lastMsg.Role == types.RoleUser || lastMsg.Role == types.RoleTool {
 			} else {
+				log.Printf("[Query] terminal: no follow up needed")
 				ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "no_follow_up_needed"}}
 				return
 			}
 		} else {
+			log.Printf("[Query] terminal: empty messages")
 			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "empty_messages"}}
 			return
 		}
@@ -386,6 +399,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		if deps.OnPhaseChange != nil {
 			deps.OnPhaseChange("call_model", "", nil)
 		}
+		log.Printf("[Query] calling CallModel...")
 		streamCh, err := deps.CallModel(ctx, QueryParams{
 			Messages:     messages,
 			SystemPrompt: params.SystemPrompt,
@@ -398,6 +412,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			ch <- QueryOutput{Type: "error", Error: err}
 			return
 		}
+		log.Printf("[Query] CallModel returned, reading stream...")
 
 		var (
 			needsFollowUp        bool

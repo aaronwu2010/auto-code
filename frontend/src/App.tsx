@@ -377,6 +377,12 @@ function App() {
 
   const handleInterrupt = () => {
     Interrupt();
+    // 立即重置 UI 状态，停止按钮切回发送，不等待后端事件回传
+    setIsLoading(false);
+    setStreamingMessage(null);
+    setIsToolCalling(false);
+    setCurrentToolUse(null);
+    setStatusText("");
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

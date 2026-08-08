@@ -83,7 +83,9 @@ type SendMessageResponse struct {
 }
 
 func (b *WailsBindings) SendMessage(request SendMessageRequest) SendMessageResponse {
+	log.Printf("[Bindings] SendMessage: received, prompt_len=%d", len(request.Prompt))
 	if !b.appState.CompareAndSetIsProcessing(false, true) {
+		log.Printf("[Bindings] SendMessage: rejected, already processing")
 		return SendMessageResponse{Success: false, Error: "a request is already in progress, please wait"}
 	}
 
@@ -93,16 +95,19 @@ func (b *WailsBindings) SendMessage(request SendMessageRequest) SendMessageRespo
 
 	if eng == nil {
 		log.Printf("[Bindings] SendMessage: engine not initialized")
+		b.appState.SetIsProcessing(false)
 		return SendMessageResponse{Success: false, Error: "engine not initialized"}
 	}
 
 	if b.ctx == nil {
 		log.Printf("[Bindings] SendMessage: context is nil")
+		b.appState.SetIsProcessing(false)
 		return SendMessageResponse{Success: false, Error: "context is nil"}
 	}
 
-	// 检查 engine 是否实现了正确的方法
+	log.Printf("[Bindings] SendMessage: calling SubmitMessage...")
 	outputCh := eng.SubmitMessage(b.ctx, request.Prompt)
+	log.Printf("[Bindings] SendMessage: SubmitMessage returned, starting forwarder goroutine")
 
 	go func() {
 		defer func() {
@@ -115,9 +120,11 @@ func (b *WailsBindings) SendMessage(request SendMessageRequest) SendMessageRespo
 			wailsRuntime.EventsEmit(b.ctx, "query:message", string(data))
 
 			if msg.Type == "result" || msg.Type == "error" {
+				log.Printf("[Bindings] message stream ended: type=%s, count=%d", msg.Type, msgCount)
 				return
 			}
 		}
+		log.Printf("[Bindings] message stream channel closed without terminal event, count=%d", msgCount)
 	}()
 
 	return SendMessageResponse{
@@ -132,7 +139,10 @@ func (b *WailsBindings) Interrupt() {
 	b.mu.RUnlock()
 
 	if eng != nil {
+		log.Printf("[Bindings] interrupt requested")
 		eng.Interrupt()
+	} else {
+		log.Printf("[Bindings] interrupt requested but engine is nil")
 	}
 }
 

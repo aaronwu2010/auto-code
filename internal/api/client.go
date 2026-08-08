@@ -178,6 +178,7 @@ func (c *Client) ChatWithStreaming(ctx context.Context, req OllamaChatRequest) (
 		for attempt := 0; attempt <= retryConfig.MaxRetries; attempt++ {
 			select {
 			case <-ctx.Done():
+				log.Printf("[API] stream cancelled before attempt %d: %v", attempt, ctx.Err())
 				ch <- StreamMessage{Type: "error", Error: ctx.Err()}
 				return
 			default:
@@ -190,6 +191,7 @@ func (c *Client) ChatWithStreaming(ctx context.Context, req OllamaChatRequest) (
 				}
 				select {
 				case <-ctx.Done():
+					log.Printf("[API] stream cancelled during retry backoff: %v", ctx.Err())
 					ch <- StreamMessage{Type: "error", Error: ctx.Err()}
 					return
 				case <-time.After(delay):
@@ -201,6 +203,13 @@ func (c *Client) ChatWithStreaming(ctx context.Context, req OllamaChatRequest) (
 				return
 			}
 
+			// ctx 已取消则直接返回，不重试
+			if ctx.Err() != nil {
+				log.Printf("[API] stream cancelled after attempt %d: %v", attempt, ctx.Err())
+				ch <- StreamMessage{Type: "error", Error: ctx.Err()}
+				return
+			}
+
 			lastErr = err
 			if apiErr, ok := err.(*APIError); ok {
 				if !apiErr.Retryable {
@@ -209,6 +218,7 @@ func (c *Client) ChatWithStreaming(ctx context.Context, req OllamaChatRequest) (
 					return
 				}
 			}
+			log.Printf("[API] stream attempt %d failed (will retry): %v", attempt, err)
 		}
 
 		ch <- StreamMessage{
@@ -270,19 +280,24 @@ func (c *Client) executeChatStream(ctx context.Context, req OllamaChatRequest, c
 		return fmt.Errorf("marshaling request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.config.BaseURL+"/chat", bytes.NewReader(body))
+	url := c.config.BaseURL + "/chat"
+	log.Printf("[API] POST %s, model=%s, msgs=%d, tools=%d, body_len=%d", url, req.Model, len(req.Messages), len(req.Tools), len(body))
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
 
 	c.setHeaders(httpReq)
 
+	log.Printf("[API] sending HTTP request...")
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		log.Printf("[API] HTTP request failed: %v", err)
 		return &APIError{StatusCode: 0, Message: err.Error(), Type: "connection_error", Retryable: true}
 	}
 	defer resp.Body.Close()
+	log.Printf("[API] HTTP response status=%d", resp.StatusCode)
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -291,11 +306,21 @@ func (c *Client) executeChatStream(ctx context.Context, req OllamaChatRequest, c
 			Message:    string(respBody),
 		}
 		apiErr.Retryable, apiErr.Type = CategorizeRetryableError(resp.StatusCode, c.config.IsLocal)
-		log.Printf("[API] HTTP %d: %s", resp.StatusCode, apiErr.Type)
+		log.Printf("[API] HTTP %d: %s, body=%s", resp.StatusCode, apiErr.Type, truncateStr(string(respBody), 200))
 		return apiErr
 	}
 
-	return c.parseNDJSONStream(resp.Body, ch)
+	log.Printf("[API] starting NDJSON parse...")
+	err = c.parseNDJSONStream(resp.Body, ch)
+	log.Printf("[API] NDJSON parse finished, err=%v", err)
+	return err
+}
+
+func truncateStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 func (c *Client) setHeaders(req *http.Request) {
@@ -326,6 +351,7 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 
 		var event OllamaChatStreamEvent
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			log.Printf("[API] stream: skipping malformed NDJSON line (%d bytes): %v", len(line), err)
 			continue
 		}
 

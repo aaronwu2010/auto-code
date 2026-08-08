@@ -31,6 +31,7 @@ type QueryEngine struct {
 	mu              sync.RWMutex
 	ctx             context.Context
 	cancel          context.CancelFunc
+	queryCancel     context.CancelFunc
 	sessionID       types.SessionID
 	config          *QueryEngineConfig
 	usage           api.Usage
@@ -146,15 +147,8 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
-	if qe.ctx != nil {
-		go func() {
-			select {
-			case <-qe.ctx.Done():
-				runCancel()
-			case <-runCtx.Done():
-			}
-		}()
-	}
+	// 注意：ctx 已经是 submitCtx（qe.ctx 的子 ctx），qe.ctx 取消时会自动级联到 runCtx，
+	// 无需额外的桥接 goroutine。
 
 	systemPrompt, err := qe.buildSystemPrompt(runCtx)
 	if err != nil {
@@ -352,8 +346,10 @@ func (qe *QueryEngine) Shutdown(_ context.Context) {
 
 func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan SDKMessage {
 	ch := make(chan SDKMessage, 256)
+	log.Printf("[Engine] SubmitMessage: called, prompt_len=%d", len(prompt))
 
 	go func() {
+		log.Printf("[Engine] SubmitMessage: goroutine started")
 		defer close(ch)
 		defer func() {
 			if r := recover(); r != nil {
@@ -378,29 +374,55 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		qe.mu.Unlock()
 
 		ch <- SDKMessage{Type: "user", Message: &userMsg, SessionID: qe.sessionID}
+		log.Printf("[Engine] SubmitMessage: user message sent")
 
-		submitCtx, submitCancel := context.WithCancel(ctx)
-		defer submitCancel()
+		// submitCtx 基于 qe.ctx（引擎生命周期 ctx），确保 Shutdown 时自动级联取消。
+		var submitCtx context.Context
+		var submitCancel context.CancelFunc
 		if qe.ctx != nil {
+			submitCtx, submitCancel = context.WithCancel(qe.ctx)
+		} else {
+			submitCtx, submitCancel = context.WithCancel(context.Background())
+		}
+		defer submitCancel()
+
+		// 注册当前查询的 cancel，供 Interrupt() 调用
+		qe.mu.Lock()
+		qe.queryCancel = submitCancel
+		qe.mu.Unlock()
+		log.Printf("[Engine] SubmitMessage: queryCancel registered, interrupt now available")
+		defer func() {
+			qe.mu.Lock()
+			qe.queryCancel = nil
+			qe.mu.Unlock()
+		}()
+
+		// 传播调用方 ctx 的取消（如 Wails 全局 ctx 关闭、stdio 请求 ctx 取消）
+		if ctx != nil {
 			go func() {
 				select {
-				case <-qe.ctx.Done():
+				case <-ctx.Done():
+					log.Printf("[Engine] caller context cancelled, cancelling query")
 					submitCancel()
 				case <-submitCtx.Done():
 				}
 			}()
 		}
 
+		log.Printf("[Engine] SubmitMessage: building system prompt...")
 		systemPrompt, err := qe.buildSystemPrompt(submitCtx)
 		if err != nil {
 			log.Printf("[Engine] buildSystemPrompt failed: %v", err)
 			ch <- SDKMessage{Type: "error", Subtype: "system_prompt_error", Message: api.GetAssistantMessageFromError(err), SessionID: qe.sessionID}
 			return
 		}
+		log.Printf("[Engine] SubmitMessage: system prompt built, len=%d", len(systemPrompt.Content))
 
 		permissionCtx := qe.appState.GetToolPermissionContext()
+		log.Printf("[Engine] SubmitMessage: assembling tool pool...")
 		allTools := qe.toolReg.AssembleToolPool(permissionCtx, nil)
 		coreTools := qe.toolReg.GetCoreTools(permissionCtx, nil)
+		log.Printf("[Engine] SubmitMessage: tools assembled, all=%d, core=%d", len(allTools), len(coreTools))
 
 		canUseTool := qe.config.CanUseTool
 		if canUseTool == nil {
@@ -435,8 +457,10 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 			ProjectDirectory: qe.getProjectDirectory(),
 		}
 
+		msgsAfterCompact := qe.getMessagesAfterCompactBoundary()
+		log.Printf("[Engine] SubmitMessage: messages after compact: %d (total: %d)", len(msgsAfterCompact), len(qe.messages))
 		queryParams := query.QueryParams{
-			Messages:     qe.getMessagesAfterCompactBoundary(),
+			Messages:     msgsAfterCompact,
 			SystemPrompt: systemPrompt,
 			Tools:        activeTools,
 			CanUseTool:   canUseTool,
@@ -449,6 +473,7 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		phaseTurnCount := 0
 		deps := query.QueryDeps{
 			CallModel: func(callCtx context.Context, p query.QueryParams) (<-chan query.QueryOutput, error) {
+				log.Printf("[Engine] CallModel invoked, model=%s, msgs=%d, tools=%d", p.Model, len(p.Messages), len(p.Tools))
 				return qe.callModel(callCtx, p)
 			},
 			Microcompact: qe.microcompact,
@@ -465,6 +490,7 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 				}
 			},
 			OnPhaseChange: func(phase string, toolName string, toolInput any) {
+				log.Printf("[Engine] PhaseChange: phase=%s, tool=%s", phase, toolName)
 				switch phase {
 				case "call_model":
 					phaseTurnCount++
@@ -493,7 +519,9 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 			},
 		}
 
+		log.Printf("[Engine] SubmitMessage: starting query.Query...")
 		outputCh := query.Query(submitCtx, queryParams, deps)
+		log.Printf("[Engine] SubmitMessage: query.Query started, processing outputs")
 
 		outputCount := 0
 		for output := range outputCh {
@@ -504,19 +532,28 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 			}
 
 			if output.Type == "terminal" || output.Type == "error" || output.Type == "interrupted" {
+				log.Printf("[Engine] conversation ended: %s, outputs=%d", output.Type, outputCount)
 				qe.appState.SetCurrentToolUse(nil)
 				qe.appState.SetStatusLineText("")
 				return
 			}
 		}
+		log.Printf("[Engine] SubmitMessage: outputCh closed unexpectedly, outputs=%d", outputCount)
 	}()
 
 	return ch
 }
 
 func (qe *QueryEngine) Interrupt() {
-	if qe.cancel != nil {
-		qe.cancel()
+	qe.mu.Lock()
+	cancel := qe.queryCancel
+	qe.queryCancel = nil
+	qe.mu.Unlock()
+	if cancel != nil {
+		log.Printf("[Engine] interrupting current query")
+		cancel()
+	} else {
+		log.Printf("[Engine] interrupt requested but no active query")
 	}
 }
 
@@ -660,6 +697,7 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 	}
 
 	ollamaMessages := api.ConvertMessagesToOllama(params.Messages, params.SystemPrompt.Content)
+	log.Printf("[Engine] callModel: model=%s, ollama_msgs=%d, tools=%d", params.Model, len(ollamaMessages), len(params.Tools))
 
 	toolDefs := make([]api.ToolFunction, 0, len(params.Tools))
 	for _, t := range params.Tools {
@@ -686,16 +724,20 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 		req.Think = true
 	}
 
+	log.Printf("[Engine] callModel: calling ChatWithStreaming...")
 	streamCh, err := qe.apiClient.ChatWithStreaming(ctx, req)
 	if err != nil {
 		log.Printf("[Engine] ChatWithStreaming failed: %v", err)
 		return nil, err
 	}
+	log.Printf("[Engine] callModel: ChatWithStreaming returned, starting bridge goroutine")
 
 	outputCh := make(chan query.QueryOutput, 256)
 	go func() {
 		defer close(outputCh)
+		msgCount := 0
 		for msg := range streamCh {
+			msgCount++
 			switch msg.Type {
 			case "assistant", "thinking", "tool_calls":
 				if msg.Message != nil {
@@ -704,6 +746,7 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 			case "tool_calls_start":
 				outputCh <- query.QueryOutput{Type: "tool_calls_start"}
 			case "done":
+				log.Printf("[Engine] callModel: stream done after %d messages", msgCount)
 				if msg.Usage != nil {
 					qe.mu.Lock()
 					qe.usage = *msg.Usage
@@ -711,11 +754,12 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 				}
 				outputCh <- query.QueryOutput{Type: "stream_event", Data: msg}
 			case "error":
-				log.Printf("[Engine] stream error: %v", msg.Error)
+				log.Printf("[Engine] stream error at msg %d: %v", msgCount, msg.Error)
 				outputCh <- query.QueryOutput{Type: "error", Error: msg.Error}
 				return
 			}
 		}
+		log.Printf("[Engine] callModel: streamCh closed after %d messages", msgCount)
 	}()
 
 	return outputCh, nil
@@ -804,6 +848,7 @@ func (qe *QueryEngine) processQueryOutput(ctx context.Context, output query.Quer
 		extractmemories.NotifyConversationEnd(ctx, qe.GetMessages())
 		return []SDKMessage{{Type: "result", Subtype: reason, SessionID: qe.sessionID}}
 	case "error":
+		log.Printf("[Engine] query error: %v", output.Error)
 		qe.streamContent = ""
 		qe.streamThinking = ""
 		qe.streamToolCalls = nil
@@ -815,6 +860,7 @@ func (qe *QueryEngine) processQueryOutput(ctx context.Context, output query.Quer
 			SessionID: qe.sessionID,
 		}}
 	case "interrupted":
+		log.Printf("[Engine] query interrupted")
 		qe.streamContent = ""
 		qe.streamThinking = ""
 		qe.streamToolCalls = nil

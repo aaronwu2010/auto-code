@@ -496,7 +496,13 @@ function App() {
   };
 
   const handleInterrupt = () => {
-    api.interrupt();
+    api.interrupt().catch(() => {});
+    // 立即重置 UI 状态，确保停止按钮切回发送，不必等待后端事件回传。
+    setIsLoading(false);
+    setStreamingMessage(null);
+    setIsToolCalling(false);
+    setPhaseHint("");
+    setCurrentToolUse(null);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -680,14 +686,6 @@ function App() {
         </div>
         <div className="flex items-center gap-3 flex-shrink-0">
           {statusText && <span className="text-xs text-slate-500">{statusText}</span>}
-          {isLoading && (
-            <button
-              onClick={handleInterrupt}
-              className="text-xs bg-red-900/40 text-red-400 px-4 py-1.5 rounded-lg hover:bg-red-900/60 border border-red-800/40 transition-all duration-200 flex items-center gap-1.5"
-            >
-              ⏹ 停止
-            </button>
-          )}
           <button
             onClick={() => setShowSettings(!showSettings)}
             className={`text-xs px-4 py-1.5 rounded-lg transition-all duration-200 flex items-center gap-1.5 ${

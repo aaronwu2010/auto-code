@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/auto-code/auto-code/internal/api"
@@ -125,19 +126,24 @@ func (a *Adapter) SendMessage(ctx context.Context, req SendMessageRequest) SendM
 	}
 
 	a.appState.SetIsProcessing(true)
-	defer a.appState.SetIsProcessing(false)
 
 	outputCh := eng.SubmitMessage(ctx, req.Prompt)
 
 	a.streamWg.Add(1)
 	go func() {
 		defer a.streamWg.Done()
+		// 查询真正结束（result/error/channel 关闭）时才标记非处理态。
+		// 不能在 SendMessage 返回时 defer，因为 SubmitMessage 是异步的，
+		// 否则 processing_update=false 会在提交后立即发出，导致前端 loading 提前消失。
+		defer a.appState.SetIsProcessing(false)
 		for msg := range outputCh {
 			a.emitEvent("query:message", msg)
 			if msg.Type == "result" || msg.Type == "error" {
+				log.Printf("[Server] message stream ended: type=%s", msg.Type)
 				return
 			}
 		}
+		log.Printf("[Server] message stream channel closed without terminal event")
 	}()
 
 	return SendMessageResponse{
