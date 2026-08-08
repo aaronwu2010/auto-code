@@ -92,7 +92,7 @@ func (si *SkillImprovement) ApplySkillImprovement(skillName, field, newValue str
 
 func GetClaudeEnvFilePath(sessionID string, hookIndex int) string {
 	homeDir, _ := os.UserHomeDir()
-	return filepath.Join(homeDir, ".claude", "env", sessionID, fmtEnvFileName(hookIndex))
+	return filepath.Join(homeDir, ".auto", "env", sessionID, fmtEnvFileName(hookIndex))
 }
 
 func fmtEnvFileName(index int) string {

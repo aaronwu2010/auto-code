@@ -1,4 +1,4 @@
-﻿package initcmd
+package initcmd
 
 import (
 	"context"
@@ -17,9 +17,9 @@ func NewInitCommand() *InitCommand {
 
 func (c *InitCommand) Execute(_ context.Context, cmdCtx *clitypes.CommandContext) (*clitypes.CommandResult, error) {
 	cwd := cmdCtx.CWD
-	claudeDir := filepath.Join(cwd, ".claude")
-	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
-		return nil, fmt.Errorf("failed to create .claude directory: %w", err)
+	autoDir := filepath.Join(cwd, ".auto")
+	if err := os.MkdirAll(autoDir, 0o755); err != nil {
+		return nil, fmt.Errorf("failed to create .auto directory: %w", err)
 	}
 
 	claudeMd := filepath.Join(cwd, "CLAUDE.md")
@@ -30,7 +30,7 @@ func (c *InitCommand) Execute(_ context.Context, cmdCtx *clitypes.CommandContext
 		}
 	}
 
-	settingsFile := filepath.Join(claudeDir, "settings.json")
+	settingsFile := filepath.Join(autoDir, "settings.json")
 	if _, err := os.Stat(settingsFile); os.IsNotExist(err) {
 		content := "{\n  \"permissions\": {\n    \"allow\": [],\n    \"deny\": []\n  }\n}\n"
 		if err := os.WriteFile(settingsFile, []byte(content), 0o644); err != nil {
@@ -38,5 +38,5 @@ func (c *InitCommand) Execute(_ context.Context, cmdCtx *clitypes.CommandContext
 		}
 	}
 
-	return &clitypes.CommandResult{Output: fmt.Sprintf("Project initialized in %s\nCreated .claude/ directory and CLAUDE.md", cwd)}, nil
+	return &clitypes.CommandResult{Output: fmt.Sprintf("Project initialized in %s\nCreated .auto/ directory and CLAUDE.md", cwd)}, nil
 }

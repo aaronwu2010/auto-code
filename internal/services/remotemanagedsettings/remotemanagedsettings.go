@@ -102,7 +102,7 @@ func (s *RemoteManagedSettingsService) IsEligible() bool {
 
 func (s *RemoteManagedSettingsService) getSettingsPath() string {
 	homeDir, _ := os.UserHomeDir()
-	return filepath.Join(homeDir, ".claude", remoteSettingsFilename)
+	return filepath.Join(homeDir, ".auto", remoteSettingsFilename)
 }
 
 func (s *RemoteManagedSettingsService) GetSessionCache() map[string]interface{} {

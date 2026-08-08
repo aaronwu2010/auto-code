@@ -249,22 +249,22 @@ func BuildEntriesFromLocalFiles(projectID string) map[string]string {
 	entries := map[string]string{}
 
 	homeDir, _ := os.UserHomeDir()
-	claudeDir := filepath.Join(homeDir, ".claude")
+	autoDir := filepath.Join(homeDir, ".auto")
 
-	userSettingsPath := filepath.Join(claudeDir, "settings.json")
+	userSettingsPath := filepath.Join(autoDir, "settings.json")
 	if content := tryReadFileForSync(userSettingsPath); content != "" {
 		entries[SyncKeys.UserSettings] = content
 	}
 
-	userMemoryPath := filepath.Join(claudeDir, "CLAUDE.md")
+	userMemoryPath := filepath.Join(autoDir, "CLAUDE.md")
 	if content := tryReadFileForSync(userMemoryPath); content != "" {
 		entries[SyncKeys.UserMemory] = content
 	}
 
 	if projectID != "" {
-		projectDir := filepath.Join(claudeDir, "projects", projectID)
+		projectDir := filepath.Join(autoDir, "projects", projectID)
 
-		localSettingsPath := filepath.Join(projectDir, ".claude", "settings.local.json")
+		localSettingsPath := filepath.Join(projectDir, ".auto", "settings.local.json")
 		if content := tryReadFileForSync(localSettingsPath); content != "" {
 			entries[SyncKeys.ProjectSettings(projectID)] = content
 		}
@@ -291,24 +291,24 @@ func writeFileForSync(filePath, content string) bool {
 
 func ApplyRemoteEntriesToLocal(entries map[string]string, projectID string) {
 	homeDir, _ := os.UserHomeDir()
-	claudeDir := filepath.Join(homeDir, ".claude")
+	autoDir := filepath.Join(homeDir, ".auto")
 
 	if content, ok := entries[SyncKeys.UserSettings]; ok && len(content) <= maxFileSizeBytes {
-		path := filepath.Join(claudeDir, "settings.json")
+		path := filepath.Join(autoDir, "settings.json")
 		writeFileForSync(path, content)
 	}
 
 	if content, ok := entries[SyncKeys.UserMemory]; ok && len(content) <= maxFileSizeBytes {
-		path := filepath.Join(claudeDir, "CLAUDE.md")
+		path := filepath.Join(autoDir, "CLAUDE.md")
 		writeFileForSync(path, content)
 	}
 
 	if projectID != "" {
-		projectDir := filepath.Join(claudeDir, "projects", projectID)
+		projectDir := filepath.Join(autoDir, "projects", projectID)
 
 		key := SyncKeys.ProjectSettings(projectID)
 		if content, ok := entries[key]; ok && len(content) <= maxFileSizeBytes {
-			path := filepath.Join(projectDir, ".claude", "settings.local.json")
+			path := filepath.Join(projectDir, ".auto", "settings.local.json")
 			writeFileForSync(path, content)
 		}
 

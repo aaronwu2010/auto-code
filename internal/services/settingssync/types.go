@@ -33,10 +33,10 @@ var SyncKeys = struct {
 	ProjectSettings func(projectID string) string
 	ProjectMemory   func(projectID string) string
 }{
-	UserSettings: "~/.claude/settings.json",
-	UserMemory:   "~/.claude/CLAUDE.md",
+	UserSettings: "~/.auto/settings.json",
+	UserMemory:   "~/.auto/CLAUDE.md",
 	ProjectSettings: func(projectID string) string {
-		return "projects/" + projectID + "/.claude/settings.local.json"
+		return "projects/" + projectID + "/.auto/settings.local.json"
 	},
 	ProjectMemory: func(projectID string) string {
 		return "projects/" + projectID + "/CLAUDE.local.md"

@@ -113,13 +113,13 @@ func (cb *ContextBuilder) AddUserContext(key, value string) {
 func (cb *ContextBuilder) LoadMemoryFiles(ctx context.Context) error {
 	searchPaths := []string{
 		cb.cwd,
-		filepath.Join(cb.cwd, ".claude"),
+		filepath.Join(cb.cwd, ".auto"),
 	}
 
 	homeDir, _ := os.UserHomeDir()
 	if homeDir != "" {
 		searchPaths = append(searchPaths, homeDir)
-		searchPaths = append(searchPaths, filepath.Join(homeDir, ".claude"))
+		searchPaths = append(searchPaths, filepath.Join(homeDir, ".auto"))
 	}
 
 	var memoryContent []string

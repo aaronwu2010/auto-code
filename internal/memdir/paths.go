@@ -47,11 +47,11 @@ func IsExtractModeActive() bool {
 func GetMemoryBaseDir() string {
 	if envDir := os.Getenv("AUTO_CODE_CONFIG_HOME"); envDir != "" {
 		if validated, err := validateMemoryPath(envDir); err == nil {
-			return filepath.Join(validated, ".claude")
+			return filepath.Join(validated, ".auto")
 		}
 	}
 	homeDir, _ := os.UserHomeDir()
-	return filepath.Join(homeDir, ".claude")
+	return filepath.Join(homeDir, ".auto")
 }
 
 // autoDirName 是项目目录下的隐藏目录名，所有记忆/格式/项目内容都存放于此

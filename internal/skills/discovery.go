@@ -95,7 +95,7 @@ func (r *DynamicSkillRegistry) DiscoverSkillDirsForPaths(ctx context.Context, pa
 		}
 		r.paths[p] = true
 
-		skillDir := filepath.Join(p, ".claude", "skills")
+		skillDir := filepath.Join(p, ".auto", "skills")
 		entries, err := os.ReadDir(skillDir)
 		if err != nil {
 			continue
@@ -161,5 +161,5 @@ func (r *DynamicSkillRegistry) ActivateConditionalSkillsForPaths(ctx context.Con
 
 func GetSkillsPath() string {
 	homeDir, _ := os.UserHomeDir()
-	return filepath.Join(homeDir, ".claude", "skills")
+	return filepath.Join(homeDir, ".auto", "skills")
 }

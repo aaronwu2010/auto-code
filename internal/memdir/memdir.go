@@ -287,7 +287,7 @@ func (m *Memdir) scanDirectory(dir string) ([]string, error) {
 		}
 	}
 
-	subDirs := []string{".claude", ".github"}
+	subDirs := []string{".auto", ".github"}
 	for _, subDir := range subDirs {
 		subPath := filepath.Join(dir, subDir)
 		if info, err := os.Stat(subPath); err == nil && info.IsDir() {

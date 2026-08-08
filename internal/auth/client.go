@@ -378,7 +378,7 @@ type TokenStore struct {
 func NewTokenStore() *TokenStore {
 	homeDir, _ := os.UserHomeDir()
 	return &TokenStore{
-		dir: filepath.Join(homeDir, ".claude"),
+		dir: filepath.Join(homeDir, ".auto"),
 	}
 }
 

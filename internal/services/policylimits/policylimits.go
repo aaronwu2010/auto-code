@@ -57,7 +57,7 @@ func (s *PolicyLimitsService) getEndpoint() string {
 
 func (s *PolicyLimitsService) getCachePath() string {
 	homeDir, _ := os.UserHomeDir()
-	return filepath.Join(homeDir, ".claude", cacheFilename)
+	return filepath.Join(homeDir, ".auto", cacheFilename)
 }
 
 func (s *PolicyLimitsService) getAuthHeaders() (map[string]string, string) {
