@@ -43,14 +43,15 @@ type QueryParams struct {
 }
 
 type QueryDeps struct {
-	CallModel     func(ctx context.Context, params QueryParams) (<-chan QueryOutput, error)
-	Microcompact  func(messages []types.Message) []types.Message
-	AutoCompact   func(messages []types.Message) (*CompactionResult, error)
-	GenerateUUID  func() string
-	GetCostUSD    func() float64
-	OnToolResult  func(result *tools.ToolResult, toolCtx *tools.ToolUseContext)
-	GetTools      func() []tools.Tool
-	OnPhaseChange func(phase string, toolName string, toolInput any)
+	CallModel      func(ctx context.Context, params QueryParams) (<-chan QueryOutput, error)
+	Microcompact   func(messages []types.Message) []types.Message
+	AutoCompact    func(messages []types.Message) (*CompactionResult, error)
+	GenerateUUID   func() string
+	GetCostUSD     func() float64
+	OnToolResult   func(result *tools.ToolResult, toolCtx *tools.ToolUseContext)
+	GetTools       func() []tools.Tool
+	OnPhaseChange  func(phase string, toolName string, toolInput any)
+	OnTurnComplete func(ctx context.Context, messages []types.Message)
 }
 
 type CompactionResult struct {
@@ -676,6 +677,10 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		}
 
 		state.TurnCount++
+
+		if deps.OnTurnComplete != nil {
+			deps.OnTurnComplete(ctx, state.Messages)
+		}
 
 		if params.MaxBudgetUsd > 0 && deps.GetCostUSD != nil && deps.GetCostUSD() >= params.MaxBudgetUsd {
 			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "max_budget_usd"}}

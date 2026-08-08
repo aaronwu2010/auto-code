@@ -2,8 +2,12 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -12,8 +16,12 @@ import (
 	"github.com/auto-code/auto-code/internal/compact"
 	engineContext "github.com/auto-code/auto-code/internal/engine/context"
 	"github.com/auto-code/auto-code/internal/engine/query"
+	"github.com/auto-code/auto-code/internal/memdir"
 	"github.com/auto-code/auto-code/internal/prompts"
+	"github.com/auto-code/auto-code/internal/services/autodream"
 	"github.com/auto-code/auto-code/internal/services/extractmemories"
+	"github.com/auto-code/auto-code/internal/services/sessionmemory"
+	"github.com/auto-code/auto-code/internal/services/teammemorysync"
 	"github.com/auto-code/auto-code/internal/state"
 	"github.com/auto-code/auto-code/internal/tools"
 	"github.com/auto-code/auto-code/internal/tools/agent"
@@ -24,23 +32,30 @@ import (
 )
 
 type QueryEngine struct {
-	appState        *state.AppState
-	toolReg         *registry.ToolRegistry
-	apiClient       *api.Client
-	messages        []types.Message
-	mu              sync.RWMutex
-	ctx             context.Context
-	cancel          context.CancelFunc
-	queryCancel     context.CancelFunc
-	sessionID       types.SessionID
-	config          *QueryEngineConfig
-	usage           api.Usage
-	readFileState   *tools.FileStateCache
-	ctxBuilder      *engineContext.ContextBuilder
-	streamContent   string
-	streamThinking  string
-	streamToolCalls []types.ToolCall
-	streamMsgID     string
+	appState            *state.AppState
+	toolReg             *registry.ToolRegistry
+	apiClient           *api.Client
+	messages            []types.Message
+	mu                  sync.RWMutex
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	queryCancel         context.CancelFunc
+	sessionID           types.SessionID
+	config              *QueryEngineConfig
+	usage               api.Usage
+	readFileState       *tools.FileStateCache
+	ctxBuilder          *engineContext.ContextBuilder
+	streamContent       string
+	streamThinking      string
+	streamToolCalls     []types.ToolCall
+	streamMsgID         string
+	userContextInjected bool
+	alreadySurfaced     map[string]bool
+	sessionRecallBytes  int
+	sessionMemory       *sessionmemory.SessionMemory
+	autoDream           *autodream.AutoDream
+	lastSummarizedMsgID string
+	teamSyncState       *teammemorysync.SyncState
 }
 
 type QueryEngineConfig struct {
@@ -85,13 +100,14 @@ func NewQueryEngine(appState *state.AppState, config *QueryEngineConfig) *QueryE
 	apiClient := api.NewClient(ollamaConfig)
 
 	return &QueryEngine{
-		appState:      appState,
-		toolReg:       registry.NewDefaultToolRegistry(),
-		apiClient:     apiClient,
-		messages:      make([]types.Message, 0),
-		sessionID:     generateSessionID(),
-		config:        config,
-		readFileState: tools.NewFileStateCache(),
+		appState:        appState,
+		toolReg:         registry.NewDefaultToolRegistry(),
+		apiClient:       apiClient,
+		messages:        make([]types.Message, 0),
+		sessionID:       generateSessionID(),
+		config:          config,
+		readFileState:   tools.NewFileStateCache(),
+		alreadySurfaced: make(map[string]bool),
 	}
 }
 
@@ -99,6 +115,17 @@ func (qe *QueryEngine) Startup(ctx context.Context) {
 	qe.ctx, qe.cancel = context.WithCancel(ctx)
 	qe.setupAgentTool()
 	compact.SetSummarizeFunc(qe.summarizeWithLLM)
+	memdir.RegisterSideQueryFn(qe.sideQuery)
+
+	if qe.ctxBuilder != nil {
+		if md := qe.ctxBuilder.GetMemdir(); md != nil {
+			paths := md.GetPaths()
+			qe.sessionMemory = sessionmemory.NewSessionMemory(paths)
+			qe.autoDream = autodream.NewAutoDream(paths)
+		}
+	}
+
+	qe.startTeamMemorySync()
 }
 
 // SetContextBuilder 注入上下文构建器，用于在系统提示中包含记忆文件和 Git 状态
@@ -411,6 +438,22 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		}
 
 		log.Printf("[Engine] SubmitMessage: building system prompt...")
+		qe.ensureUserContextMessage(submitCtx)
+
+		if recall := qe.performActiveRecall(submitCtx, prompt); recall != "" {
+			recallMsg := types.Message{
+				ID:        generateMessageID(),
+				Role:      types.RoleUser,
+				Content:   recall,
+				Timestamp: time.Now().Unix(),
+				IsMeta:    true,
+				UUID:      "active-recall",
+			}
+			qe.mu.Lock()
+			qe.messages = append(qe.messages, recallMsg)
+			qe.mu.Unlock()
+		}
+
 		systemPrompt, err := qe.buildSystemPrompt(submitCtx)
 		if err != nil {
 			log.Printf("[Engine] buildSystemPrompt failed: %v", err)
@@ -517,6 +560,27 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 					}
 					qe.appState.SetStatusLineText(fmt.Sprintf("工具 %s 执行完成", toolName))
 				}
+			},
+			OnTurnComplete: func(turnCtx context.Context, msgs []types.Message) {
+				if qe.sessionMemory == nil || !memdir.IsAutoMemoryEnabled() {
+					return
+				}
+				lastTokens := qe.sessionMemory.GetLastTokenCount()
+				lastCalls := qe.sessionMemory.GetLastToolCalls()
+				if !sessionmemory.ShouldExtractMemory(msgs, lastTokens, lastCalls) {
+					return
+				}
+				go func() {
+					if err := qe.sessionMemory.ExtractSessionMemory(turnCtx, msgs); err != nil {
+						log.Printf("[Engine] session memory extraction failed: %v", err)
+					} else {
+						qe.mu.Lock()
+						if len(msgs) > 0 {
+							qe.lastSummarizedMsgID = msgs[len(msgs)-1].ID
+						}
+						qe.mu.Unlock()
+					}
+				}()
 			},
 		}
 
@@ -857,6 +921,7 @@ func (qe *QueryEngine) processQueryOutput(ctx context.Context, output query.Quer
 			qe.streamToolCalls = nil
 			qe.streamMsgID = ""
 			extractmemories.NotifyConversationEnd(ctx, qe.GetMessages())
+			qe.triggerAutoDream(ctx)
 			return []SDKMessage{
 				{Type: "assistant", Message: &completeMsg, SessionID: qe.sessionID},
 				{Type: "result", Subtype: reason, SessionID: qe.sessionID},
@@ -867,6 +932,7 @@ func (qe *QueryEngine) processQueryOutput(ctx context.Context, output query.Quer
 		qe.streamToolCalls = nil
 		qe.streamMsgID = ""
 		extractmemories.NotifyConversationEnd(ctx, qe.GetMessages())
+		qe.triggerAutoDream(ctx)
 		return []SDKMessage{{Type: "result", Subtype: reason, SessionID: qe.sessionID}}
 	case "error":
 		log.Printf("[Engine] query error: %v", output.Error)
@@ -892,46 +958,342 @@ func (qe *QueryEngine) processQueryOutput(ctx context.Context, output query.Quer
 }
 
 func (qe *QueryEngine) buildSystemPrompt(ctx context.Context) (*types.SystemPrompt, error) {
-	// 构建完整的系统提示词
 	config := prompts.SystemPromptConfig{
-		LanguagePreference: "Chinese", // 使用中文响应
+		LanguagePreference: "Chinese",
 	}
 
-	content := prompts.BuildSystemPrompt(ctx, config)
+	var blocks []types.SystemPromptBlock
 
-	// 注入上下文构建器中的记忆文件和 Git 状态
+	if qe.config.CustomSystemPrompt != "" {
+		blocks = append(blocks, types.SystemPromptBlock{Text: qe.config.CustomSystemPrompt, CacheScope: ""})
+	} else {
+		blocks = append(blocks, types.SystemPromptBlock{Text: prompts.BuildSystemPrompt(ctx, config), CacheScope: "global"})
+	}
+
+	// Auto Memory
 	if qe.ctxBuilder != nil {
-		if gitStatus, err := qe.ctxBuilder.GetGitStatus(ctx); err == nil && gitStatus != "" {
-			content += "\n\n# Git Status\n" + gitStatus
+		if memLines := qe.ctxBuilder.GetMemoryLines(ctx); memLines != "" {
+			blocks = append(blocks, types.SystemPromptBlock{Text: memLines, CacheScope: ""})
 		}
-		if userCtx, err := qe.ctxBuilder.GetUserContext(ctx); err == nil {
-			if claudeMd, ok := userCtx["claudeMd"]; ok && claudeMd != "" {
-				content += "\n\n# Project Memory\n" + claudeMd
-			}
+		if gitStatus, err := qe.ctxBuilder.GetGitStatus(ctx); err == nil && gitStatus != "" {
+			blocks = append(blocks, types.SystemPromptBlock{Text: "# Git Status\n" + gitStatus, CacheScope: ""})
 		}
 	}
 
-	// 添加项目目录信息（关键：告诉 AI 使用这个目录）
 	projectDir := qe.config.CWD
 	if projectDir == "" {
 		projectDir = qe.appState.GetProjectDirectory()
 	}
 	if projectDir != "" {
-		content += fmt.Sprintf("\n\n# Project Directory\nThe current project directory is: %s\n\nIMPORTANT: When creating files, use this directory as the base path. For example, if the user asks to create 'hello.go', you should write to '%s/hello.go' (using the correct path separator for the operating system).", projectDir, projectDir)
-	}
-
-	// 添加自定义提示词
-	if qe.config.CustomSystemPrompt != "" {
-		content = qe.config.CustomSystemPrompt + "\n\n" + content
+		blocks = append(blocks, types.SystemPromptBlock{
+			Text:       fmt.Sprintf("# Project Directory\nThe current project directory is: %s\n\nIMPORTANT: When creating files, use this directory as the base path. For example, if the user asks to create 'hello.go', you should write to '%s/hello.go' (using the correct path separator for the operating system).", projectDir, projectDir),
+			CacheScope: "",
+		})
 	}
 
 	if qe.config.AppendSystemPrompt != "" {
-		content += "\n\n" + qe.config.AppendSystemPrompt
+		blocks = append(blocks, types.SystemPromptBlock{Text: qe.config.AppendSystemPrompt, CacheScope: ""})
 	}
 
-	content += fmt.Sprintf("\n\nCurrent date: %s", time.Now().Format("2006-01-02"))
+	blocks = append(blocks, types.SystemPromptBlock{
+		Text:       fmt.Sprintf("Current date: %s", time.Now().Format("2006-01-02")),
+		CacheScope: "",
+	})
 
-	return &types.SystemPrompt{Content: content}, nil
+	sp := &types.SystemPrompt{Blocks: blocks}
+	sp.Content = sp.BuildContent()
+	return sp, nil
+}
+
+func (qe *QueryEngine) ensureUserContextMessage(ctx context.Context) {
+	qe.mu.Lock()
+	defer qe.mu.Unlock()
+	if qe.userContextInjected {
+		return
+	}
+	if qe.ctxBuilder == nil {
+		return
+	}
+
+	userCtx, err := qe.ctxBuilder.GetUserContext(ctx)
+	if err != nil {
+		return
+	}
+
+	var sections []string
+	if claudeMd, ok := userCtx["claudeMd"]; ok && claudeMd != "" {
+		sections = append(sections, "# claudeMd\n"+claudeMd)
+	}
+	if memEntry := qe.ctxBuilder.GetMemoryEntrypointContent(ctx); memEntry != "" {
+		sections = append(sections, "# autoMemory\n"+memEntry)
+	}
+	sections = append(sections, fmt.Sprintf("# currentDate\nToday's date is %s.", time.Now().Format("2006-01-02")))
+
+	if len(sections) == 0 {
+		return
+	}
+
+	contextText := strings.Join(sections, "\n\n")
+	reminderContent := "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n" + contextText + "\n\n      IMPORTANT: this context may or may not be relevant to your tasks.\n</system-reminder>"
+
+	metaMsg := types.Message{
+		ID:        generateMessageID(),
+		Role:      types.RoleUser,
+		Content:   reminderContent,
+		Timestamp: time.Now().Unix(),
+		IsMeta:    true,
+		UUID:      "user-context",
+	}
+
+	qe.messages = append([]types.Message{metaMsg}, qe.messages...)
+	qe.userContextInjected = true
+}
+
+func (qe *QueryEngine) sideQuery(ctx context.Context, systemPrompt, userPrompt string, outputPath string) (string, error) {
+	if qe.apiClient == nil {
+		return "", fmt.Errorf("api client not configured")
+	}
+
+	ollamaMessages := []api.OllamaMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}
+
+	temp := 0.0
+	numPredict := 2048
+	req := api.OllamaChatRequest{
+		Messages: ollamaMessages,
+		Stream:   false,
+		Options: &api.ModelOptions{
+			Temperature: &temp,
+			NumPredict:  &numPredict,
+		},
+	}
+
+	callCtx := ctx
+	if callCtx == nil {
+		callCtx = qe.ctx
+	}
+	if callCtx == nil {
+		callCtx = context.Background()
+	}
+
+	resp, err := qe.apiClient.ChatWithoutStreaming(callCtx, req)
+	if err != nil {
+		return "", err
+	}
+
+	return resp.Content, nil
+}
+
+const (
+	maxRecallLinesPerFile   = 200
+	maxRecallBytesPerFile   = 4 * 1024
+	maxSessionRecallBytes   = 60 * 1024
+	maxRecentToolsForRecall = 10
+)
+
+func (qe *QueryEngine) performActiveRecall(ctx context.Context, userInput string) string {
+	if qe.ctxBuilder == nil || !memdir.IsAutoMemoryEnabled() {
+		return ""
+	}
+
+	md := qe.ctxBuilder.GetMemdir()
+	if md == nil {
+		return ""
+	}
+	memoryDir := md.GetPaths().GetAutoMemPath()
+	if memoryDir == "" {
+		return ""
+	}
+
+	recentTools := qe.getRecentToolNames(maxRecentToolsForRecall)
+
+	relevant, err := memdir.FindRelevantMemories(ctx, userInput, memoryDir, recentTools, qe.alreadySurfaced)
+	if err != nil || len(relevant) == 0 {
+		return ""
+	}
+
+	var sections []string
+	for _, mem := range relevant {
+		if qe.sessionRecallBytes >= maxSessionRecallBytes {
+			break
+		}
+
+		content, err := os.ReadFile(mem.Path)
+		if err != nil {
+			continue
+		}
+
+		text := string(content)
+		text = truncateRecallContent(text, maxRecallLinesPerFile, maxRecallBytesPerFile)
+
+		header := memdir.MemoryFreshnessNote(mem.MtimeMs)
+		section := fmt.Sprintf("- %s (%s)\n%s", mem.Path, header, text)
+		sections = append(sections, section)
+
+		qe.alreadySurfaced[mem.Path] = true
+		qe.sessionRecallBytes += len(section)
+	}
+
+	if len(sections) == 0 {
+		return ""
+	}
+
+	reminder := "<system-reminder>\nThe following relevant memories were recalled for this query:\n\n" +
+		strings.Join(sections, "\n\n") +
+		"\n\n      IMPORTANT: these memories may or may not be relevant to the user's current request.\n</system-reminder>"
+
+	return reminder
+}
+
+func (qe *QueryEngine) getRecentToolNames(limit int) []string {
+	qe.mu.RLock()
+	defer qe.mu.RUnlock()
+
+	var names []string
+	for i := len(qe.messages) - 1; i >= 0 && len(names) < limit; i-- {
+		for _, tc := range qe.messages[i].ToolCalls {
+			names = append(names, tc.Function.Name)
+			if len(names) >= limit {
+				break
+			}
+		}
+	}
+	return names
+}
+
+func truncateRecallContent(text string, maxLines, maxBytes int) string {
+	if len(text) > maxBytes {
+		text = text[:maxBytes]
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
+		text = strings.Join(lines, "\n") + "\n... (truncated)"
+	}
+	return text
+}
+
+func (qe *QueryEngine) triggerAutoDream(ctx context.Context) {
+	if qe.autoDream == nil || !autodream.IsAutoDreamEnabled() {
+		return
+	}
+	go func() {
+		dreamCtx := qe.ctx
+		if dreamCtx == nil {
+			dreamCtx = context.Background()
+		}
+		_ = qe.autoDream.ExecuteAutoDream(dreamCtx)
+	}()
+}
+
+const (
+	teamSyncPollInterval  = 2 * time.Second
+	teamSyncDebounceDelay = 2 * time.Second
+)
+
+func (qe *QueryEngine) startTeamMemorySync() {
+	if !teammemorysync.IsTeamMemorySyncAvailable() {
+		return
+	}
+
+	qe.teamSyncState = teammemorysync.CreateSyncState()
+
+	go func() {
+		result, err := teammemorysync.PullTeamMemory(qe.ctx, qe.teamSyncState)
+		if err != nil {
+			log.Printf("[TeamSync] initial pull failed: %v", err)
+		} else if result != nil && result.Success {
+			log.Printf("[TeamSync] initial pull success: %d files", result.FilesWritten)
+		}
+	}()
+
+	go qe.teamMemoryWatcher()
+}
+
+func (qe *QueryEngine) teamMemoryWatcher() {
+	teamDir := memdir.GetTeamMemPath()
+	if teamDir == "" {
+		return
+	}
+
+	lastHash := qe.computeTeamDirHash(teamDir)
+	debounceTimer := time.NewTimer(0)
+	if !debounceTimer.Stop() {
+		<-debounceTimer.C
+	}
+	pendingChange := false
+
+	ticker := time.NewTicker(teamSyncPollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-qe.ctx.Done():
+			return
+		case <-ticker.C:
+			currentHash := qe.computeTeamDirHash(teamDir)
+			if currentHash != lastHash {
+				lastHash = currentHash
+				pendingChange = true
+				debounceTimer.Reset(teamSyncDebounceDelay)
+			}
+		case <-debounceTimer.C:
+			if pendingChange {
+				pendingChange = false
+				qe.pushTeamMemoryWithSecretScan()
+			}
+		}
+	}
+}
+
+func (qe *QueryEngine) computeTeamDirHash(dir string) string {
+	h := sha256.New()
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		fmt.Fprintf(h, "%s:%d:%d\n", path, info.Size(), info.ModTime().UnixNano())
+		return nil
+	})
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func (qe *QueryEngine) pushTeamMemoryWithSecretScan() {
+	teamDir := memdir.GetTeamMemPath()
+	if teamDir == "" {
+		return
+	}
+
+	var skipped []string
+	filepath.Walk(teamDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(strings.ToLower(path), ".md") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		if secrets := teammemorysync.ScanForSecretsPublic(string(data)); len(secrets) > 0 {
+			skipped = append(skipped, fmt.Sprintf("%s (secrets: %s)", path, strings.Join(secrets, ", ")))
+		}
+		return nil
+	})
+
+	if len(skipped) > 0 {
+		log.Printf("[TeamSync] 跳过含 secret 的文件: %s", strings.Join(skipped, "; "))
+	}
+
+	result, err := teammemorysync.PushTeamMemory(qe.ctx, qe.teamSyncState)
+	if err != nil {
+		log.Printf("[TeamSync] push failed: %v", err)
+	} else if result != nil && result.Success {
+		log.Printf("[TeamSync] push success: %d files", result.FilesPushed)
+	}
 }
 
 // getProjectDirectory 获取项目目录
@@ -1088,23 +1450,28 @@ func (qe *QueryEngine) summarizeWithLLM(ctx any, messages []compact.CompactMessa
 func (qe *QueryEngine) autoCompact(messages []types.Message) (*query.CompactionResult, error) {
 	if len(messages) <= 4 {
 		log.Printf("[Compact] 消息数不足, 跳过压缩")
-		return nil, nil // 不需要压缩
+		return nil, nil
 	}
 
-	// 计算当前 token 数量（简单估算）
 	totalTokens := 0
 	for _, msg := range messages {
-		totalTokens += len(msg.Content) / 4 // 粗略估算：每4个字符约1个token
+		totalTokens += len(msg.Content) / 4
 	}
 
-	windowSize := 200000 // 默认上下文窗口大小
+	windowSize := 200000
+	autoCompactThreshold := windowSize - compact.AutoCompactBufferTokens
+
 	if !ShouldAutoCompact(totalTokens, windowSize) {
 		log.Printf("[Compact] token 未达阈值, 跳过压缩")
 		return nil, nil
 	}
 	log.Printf("[Compact] token 达到阈值, 触发压缩")
 
-	// 转换为 CompactMessage
+	if result, err := qe.trySessionMemoryCompaction(messages, autoCompactThreshold); err == nil && result != nil {
+		log.Printf("[Compact] SM Compact 成功: %s", result.Summary)
+		return result, nil
+	}
+
 	compactMessages := make([]compact.CompactMessage, len(messages))
 	for i, msg := range messages {
 		compactMessages[i] = compact.CompactMessage{
@@ -1114,77 +1481,27 @@ func (qe *QueryEngine) autoCompact(messages []types.Message) (*query.CompactionR
 		}
 	}
 
-	// === 第一策略：LLM 智能摘要 ===
-	// 保留最近一半消息，对较早的消息进行 LLM 摘要
-	keepCount := len(compactMessages) / 2
-	if keepCount < 2 {
-		keepCount = 2
+	if cr := compact.CompactWithSummary(compactMessages, windowSize, totalTokens); cr != nil && len(cr.Messages) > 0 {
+		compactedTypes := convertCompactMessagesToTypes(cr.Messages, messages)
+		summaryText := fmt.Sprintf("LLM 智能摘要: 压缩 %d 条消息, 保留 %d 条, 节省 ~%d tokens",
+			cr.MessagesRemoved, cr.MessagesKept, cr.TotalTokensBefore-cr.TotalTokensAfter)
+		log.Printf("[Compact] %s", summaryText)
+		return &query.CompactionResult{
+			Messages:       compactedTypes,
+			BoundaryMarker: "llm_compact",
+			Summary:        summaryText,
+		}, nil
 	}
 
-	if len(compactMessages) > keepCount {
-		// 调整切分点：避免在 tool 消息处截断（缺少对应 assistant 消息会导致 API 错误）
-		cutPoint := len(compactMessages) - keepCount
-		for cutPoint < len(compactMessages) && compactMessages[cutPoint].Role == "tool" {
-			log.Printf("[Compact] 切分点调整: 避免 tool 消息截断")
-			cutPoint--
-		}
-		if cutPoint < 1 {
-			cutPoint = 1
-		}
-
-		olderMessages := compactMessages[:cutPoint]
-
-		if len(olderMessages) > 0 {
-			log.Printf("[Compact] 开始 LLM 智能摘要")
-			summary, err := qe.summarizeWithLLM(nil, olderMessages, compact.GetCompactPrompt())
-			if err == nil && summary != "" {
-				// 构建压缩后的消息列表
-				var compactedTypes []types.Message
-
-				// 添加摘要消息（user 角色，包含会话延续上下文）
-				compactedTypes = append(compactedTypes, types.Message{
-					ID:        generateMessageID(),
-					Role:      types.RoleUser,
-					Content:   compact.GetCompactUserSummaryMessage(summary, false, "", true),
-					Timestamp: time.Now().Unix(),
-				})
-
-				// 保留切分点之后的最近消息
-				compactedTypes = append(compactedTypes, messages[cutPoint:]...)
-
-				tokensAfter := 0
-				for _, m := range compactedTypes {
-					tokensAfter += len(m.Content) / 4
-				}
-
-				summaryText := fmt.Sprintf("LLM 智能摘要: 压缩 %d 条消息为摘要, 保留 %d 条近期消息, 节省 ~%d tokens",
-					len(olderMessages), len(messages[cutPoint:]), totalTokens-tokensAfter)
-				log.Printf("[Compact] %s", summaryText)
-
-				return &query.CompactionResult{
-					Messages:       compactedTypes,
-					BoundaryMarker: "llm_compact",
-					Summary:        summaryText,
-				}, nil
-			}
-
-			log.Printf("[Compact] LLM 摘要失败，回退到微压缩: %v", err)
-		}
-	}
-
-	// === 第二策略（回退）：微压缩 - 仅过滤空消息、保留 system 和最新 user 消息 ===
 	log.Printf("[Compact] 回退到微压缩策略")
 	result := compact.MicrocompactMessages(compactMessages)
 
-	// 边界检查：确保 MessagesAfter 不超过 compactMessages 长度
 	if result.MessagesAfter < 0 || result.MessagesAfter > len(compactMessages) {
 		return nil, nil
 	}
 
-	// 转换回 types.Message
 	var compactedTypes []types.Message
 	for _, cm := range compactMessages[:result.MessagesAfter] {
-		// 找到原始消息的索引
 		origIdx := -1
 		for j := range messages {
 			if messages[j].Content == cm.Content && string(messages[j].Role) == cm.Role {
@@ -1195,7 +1512,6 @@ func (qe *QueryEngine) autoCompact(messages []types.Message) (*query.CompactionR
 		if origIdx >= 0 {
 			compactedTypes = append(compactedTypes, messages[origIdx])
 		} else {
-			// 创建新消息
 			compactedTypes = append(compactedTypes, types.Message{
 				ID:        generateMessageID(),
 				Role:      types.MessageRole(cm.Role),
@@ -1205,7 +1521,6 @@ func (qe *QueryEngine) autoCompact(messages []types.Message) (*query.CompactionR
 		}
 	}
 
-	// 生成压缩摘要
 	summary := ""
 	if result.DidCompact {
 		summary = fmt.Sprintf("微压缩 %d 条消息, 节省 ~%d tokens", result.MessagesBefore-result.MessagesAfter, result.TokensSaved)
@@ -1216,6 +1531,125 @@ func (qe *QueryEngine) autoCompact(messages []types.Message) (*query.CompactionR
 		BoundaryMarker: "auto_compact",
 		Summary:        summary,
 	}, nil
+}
+
+const (
+	smCompactMinTokens   = 10000
+	smCompactMinMessages = 5
+	smCompactMaxTokens   = 40000
+)
+
+func (qe *QueryEngine) trySessionMemoryCompaction(messages []types.Message, autoCompactThreshold int) (*query.CompactionResult, error) {
+	if qe.sessionMemory == nil {
+		return nil, nil
+	}
+
+	summaryPath := qe.sessionMemory.GetMemoryFilePath()
+	if summaryPath == "" {
+		return nil, nil
+	}
+
+	summaryContent, err := os.ReadFile(summaryPath)
+	if err != nil || len(strings.TrimSpace(string(summaryContent))) == 0 {
+		return nil, nil
+	}
+
+	boundaryIdx := -1
+	qe.mu.RLock()
+	lastID := qe.lastSummarizedMsgID
+	qe.mu.RUnlock()
+	if lastID != "" {
+		for i, msg := range messages {
+			if msg.ID == lastID {
+				boundaryIdx = i
+				break
+			}
+		}
+	}
+
+	if boundaryIdx < 0 {
+		boundaryIdx = len(messages) / 2
+	}
+
+	keptMessages := messages[boundaryIdx+1:]
+	keptTokens := 0
+	for _, m := range keptMessages {
+		keptTokens += len(m.Content) / 4
+	}
+
+	if keptTokens < smCompactMinTokens || len(keptMessages) < smCompactMinMessages {
+		log.Printf("[Compact] SM Compact: 保留消息不足 (%d tokens, %d msgs), 跳过", keptTokens, len(keptMessages))
+		return nil, nil
+	}
+
+	summaryTokens := len(summaryContent) / 4
+	totalAfter := summaryTokens + keptTokens
+
+	if totalAfter >= autoCompactThreshold {
+		log.Printf("[Compact] SM Compact: 压缩后 %d tokens >= 阈值 %d, 降级到 Full Compact", totalAfter, autoCompactThreshold)
+		return nil, nil
+	}
+
+	if totalAfter > smCompactMaxTokens {
+		log.Printf("[Compact] SM Compact: 压缩后 %d tokens > 最大 %d, 降级", totalAfter, smCompactMaxTokens)
+		return nil, nil
+	}
+
+	summaryMsg := types.Message{
+		ID:        generateMessageID(),
+		Role:      types.RoleUser,
+		Content:   compact.GetCompactUserSummaryMessage(string(summaryContent), false, "", true),
+		Timestamp: time.Now().Unix(),
+	}
+
+	result := []types.Message{summaryMsg}
+	result = append(result, keptMessages...)
+
+	qe.mu.Lock()
+	if len(keptMessages) > 0 {
+		qe.lastSummarizedMsgID = keptMessages[len(keptMessages)-1].ID
+	}
+	qe.mu.Unlock()
+
+	return &query.CompactionResult{
+		Messages:       result,
+		BoundaryMarker: "sm_compact",
+		Summary:        fmt.Sprintf("SM Compact: session summary 替代 %d 条消息, 保留 %d 条近期消息", boundaryIdx+1, len(keptMessages)),
+	}, nil
+}
+
+func convertCompactMessagesToTypes(compactMsgs []compact.CompactMessage, origMessages []types.Message) []types.Message {
+	var result []types.Message
+	for i, cm := range compactMsgs {
+		if i == 0 && cm.Role == "system" {
+			result = append(result, types.Message{
+				ID:        generateMessageID(),
+				Role:      types.RoleUser,
+				Content:   compact.GetCompactUserSummaryMessage(cm.Content, false, "", true),
+				Timestamp: time.Now().Unix(),
+			})
+			continue
+		}
+
+		origIdx := -1
+		for j := range origMessages {
+			if origMessages[j].Content == cm.Content && string(origMessages[j].Role) == cm.Role {
+				origIdx = j
+				break
+			}
+		}
+		if origIdx >= 0 {
+			result = append(result, origMessages[origIdx])
+		} else {
+			result = append(result, types.Message{
+				ID:        generateMessageID(),
+				Role:      types.MessageRole(cm.Role),
+				Content:   cm.Content,
+				Timestamp: time.Now().Unix(),
+			})
+		}
+	}
+	return result
 }
 
 func ShouldAutoCompact(currentTokens, windowSize int) bool {

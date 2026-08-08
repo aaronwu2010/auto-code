@@ -35,6 +35,7 @@ type CompactionResult struct {
 	MessagesKept      int
 	Summary           string
 	WasPartial        bool
+	Messages          []CompactMessage
 }
 
 func GetEffectiveContextWindowSize(configuredWindowSize int) int {

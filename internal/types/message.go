@@ -110,5 +110,41 @@ func (m *Message) ToContentBlocks() []ContentBlock {
 }
 
 type SystemPrompt struct {
-	Content string `json:"content"`
+	Content string              `json:"content"`
+	Blocks  []SystemPromptBlock `json:"blocks,omitempty"`
+}
+
+type SystemPromptBlock struct {
+	Text       string `json:"text"`
+	CacheScope string `json:"cache_scope,omitempty"`
+}
+
+func (sp *SystemPrompt) BuildContent() string {
+	if sp.Content != "" {
+		return sp.Content
+	}
+	if len(sp.Blocks) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(sp.Blocks))
+	for _, b := range sp.Blocks {
+		if b.Text != "" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return joinSections(parts)
+}
+
+func joinSections(parts []string) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	result := parts[0]
+	for _, p := range parts[1:] {
+		result += "\n\n" + p
+	}
+	return result
 }

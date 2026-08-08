@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -22,14 +23,14 @@ import (
 
 const (
 	TeamMemorySyncTimeoutMs = 30000
-	MaxFileSizeBytes         = 250000
-	MaxPutBodyBytes          = 200000
-	MaxRetries               = 3
-	MaxConflictRetries       = 2
+	MaxFileSizeBytes        = 250000
+	MaxPutBodyBytes         = 200000
+	MaxRetries              = 3
+	MaxConflictRetries      = 2
 )
 
 type SyncState struct {
-	mu              sync.RWMutex
+	mu                sync.RWMutex
 	LastKnownChecksum string            `json:"last_known_checksum"`
 	ServerChecksums   map[string]string `json:"server_checksums"`
 	ServerMaxEntries  *int              `json:"server_max_entries,omitempty"`
@@ -42,10 +43,10 @@ func CreateSyncState() *SyncState {
 }
 
 type PullResult struct {
-	Success     bool   `json:"success"`
-	FilesWritten int   `json:"files_written"`
-	EntryCount  int    `json:"entry_count"`
-	Error       string `json:"error,omitempty"`
+	Success      bool   `json:"success"`
+	FilesWritten int    `json:"files_written"`
+	EntryCount   int    `json:"entry_count"`
+	Error        string `json:"error,omitempty"`
 }
 
 type PushResult struct {
@@ -350,24 +351,66 @@ func readLocalTeamMemory() (map[string]string, error) {
 	return files, err
 }
 
+var secretRegexPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`AKIA[0-9A-Z]{16}`),
+	regexp.MustCompile(`AGPA[0-9A-Z]{16}`),
+	regexp.MustCompile(`AIDA[0-9A-Z]{16}`),
+	regexp.MustCompile(`ASIA[0-9A-Z]{16}`),
+	regexp.MustCompile(`ghp_[0-9a-zA-Z]{36}`),
+	regexp.MustCompile(`gho_[0-9a-zA-Z]{36}`),
+	regexp.MustCompile(`ghs_[0-9a-zA-Z]{36}`),
+	regexp.MustCompile(`ghu_[0-9a-zA-Z]{36}`),
+	regexp.MustCompile(`ghr_[0-9a-zA-Z]{76}`),
+	regexp.MustCompile(`glpat-[0-9a-zA-Z\-_]{20}`),
+	regexp.MustCompile(`AIza[0-9a-zA-Z\-_]{35}`),
+	regexp.MustCompile(`xox[baprs]-[0-9a-zA-Z\-]{10,48}`),
+	regexp.MustCompile(`sk_live_[0-9a-zA-Z]{24,99}`),
+	regexp.MustCompile(`rk_live_[0-9a-zA-Z]{24,99}`),
+	regexp.MustCompile(`sk_test_[0-9a-zA-Z]{24,99}`),
+	regexp.MustCompile(`-----BEGIN (RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----`),
+	regexp.MustCompile(`eyJ[0-9a-zA-Z\-_]+\.eyJ[0-9a-zA-Z\-_]+`),
+	regexp.MustCompile(`ya29\.[0-9a-zA-Z\-_]+`),
+	regexp.MustCompile(`[0-9a-f]{32}`),
+	regexp.MustCompile(`[0-9a-f]{40}`),
+	regexp.MustCompile(`[0-9a-f]{64}`),
+}
+
+var secretKeywords = []string{
+	"api_key", "apikey", "secret_key", "secretkey",
+	"private_key", "privatekey",
+	"password", "passwd",
+	"bearer", "authorization:",
+	"access_token", "refresh_token",
+	"client_secret", "clientsecret",
+	"aws_secret", "aws_access",
+	"private_token", "pat_",
+	"npm_[0-9a-zA-Z]{36}",
+	"pypi-",
+	"x-api-key:",
+	"vault_token",
+}
+
 func scanForSecrets(content string) []string {
 	var found []string
-	patterns := []string{
-		"api_key", "apikey", "secret_key", "secretkey",
-		"private_key", "privatekey",
-		"password", "passwd",
-		"token", "bearer",
-		"authorization:",
+
+	for _, re := range secretRegexPatterns {
+		if re.MatchString(content) {
+			found = append(found, re.String())
+		}
 	}
 
 	lower := strings.ToLower(content)
-	for _, pattern := range patterns {
+	for _, pattern := range secretKeywords {
 		if strings.Contains(lower, pattern) {
 			found = append(found, pattern)
 		}
 	}
 
 	return found
+}
+
+func ScanForSecretsPublic(content string) []string {
+	return scanForSecrets(content)
 }
 
 func getRepoName() string {

@@ -40,6 +40,24 @@ func NewSessionMemory(paths *memdir.Paths) *SessionMemory {
 	}
 }
 
+func (s *SessionMemory) GetLastTokenCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastTokenCount
+}
+
+func (s *SessionMemory) GetLastToolCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastToolCalls
+}
+
+func (s *SessionMemory) GetMemoryFilePath() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.memoryFile
+}
+
 func ShouldExtractMemory(messages []types.Message, lastTokenCount int, lastToolCalls int) bool {
 	totalTokens := estimateTokenCount(messages)
 	toolCallCount := countToolCalls(messages)

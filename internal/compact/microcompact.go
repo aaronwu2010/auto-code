@@ -157,6 +157,7 @@ func CompactWithSummary(messages []CompactMessage, windowSize, currentTokens int
 					MessagesKept:      len(result),
 					Summary:           summary,
 					WasPartial:        false,
+					Messages:          result,
 				}
 			}
 		}

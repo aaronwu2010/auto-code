@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/auto-code/auto-code/internal/hooks"
+	"github.com/auto-code/auto-code/internal/memdir"
 	"github.com/auto-code/auto-code/internal/types"
 	"github.com/auto-code/auto-code/internal/utils/executil"
 )
@@ -21,15 +23,33 @@ type ContextBuilder struct {
 	cacheBreaker string
 	cwd          string
 	memoryPaths  []string
+	memdir       *memdir.Memdir
+	eventBus     *hooks.HookEventBus
 }
 
 func NewContextBuilder(cwd string) *ContextBuilder {
-	return &ContextBuilder{
+	cb := &ContextBuilder{
 		systemCtx:   make(map[string]string),
 		userCtx:     make(map[string]string),
 		cwd:         cwd,
 		memoryPaths: []string{},
 	}
+	if cwd != "" {
+		cb.memdir = memdir.NewMemdir(cwd)
+	}
+	return cb
+}
+
+func (cb *ContextBuilder) SetEventBus(bus *hooks.HookEventBus) {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	cb.eventBus = bus
+}
+
+func (cb *ContextBuilder) GetMemdir() *memdir.Memdir {
+	cb.mu.RLock()
+	defer cb.mu.RUnlock()
+	return cb.memdir
 }
 
 func (cb *ContextBuilder) GetGitStatus(ctx context.Context) (string, error) {
@@ -110,74 +130,161 @@ func (cb *ContextBuilder) AddUserContext(key, value string) {
 	cb.userCtx[key] = value
 }
 
-func (cb *ContextBuilder) LoadMemoryFiles(ctx context.Context) error {
-	searchPaths := []string{
-		cb.cwd,
-		filepath.Join(cb.cwd, ".auto"),
-	}
+type claudeMdSource struct {
+	path       string
+	memoryType string
+}
 
+func (cb *ContextBuilder) LoadMemoryFiles(ctx context.Context) error {
 	homeDir, _ := os.UserHomeDir()
+
+	sources := []claudeMdSource{
+		{filepath.Join(string(os.PathSeparator), "etc", "auto-code", "CLAUDE.md"), "Managed"},
+	}
 	if homeDir != "" {
-		searchPaths = append(searchPaths, homeDir)
-		searchPaths = append(searchPaths, filepath.Join(homeDir, ".auto"))
+		sources = append(sources, claudeMdSource{filepath.Join(homeDir, ".auto", "CLAUDE.md"), "User"})
+	}
+	if cb.cwd != "" {
+		sources = append(sources,
+			claudeMdSource{filepath.Join(cb.cwd, "CLAUDE.md"), "Project"},
+			claudeMdSource{filepath.Join(cb.cwd, ".auto", "CLAUDE.md"), "Project"},
+			claudeMdSource{filepath.Join(cb.cwd, "CLAUDE.local.md"), "Local"},
+		)
 	}
 
 	var memoryContent []string
+	var loadedPaths []string
 
-	for _, dir := range searchPaths {
-		files := []string{
-			filepath.Join(dir, "CLAUDE.md"),
-			filepath.Join(dir, "claude.md"),
+	for _, src := range sources {
+		content, err := os.ReadFile(src.path)
+		if err != nil {
+			continue
 		}
+		resolved := cb.resolveIncludes(string(content), filepath.Dir(src.path), make(map[string]bool), 0)
+		memoryContent = append(memoryContent, fmt.Sprintf("--- %s ---\n%s", filepath.Base(src.path), resolved))
+		loadedPaths = append(loadedPaths, src.path)
+		cb.emitInstructionsLoaded(src.path, src.memoryType, "session_start")
+	}
 
-		for _, f := range files {
-			content, err := os.ReadFile(f)
-			if err != nil {
-				continue
+	if cb.cwd != "" {
+		rulesDir := filepath.Join(cb.cwd, ".auto", "rules")
+		if entries, err := os.ReadDir(rulesDir); err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".md") {
+					continue
+				}
+				f := filepath.Join(rulesDir, entry.Name())
+				content, err := os.ReadFile(f)
+				if err != nil {
+					continue
+				}
+				resolved := cb.resolveIncludes(string(content), rulesDir, make(map[string]bool), 0)
+				memoryContent = append(memoryContent, fmt.Sprintf("--- %s ---\n%s", entry.Name(), resolved))
+				loadedPaths = append(loadedPaths, f)
+				cb.emitInstructionsLoaded(f, "Project", "session_start")
 			}
-			memoryContent = append(memoryContent, fmt.Sprintf("--- %s ---\n%s", filepath.Base(f), string(content)))
-			cb.mu.Lock()
-			cb.memoryPaths = append(cb.memoryPaths, f)
-			cb.mu.Unlock()
 		}
 	}
 
+	cb.mu.Lock()
+	cb.memoryPaths = loadedPaths
 	if len(memoryContent) > 0 {
-		cb.AddUserContext("claudeMd", strings.Join(memoryContent, "\n\n"))
+		cb.userCtx["claudeMd"] = strings.Join(memoryContent, "\n\n")
+	} else {
+		delete(cb.userCtx, "claudeMd")
 	}
+	cb.mu.Unlock()
 
 	return nil
 }
 
+func (cb *ContextBuilder) resolveIncludes(content string, baseDir string, visited map[string]bool, depth int) string {
+	if depth > 10 {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "@") {
+			continue
+		}
+		includePath := strings.TrimSpace(trimmed[1:])
+		if includePath == "" {
+			continue
+		}
+		resolvedPath := cb.resolveIncludePath(includePath, baseDir)
+		if resolvedPath == "" {
+			continue
+		}
+		abs, err := filepath.Abs(resolvedPath)
+		if err != nil {
+			continue
+		}
+		if visited[abs] {
+			continue
+		}
+		incContent, err := os.ReadFile(abs)
+		if err != nil {
+			continue
+		}
+		visited[abs] = true
+		nested := cb.resolveIncludes(string(incContent), filepath.Dir(abs), visited, depth+1)
+		lines[i] = nested
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (cb *ContextBuilder) resolveIncludePath(p string, baseDir string) string {
+	if strings.HasPrefix(p, "~/") {
+		homeDir, _ := os.UserHomeDir()
+		if homeDir != "" {
+			return filepath.Join(homeDir, p[2:])
+		}
+		return ""
+	}
+	if filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(baseDir, p)
+}
+
+func (cb *ContextBuilder) emitInstructionsLoaded(filePath, memoryType, loadReason string) {
+	cb.mu.RLock()
+	bus := cb.eventBus
+	cb.mu.RUnlock()
+	if bus == nil {
+		return
+	}
+	bus.EmitStarted(hooks.HookInstructionsLoaded, filePath, fmt.Sprintf("%s:%s", memoryType, loadReason))
+}
+
 func (cb *ContextBuilder) BuildSystemPrompt(ctx context.Context, customPrompt, appendPrompt string) *types.SystemPrompt {
-	var content string
+	var blocks []types.SystemPromptBlock
 
 	if customPrompt != "" {
-		content = customPrompt + "\n\n"
+		blocks = append(blocks, types.SystemPromptBlock{Text: customPrompt, CacheScope: ""})
 	} else {
-		content = cb.buildDefaultSystemPrompt()
+		blocks = append(blocks, types.SystemPromptBlock{Text: cb.buildDefaultSystemPrompt(), CacheScope: "global"})
 	}
 
 	systemCtx, _ := cb.GetSystemContext(ctx)
-	userCtx, _ := cb.GetUserContext(ctx)
 
 	if gitStatus, ok := systemCtx["gitStatus"]; ok && gitStatus != "" {
-		content += "Git Status:\n" + gitStatus + "\n\n"
+		blocks = append(blocks, types.SystemPromptBlock{Text: "Git Status:\n" + gitStatus, CacheScope: ""})
 	}
 
-	if claudeMd, ok := userCtx["claudeMd"]; ok && claudeMd != "" {
-		content += "Project Memory:\n" + claudeMd + "\n\n"
-	}
-
-	content += fmt.Sprintf("Current Date: %s\n", time.Now().Format("2006-01-02"))
+	blocks = append(blocks, types.SystemPromptBlock{
+		Text:       fmt.Sprintf("Current Date: %s", time.Now().Format("2006-01-02")),
+		CacheScope: "",
+	})
 
 	if appendPrompt != "" {
-		content += "\n\n" + appendPrompt
+		blocks = append(blocks, types.SystemPromptBlock{Text: appendPrompt, CacheScope: ""})
 	}
 
-	return &types.SystemPrompt{
-		Content: content,
-	}
+	sp := &types.SystemPrompt{Blocks: blocks}
+	sp.Content = sp.BuildContent()
+	return sp
 }
 
 func (cb *ContextBuilder) buildDefaultSystemPrompt() string {
@@ -210,4 +317,28 @@ func (cb *ContextBuilder) GetMemoryPaths() []string {
 	result := make([]string, len(cb.memoryPaths))
 	copy(result, cb.memoryPaths)
 	return result
+}
+
+func (cb *ContextBuilder) GetMemoryLines(ctx context.Context) string {
+	cb.mu.RLock()
+	md := cb.memdir
+	cb.mu.RUnlock()
+	if md == nil || !memdir.IsAutoMemoryEnabled() {
+		return ""
+	}
+	return md.BuildMemoryLines()
+}
+
+func (cb *ContextBuilder) GetMemoryEntrypointContent(ctx context.Context) string {
+	cb.mu.RLock()
+	md := cb.memdir
+	cb.mu.RUnlock()
+	if md == nil || !memdir.IsAutoMemoryEnabled() {
+		return ""
+	}
+	content, err := md.BuildMemoryPrompt(ctx)
+	if err != nil || content == "" {
+		return ""
+	}
+	return content
 }
