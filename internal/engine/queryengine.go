@@ -99,9 +99,11 @@ func NewQueryEngine(appState *state.AppState, config *QueryEngineConfig) *QueryE
 
 	apiClient := api.NewClient(ollamaConfig)
 
+	toolReg := registry.NewDefaultToolRegistry()
+
 	return &QueryEngine{
 		appState:        appState,
-		toolReg:         registry.NewDefaultToolRegistry(),
+		toolReg:         toolReg,
 		apiClient:       apiClient,
 		messages:        make([]types.Message, 0),
 		sessionID:       generateSessionID(),

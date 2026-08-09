@@ -173,10 +173,14 @@ func (c *Client) ChatWithStreaming(ctx context.Context, req OllamaChatRequest) (
 	go func() {
 		defer close(ch)
 
-		retryConfig := c.retryConfig()
+		rc := c.retryConfig()
 		var lastErr error
+		normalAttempts := 0
+		loadingAttempts := 0
 
-		for attempt := 0; attempt <= retryConfig.MaxRetries; attempt++ {
+		for {
+			attempt := normalAttempts + loadingAttempts
+
 			select {
 			case <-ctx.Done():
 				log.Printf("[API] stream cancelled before attempt %d: %v", attempt, ctx.Err())
@@ -186,20 +190,31 @@ func (c *Client) ChatWithStreaming(ctx context.Context, req OllamaChatRequest) (
 			}
 
 			if attempt > 0 {
-				// 模型加载时使用更长的等待时间
-				baseDelay := retryConfig.BaseDelay
+				isModelLoading := false
 				if lastErr != nil {
 					if apiErr, ok := lastErr.(*APIError); ok && apiErr.Type == "model_loading" {
-						baseDelay = 2 * time.Second
+						isModelLoading = true
 					}
 				}
-				delay := baseDelay * time.Duration(1<<uint(attempt-1))
-				if delay > retryConfig.MaxDelay {
-					delay = retryConfig.MaxDelay
-				}
-				if lastErr != nil {
-					if apiErr, ok := lastErr.(*APIError); ok && apiErr.Type == "model_loading" {
-						delay = 3 * time.Second // 模型加载时固定等待3秒
+
+				var delay time.Duration
+				if isModelLoading {
+					shift := loadingAttempts - 1
+					if shift > 20 {
+						shift = 20
+					}
+					delay = rc.ModelLoadingBaseDelay * time.Duration(1<<uint(shift))
+					if delay > rc.ModelLoadingMaxDelay {
+						delay = rc.ModelLoadingMaxDelay
+					}
+				} else {
+					shift := normalAttempts - 1
+					if shift > 20 {
+						shift = 20
+					}
+					delay = rc.BaseDelay * time.Duration(1<<uint(shift))
+					if delay > rc.MaxDelay {
+						delay = rc.MaxDelay
 					}
 				}
 				log.Printf("[API] retry attempt %d after %v delay", attempt, delay)
@@ -233,13 +248,33 @@ func (c *Client) ChatWithStreaming(ctx context.Context, req OllamaChatRequest) (
 				}
 			}
 			log.Printf("[API] stream attempt %d failed (will retry): %v", attempt, err)
-		}
 
-		ch <- StreamMessage{
-			Type:  "error",
-			Error: fmt.Errorf("max retries exceeded: %w", lastErr),
+			isModelLoading := false
+			if apiErr, ok := err.(*APIError); ok && apiErr.Type == "model_loading" {
+				isModelLoading = true
+			}
+			if isModelLoading {
+				loadingAttempts++
+				if loadingAttempts > rc.ModelLoadingMaxRetries {
+					ch <- StreamMessage{
+						Type:  "error",
+						Error: fmt.Errorf("model is still loading after %d retries: %w", loadingAttempts, lastErr),
+					}
+					log.Printf("[API] max model-loading retries exceeded (%d): %v", loadingAttempts, lastErr)
+					return
+				}
+			} else {
+				normalAttempts++
+				if normalAttempts > rc.MaxRetries {
+					ch <- StreamMessage{
+						Type:  "error",
+						Error: fmt.Errorf("max retries exceeded: %w", lastErr),
+					}
+					log.Printf("[API] max retries exceeded: %v", lastErr)
+					return
+				}
+			}
 		}
-		log.Printf("[API] max retries exceeded: %v", lastErr)
 	}()
 
 	return ch, nil
@@ -296,6 +331,7 @@ func (c *Client) executeChatStream(ctx context.Context, req OllamaChatRequest, c
 
 	url := c.config.BaseURL + "/chat"
 	log.Printf("[API] POST %s, model=%s, msgs=%d, tools=%d, body_len=%d", url, req.Model, len(req.Messages), len(req.Tools), len(body))
+	log.Printf("[API] req params: keep_alive=%q stream=%v think=%v format=%v options=%+v", req.KeepAlive, req.Stream, req.Think, req.Format, req.Options)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -420,6 +456,8 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 
 			// 如果是模型加载中，返回可重试错误
 			if stopReason == "load" {
+				log.Printf("[API] model is loading: load_duration=%d total_duration=%d prompt_eval_count=%d eval_count=%d",
+					event.LoadDuration, event.TotalDuration, event.PromptEvalCount, event.EvalCount)
 				log.Printf("[API] model is loading, will retry after delay")
 				return &APIError{StatusCode: 0, Message: "model is loading", Type: "model_loading", Retryable: true}
 			}
@@ -550,20 +588,32 @@ type RetryConfig struct {
 	MaxRetries int
 	BaseDelay  time.Duration
 	MaxDelay   time.Duration
+
+	// 模型加载专用重试预算。大模型冷启动可能需要数分钟加载到显存，
+	// 不能与普通错误共用 MaxRetries，否则会在模型尚未加载完成时过早放弃。
+	ModelLoadingMaxRetries int
+	ModelLoadingBaseDelay  time.Duration
+	ModelLoadingMaxDelay   time.Duration
 }
 
 func (c *Client) retryConfig() RetryConfig {
 	if c.config.IsLocal {
 		return RetryConfig{
-			MaxRetries: 5,
-			BaseDelay:  500 * time.Millisecond,
-			MaxDelay:   10 * time.Second,
+			MaxRetries:             5,
+			BaseDelay:              500 * time.Millisecond,
+			MaxDelay:               10 * time.Second,
+			ModelLoadingMaxRetries: 30,
+			ModelLoadingBaseDelay:  3 * time.Second,
+			ModelLoadingMaxDelay:   10 * time.Second,
 		}
 	}
 	return RetryConfig{
-		MaxRetries: 10,
-		BaseDelay:  1 * time.Second,
-		MaxDelay:   30 * time.Second,
+		MaxRetries:             10,
+		BaseDelay:              1 * time.Second,
+		MaxDelay:               30 * time.Second,
+		ModelLoadingMaxRetries: 60,
+		ModelLoadingBaseDelay:  3 * time.Second,
+		ModelLoadingMaxDelay:   15 * time.Second,
 	}
 }
 
