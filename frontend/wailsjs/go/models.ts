@@ -287,6 +287,7 @@ export namespace state {
 	export class OllamaConfigRequest {
 	    base_url: string;
 	    api_key: string;
+	    has_api_key: boolean;
 	    model: string;
 	
 	    static createFrom(source: any = {}) {
@@ -297,6 +298,7 @@ export namespace state {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.base_url = source["base_url"];
 	        this.api_key = source["api_key"];
+	        this.has_api_key = source["has_api_key"];
 	        this.model = source["model"];
 	    }
 	}

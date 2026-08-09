@@ -55,6 +55,7 @@ function App() {
   const [ollamaConfig, setOllamaConfig] = useState<OllamaConfig>({
     base_url: "http://localhost:11434/api",
     api_key: "",
+    has_api_key: false,
     model: "",
   });
   const [ollamaHealth, setOllamaHealth] = useState<OllamaHealth | null>(null);
