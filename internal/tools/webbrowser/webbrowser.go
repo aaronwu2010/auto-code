@@ -3,6 +3,7 @@ package webbrowser
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"runtime"
 
@@ -64,6 +65,10 @@ func (t *WebBrowserTool) Call(ctx context.Context, input any, toolCtx *tools.Too
 		return &tools.ToolResult{Data: WebBrowserOutput{URL: inp.URL, Error: "URL is empty"}}, nil
 	}
 
+	if !isAllowedBrowserURL(inp.URL) {
+		return &tools.ToolResult{Data: WebBrowserOutput{URL: inp.URL, Error: "URL scheme not allowed, only http and https are permitted"}}, nil
+	}
+
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
@@ -95,4 +100,12 @@ func ParseWebBrowserInput(raw map[string]any) (WebBrowserInput, error) {
 		return inp, fmt.Errorf("url is required")
 	}
 	return inp, nil
+}
+
+func isAllowedBrowserURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	return u.Scheme == "http" || u.Scheme == "https"
 }

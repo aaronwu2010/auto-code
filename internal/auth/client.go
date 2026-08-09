@@ -396,7 +396,15 @@ func (s *TokenStore) Save(tokens *OAuthTokens) error {
 }
 
 func (s *TokenStore) Load() (*OAuthTokens, error) {
-	data, err := os.ReadFile(s.path())
+	path := s.path()
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return nil, fmt.Errorf("token file has insecure permissions %o; expected 0600", info.Mode().Perm())
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}

@@ -76,16 +76,21 @@ func (b *BridgeMain) GetWork(ctx context.Context) (*WorkData, error) {
 	if b.onWorkReceived != nil {
 		if err := b.onWorkReceived(nil); err == nil {
 			b.mu.RLock()
+			var found *WorkData
 			for _, h := range b.sessions {
 				if h.Connected {
-					return &WorkData{
+					found = &WorkData{
 						WorkID:        string(h.SessionID),
 						SessionURL:    "",
 						EnvironmentID: "",
-					}, nil
+					}
+					break
 				}
 			}
 			b.mu.RUnlock()
+			if found != nil {
+				return found, nil
+			}
 		}
 	}
 	select {

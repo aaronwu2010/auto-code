@@ -54,12 +54,8 @@ func (cm *ConfigManager) load() error {
 	return json.Unmarshal(data, &cm.config)
 }
 
-// save 保存配置到文件
+// save 保存配置到文件（调用方须持有 cm.mu 锁）
 func (cm *ConfigManager) save() error {
-	cm.mu.RLock()
-	defer cm.mu.RUnlock()
-
-	// 确保目录存在
 	dir := filepath.Dir(cm.filePath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -70,7 +66,7 @@ func (cm *ConfigManager) save() error {
 		return err
 	}
 
-	return os.WriteFile(cm.filePath, data, 0o644)
+	return os.WriteFile(cm.filePath, data, 0o600)
 }
 
 // Get 获取配置值

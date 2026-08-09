@@ -3,7 +3,7 @@ package reflection
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,7 +11,7 @@ import (
 
 func TestNewFileExperienceStore(t *testing.T) {
 	// 创建临时目录
-	tempDir, err := ioutil.TempDir("", "reflection_test")
+	tempDir, err := os.MkdirTemp("", "reflection_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestNewFileExperienceStore(t *testing.T) {
 
 func TestFileExperienceStore_SaveAndLoad(t *testing.T) {
 	// 创建临时目录
-	tempDir, err := ioutil.TempDir("", "reflection_test")
+	tempDir, err := os.MkdirTemp("", "reflection_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestFileExperienceStore_SaveAndLoad(t *testing.T) {
 
 func TestFileExperienceStore_Search(t *testing.T) {
 	// 创建临时目录
-	tempDir, err := ioutil.TempDir("", "reflection_test")
+	tempDir, err := os.MkdirTemp("", "reflection_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestFileExperienceStore_Search(t *testing.T) {
 
 func TestFileExperienceStore_Delete(t *testing.T) {
 	// 创建临时目录
-	tempDir, err := ioutil.TempDir("", "reflection_test")
+	tempDir, err := os.MkdirTemp("", "reflection_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestFileExperienceStore_Delete(t *testing.T) {
 
 func TestFileExperienceStore_GetMostRelevant(t *testing.T) {
 	// 创建临时目录
-	tempDir, err := ioutil.TempDir("", "reflection_test")
+	tempDir, err := os.MkdirTemp("", "reflection_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestFileExperienceStore_GetMostRelevant(t *testing.T) {
 
 func TestFileExperienceStore_Update(t *testing.T) {
 	// 创建临时目录
-	tempDir, err := ioutil.TempDir("", "reflection_test")
+	tempDir, err := os.MkdirTemp("", "reflection_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestFileExperienceStore_Update(t *testing.T) {
 
 func TestFileExperienceStore_GetStats(t *testing.T) {
 	// 创建临时目录
-	tempDir, err := ioutil.TempDir("", "reflection_test")
+	tempDir, err := os.MkdirTemp("", "reflection_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestFileExperienceStore_GetStats(t *testing.T) {
 
 func TestFileExperienceStore_ExportImport(t *testing.T) {
 	// 创建临时目录
-	tempDir, err := ioutil.TempDir("", "reflection_test")
+	tempDir, err := os.MkdirTemp("", "reflection_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
@@ -383,7 +383,7 @@ func TestFileExperienceStore_ExportImport(t *testing.T) {
 
 func TestFileExperienceStore_QueryFilters(t *testing.T) {
 	// 创建临时目录
-	tempDir, err := ioutil.TempDir("", "reflection_test")
+	tempDir, err := os.MkdirTemp("", "reflection_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
@@ -451,7 +451,7 @@ func TestFileExperienceStore_QueryFilters(t *testing.T) {
 
 func TestFileExperienceStore_CacheHit(t *testing.T) {
 	// 创建临时目录
-	tempDir, err := ioutil.TempDir("", "reflection_test")
+	tempDir, err := os.MkdirTemp("", "reflection_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
@@ -491,7 +491,7 @@ func TestFileExperienceStore_CacheHit(t *testing.T) {
 
 func TestFileExperienceStore_Persistence(t *testing.T) {
 	// 创建临时目录
-	tempDir, err := ioutil.TempDir("", "reflection_persistence_test")
+	tempDir, err := os.MkdirTemp("", "reflection_persistence_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
@@ -536,7 +536,7 @@ func TestFileExperienceStore_Persistence(t *testing.T) {
 }
 
 func BenchmarkFileExperienceStore_Save(b *testing.B) {
-	tempDir, _ := ioutil.TempDir("", "reflection_bench")
+	tempDir, _ := os.MkdirTemp("", "reflection_bench")
 	defer os.RemoveAll(tempDir)
 
 	config := &ReflectionConfig{
@@ -554,7 +554,7 @@ func BenchmarkFileExperienceStore_Save(b *testing.B) {
 }
 
 func BenchmarkFileExperienceStore_Search(b *testing.B) {
-	tempDir, _ := ioutil.TempDir("", "reflection_bench")
+	tempDir, _ := os.MkdirTemp("", "reflection_bench")
 	defer os.RemoveAll(tempDir)
 
 	config := &ReflectionConfig{

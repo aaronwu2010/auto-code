@@ -202,10 +202,17 @@ func (d *AutoDream) tryAcquireConsolidationLock() bool {
 				}
 			}
 		}
+		_ = os.Remove(d.lockFile)
 	}
 
 	data, _ := json.Marshal(time.Now().UnixMilli())
-	return os.WriteFile(d.lockFile, data, 0o644) == nil
+	f, err := os.OpenFile(d.lockFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return false
+	}
+	_, err = f.Write(data)
+	f.Close()
+	return err == nil
 }
 
 func (d *AutoDream) releaseConsolidationLock() {

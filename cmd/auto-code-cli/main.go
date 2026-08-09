@@ -14,6 +14,13 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	appState := state.NewAppState()
 
 	ollamaConfig := api.DefaultOllamaConfig()
@@ -54,14 +61,12 @@ func main() {
 
 	health := queryEngine.CheckHealth(ctx)
 	if !health.Connected {
-		fmt.Fprintln(os.Stderr, "Error:", health.Error)
-		os.Exit(1)
+		return fmt.Errorf("%s", health.Error)
 	}
 	fmt.Printf("Ollama connected: %d models available\n", health.AvailableModels)
 
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "Usage: auto-code-cli <prompt>")
-		os.Exit(1)
+		return fmt.Errorf("usage: auto-code-cli <prompt>")
 	}
 
 	prompt := os.Args[1]
@@ -80,12 +85,13 @@ func main() {
 			}
 		case "result":
 			fmt.Printf("\n[%s]\n", msg.Subtype)
-			return
+			return nil
 		case "error":
 			if msg.Message != nil {
-				fmt.Fprintln(os.Stderr, "Error:", msg.Message.Content)
+				return fmt.Errorf("%s", msg.Message.Content)
 			}
-			os.Exit(1)
+			return fmt.Errorf("unknown error")
 		}
 	}
+	return nil
 }

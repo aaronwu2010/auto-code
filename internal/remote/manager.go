@@ -1,5 +1,10 @@
 package remote
 
+// STUB IMPLEMENTATION: This file contains placeholder stubs for the remote session
+// manager. Connect() creates a fake session without connecting to a real server,
+// ProxyPermission() always returns Allow without checking server-side policy.
+// TODO: Implement real remote session management with server-side permission proxy.
+
 import (
 	"context"
 	"fmt"
@@ -22,17 +27,17 @@ type RemoteSessionManager struct {
 type ConnectionStatus string
 
 const (
-	StatusConnecting    ConnectionStatus = "connecting"
-	StatusConnected     ConnectionStatus = "connected"
-	StatusReconnecting  ConnectionStatus = "reconnecting"
-	StatusDisconnected  ConnectionStatus = "disconnected"
+	StatusConnecting   ConnectionStatus = "connecting"
+	StatusConnected    ConnectionStatus = "connected"
+	StatusReconnecting ConnectionStatus = "reconnecting"
+	StatusDisconnected ConnectionStatus = "disconnected"
 )
 
 type RemoteSession struct {
-	SessionID   types.SessionID `json:"session_id"`
-	URL         string          `json:"url"`
+	SessionID   types.SessionID  `json:"session_id"`
+	URL         string           `json:"url"`
 	Status      ConnectionStatus `json:"status"`
-	ConnectedAt time.Time       `json:"connected_at"`
+	ConnectedAt time.Time        `json:"connected_at"`
 }
 
 func NewRemoteSessionManager(url string) *RemoteSessionManager {

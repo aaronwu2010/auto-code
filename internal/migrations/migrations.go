@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 )
 
@@ -80,6 +82,10 @@ func (r *MigrationRunner) RunAll() error {
 	copy(migrations, r.migrations)
 	r.mu.RUnlock()
 
+	sort.Slice(migrations, func(i, j int) bool {
+		return compareVersions(migrations[i].Version, migrations[j].Version) < 0
+	})
+
 	applied := r.loadAppliedMigrations()
 
 	for _, m := range migrations {
@@ -119,14 +125,45 @@ func (r *MigrationRunner) GetPendingMigrations() []Migration {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	migrations := make([]Migration, len(r.migrations))
+	copy(migrations, r.migrations)
+	sort.Slice(migrations, func(i, j int) bool {
+		return compareVersions(migrations[i].Version, migrations[j].Version) < 0
+	})
+
 	applied := r.loadAppliedMigrations()
 	var pending []Migration
-	for _, m := range r.migrations {
+	for _, m := range migrations {
 		if !applied[m.Name] {
 			pending = append(pending, m)
 		}
 	}
 	return pending
+}
+
+func compareVersions(a, b string) int {
+	aParts := strings.Split(a, ".")
+	bParts := strings.Split(b, ".")
+	maxLen := len(aParts)
+	if len(bParts) > maxLen {
+		maxLen = len(bParts)
+	}
+	for i := 0; i < maxLen; i++ {
+		var aNum, bNum int
+		if i < len(aParts) {
+			fmt.Sscanf(aParts[i], "%d", &aNum)
+		}
+		if i < len(bParts) {
+			fmt.Sscanf(bParts[i], "%d", &bNum)
+		}
+		if aNum != bNum {
+			if aNum < bNum {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
 }
 
 func migrateAutoUpdatesToSettings(configDir string) error {

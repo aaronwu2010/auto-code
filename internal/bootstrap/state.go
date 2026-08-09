@@ -1,6 +1,7 @@
 package state
 
 import (
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -8,39 +9,43 @@ import (
 )
 
 type BootstrapState struct {
-	OriginalCwd              string
-	ProjectRoot              string
-	TotalCostUSD             float64
-	TotalAPIDuration         time.Duration
-	TotalToolDuration        time.Duration
-	StartTime                time.Time
-	LastInteractionTime      atomic.Int64
-	SessionID                types.SessionID
-	ParentSessionID          types.SessionID
-	MainLoopModelOverride    types.ModelSetting
-	InitialMainLoopModel     types.ModelSetting
-	IsInteractive            bool
-	ClientType               string
+	OriginalCwd                string
+	ProjectRoot                string
+	TotalCostUSD               float64
+	TotalAPIDuration           time.Duration
+	TotalToolDuration          time.Duration
+	StartTime                  time.Time
+	LastInteractionTime        atomic.Int64
+	SessionID                  types.SessionID
+	ParentSessionID            types.SessionID
+	MainLoopModelOverride      types.ModelSetting
+	InitialMainLoopModel       types.ModelSetting
+	IsInteractive              bool
+	ClientType                 string
 	SessionPersistenceDisabled bool
+	mu                         sync.RWMutex
 }
 
-var globalBootstrap *BootstrapState
+var (
+	globalBootstrap atomic.Pointer[BootstrapState]
+)
 
 func InitBootstrap(cwd string) *BootstrapState {
-	globalBootstrap = &BootstrapState{
-		OriginalCwd:         cwd,
-		ProjectRoot:         cwd,
-		StartTime:           time.Now(),
-		SessionID:           generateSessionID(),
-		ClientType:          "cli",
-		IsInteractive:       true,
+	bs := &BootstrapState{
+		OriginalCwd:   cwd,
+		ProjectRoot:   cwd,
+		StartTime:     time.Now(),
+		SessionID:     generateSessionID(),
+		ClientType:    "cli",
+		IsInteractive: true,
 	}
-	globalBootstrap.LastInteractionTime.Store(time.Now().UnixMilli())
-	return globalBootstrap
+	bs.LastInteractionTime.Store(time.Now().UnixMilli())
+	globalBootstrap.Store(bs)
+	return bs
 }
 
 func GetBootstrap() *BootstrapState {
-	return globalBootstrap
+	return globalBootstrap.Load()
 }
 
 func (bs *BootstrapState) GetSessionID() types.SessionID {
@@ -56,18 +61,26 @@ func (bs *BootstrapState) GetProjectRoot() string {
 }
 
 func (bs *BootstrapState) GetTotalCostUSD() float64 {
+	bs.mu.RLock()
+	defer bs.mu.RUnlock()
 	return bs.TotalCostUSD
 }
 
 func (bs *BootstrapState) AddToTotalCost(cost float64) {
+	bs.mu.Lock()
+	defer bs.mu.Unlock()
 	bs.TotalCostUSD += cost
 }
 
 func (bs *BootstrapState) GetMainLoopModelOverride() types.ModelSetting {
+	bs.mu.RLock()
+	defer bs.mu.RUnlock()
 	return bs.MainLoopModelOverride
 }
 
 func (bs *BootstrapState) SetMainLoopModelOverride(model types.ModelSetting) {
+	bs.mu.Lock()
+	defer bs.mu.Unlock()
 	bs.MainLoopModelOverride = model
 }
 

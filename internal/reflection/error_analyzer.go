@@ -38,18 +38,18 @@ func NewBaseErrorAnalyzer(config *ReflectionConfig) *BaseErrorAnalyzer {
 func (a *BaseErrorAnalyzer) Analyze(ctx context.Context, errorInfo *ErrorInfo) (*ErrorAnalysis, error) {
 	start := time.Now()
 
+	// 验证输入
+	if errorInfo == nil {
+		a.logger.Error("Error info is nil")
+		return nil, fmt.Errorf("error info is nil")
+	}
+
 	a.mu.Lock()
 	a.totalAnalyzed++
 	a.mu.Unlock()
 
 	// 记录分析开始
 	a.logger.LogErrorAnalysisStart(errorInfo.ID, errorInfo.Message)
-
-	// 验证输入
-	if errorInfo == nil {
-		a.logger.Error("Error info is nil")
-		return nil, fmt.Errorf("error info is nil")
-	}
 
 	// 分类错误
 	category := a.CategorizeError(errorInfo)

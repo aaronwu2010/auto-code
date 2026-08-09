@@ -6,6 +6,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/auto-code/auto-code/internal/state"
 )
@@ -57,6 +58,7 @@ func (c *BaseCommand) Execute(_ context.Context, _ *CommandContext) (*CommandRes
 }
 
 type CommandRegistry struct {
+	mu       sync.RWMutex
 	commands map[string]Command
 }
 
@@ -67,6 +69,8 @@ func NewCommandRegistry() *CommandRegistry {
 }
 
 func (r *CommandRegistry) Register(cmd Command) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.commands[cmd.Name()] = cmd
 	for _, alias := range cmd.Aliases() {
 		r.commands[alias] = cmd
@@ -74,11 +78,15 @@ func (r *CommandRegistry) Register(cmd Command) {
 }
 
 func (r *CommandRegistry) Get(name string) (Command, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	cmd, ok := r.commands[name]
 	return cmd, ok
 }
 
 func (r *CommandRegistry) All() []Command {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	seen := make(map[string]bool)
 	var result []Command
 	for _, cmd := range r.commands {

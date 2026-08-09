@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -38,6 +39,7 @@ type MCPServerConnection struct {
 	capabilities ServerCapabilities
 	lastError    string
 	connectedAt  time.Time
+	nextID       atomic.Int64
 }
 
 func NewMCPServerConnection(config ServerConfig) *MCPServerConnection {
@@ -149,7 +151,7 @@ func (c *MCPServerConnection) CallTool(ctx context.Context, toolName string, arg
 		Arguments: arguments,
 	}
 
-	resp, err := transport.Send(ctx, NewRequest(0, "tools/call", params))
+	resp, err := transport.Send(ctx, NewRequest(int(c.nextID.Add(1)), "tools/call", params))
 	if err != nil {
 		return nil, fmt.Errorf("send tool call: %w", err)
 	}
@@ -183,7 +185,7 @@ func (c *MCPServerConnection) ReadResource(ctx context.Context, uri string) (*Re
 	}
 
 	params := ResourceReadParams{URI: uri}
-	resp, err := transport.Send(ctx, NewRequest(0, "resources/read", params))
+	resp, err := transport.Send(ctx, NewRequest(int(c.nextID.Add(1)), "resources/read", params))
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +267,7 @@ func (c *MCPServerConnection) initialize(ctx context.Context) (*InitializeResult
 		},
 	}
 
-	resp, err := c.transport.Send(ctx, NewRequest(0, "initialize", params))
+	resp, err := c.transport.Send(ctx, NewRequest(int(c.nextID.Add(1)), "initialize", params))
 	if err != nil {
 		return nil, err
 	}
@@ -290,7 +292,7 @@ func (c *MCPServerConnection) initialize(ctx context.Context) (*InitializeResult
 }
 
 func (c *MCPServerConnection) listTools(ctx context.Context) ([]ToolDefinition, error) {
-	resp, err := c.transport.Send(ctx, NewRequest(0, "tools/list", nil))
+	resp, err := c.transport.Send(ctx, NewRequest(int(c.nextID.Add(1)), "tools/list", nil))
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +315,7 @@ func (c *MCPServerConnection) listTools(ctx context.Context) ([]ToolDefinition, 
 }
 
 func (c *MCPServerConnection) listResources(ctx context.Context) ([]ResourceDefinition, error) {
-	resp, err := c.transport.Send(ctx, NewRequest(0, "resources/list", nil))
+	resp, err := c.transport.Send(ctx, NewRequest(int(c.nextID.Add(1)), "resources/list", nil))
 	if err != nil {
 		return nil, err
 	}

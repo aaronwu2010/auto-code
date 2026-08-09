@@ -9,13 +9,13 @@ import (
 )
 
 type AuthCodeListener struct {
-	mu             sync.Mutex
-	server         *http.Server
-	port           int
-	codeCh         chan string
-	errCh          chan error
-	expectedState  string
-	pendingResp    http.ResponseWriter
+	mu            sync.Mutex
+	server        *http.Server
+	port          int
+	codeCh        chan string
+	errCh         chan error
+	expectedState string
+	pendingResp   http.ResponseWriter
 }
 
 func NewAuthCodeListener() *AuthCodeListener {
@@ -74,11 +74,12 @@ func (l *AuthCodeListener) WaitForAuthorizationCode(ctx context.Context, state s
 func (l *AuthCodeListener) HandleSuccessRedirect(w http.ResponseWriter, scopes []string) {
 	l.mu.Lock()
 	if l.pendingResp != nil {
+		redirectURL := "https://console.anthropic.com/auth/success"
 		if shouldUseClaudeAIAuth(scopes) {
-			http.Redirect(l.pendingResp, nil, "https://claude.ai/auth/success", http.StatusFound)
-		} else {
-			http.Redirect(l.pendingResp, nil, "https://console.anthropic.com/auth/success", http.StatusFound)
+			redirectURL = "https://claude.ai/auth/success"
 		}
+		l.pendingResp.Header().Set("Location", redirectURL)
+		l.pendingResp.WriteHeader(http.StatusFound)
 		l.pendingResp = nil
 	}
 	l.mu.Unlock()
@@ -104,7 +105,7 @@ func (l *AuthCodeListener) handleCallback(w http.ResponseWriter, r *http.Request
 	query := r.URL.Query()
 
 	if errParam := query.Get("error"); errParam != "" {
-		l.errCh <- fmt.Errorf("OAuth error: %s - %s", errParam, query.Get("error_description"))
+		l.sendError(fmt.Errorf("OAuth error: %s - %s", errParam, query.Get("error_description")))
 		l.HandleErrorRedirect(w)
 		return
 	}
@@ -113,7 +114,7 @@ func (l *AuthCodeListener) handleCallback(w http.ResponseWriter, r *http.Request
 	state := query.Get("state")
 
 	if code == "" {
-		l.errCh <- fmt.Errorf("no authorization code in callback")
+		l.sendError(fmt.Errorf("no authorization code in callback"))
 		l.HandleErrorRedirect(w)
 		return
 	}
@@ -123,15 +124,34 @@ func (l *AuthCodeListener) handleCallback(w http.ResponseWriter, r *http.Request
 	l.pendingResp = w
 	l.mu.Unlock()
 
-	if expectedState != "" && state != expectedState {
-		l.errCh <- fmt.Errorf("state mismatch: expected %s, got %s", expectedState, state)
+	if expectedState == "" {
+		l.sendError(fmt.Errorf("received callback before authorization request was initiated"))
+		l.HandleErrorRedirect(w)
+		return
+	}
+	if state != expectedState {
+		l.sendError(fmt.Errorf("state mismatch: expected %s, got %s", expectedState, state))
 		l.HandleErrorRedirect(w)
 		return
 	}
 
 	fmt.Fprintf(w, "<html><body><h2>Authorization successful!</h2><p>You can close this tab.</p></body></html>")
 
-	l.codeCh <- code
+	l.sendCode(code)
+}
+
+func (l *AuthCodeListener) sendError(err error) {
+	select {
+	case l.errCh <- err:
+	default:
+	}
+}
+
+func (l *AuthCodeListener) sendCode(code string) {
+	select {
+	case l.codeCh <- code:
+	default:
+	}
 }
 
 func shouldUseClaudeAIAuth(scopes []string) bool {

@@ -189,7 +189,7 @@ func (s *AppState) saveConfig() error {
 		return err
 	}
 
-	return os.WriteFile(s.configPath, data, 0644)
+	return os.WriteFile(s.configPath, data, 0600)
 }
 
 func (s *AppState) AddListener(listener StateChangeListener) {
@@ -233,8 +233,38 @@ func (s *AppState) GetSnapshot() AppStateSnapshot {
 func (s *AppState) Get() *AppState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	cp := *s
-	return &cp
+	cp := &AppState{
+		Settings:                s.Settings,
+		Verbose:                 s.Verbose,
+		MainLoopModel:           s.MainLoopModel,
+		MainLoopModelForSession: s.MainLoopModelForSession,
+		StatusLineText:          s.StatusLineText,
+		ExpandedView:            s.ExpandedView,
+		IsBriefOnly:             s.IsBriefOnly,
+		ToolPermissionCtx:       s.ToolPermissionCtx,
+		SpinnerTip:              s.SpinnerTip,
+		Agent:                   s.Agent,
+		KairosEnabled:           s.KairosEnabled,
+		RemoteSessionURL:        s.RemoteSessionURL,
+		RemoteConnectionStatus:  s.RemoteConnectionStatus,
+		ReplBridgeEnabled:       s.ReplBridgeEnabled,
+		ReplBridgeConnected:     s.ReplBridgeConnected,
+		ThinkingEnabled:         s.ThinkingEnabled,
+		PromptSuggestionEnabled: s.PromptSuggestionEnabled,
+		FastMode:                s.FastMode,
+		Tasks:                   s.Tasks,
+		MCP:                     s.MCP,
+		Plugins:                 s.Plugins,
+		AgentDefinitions:        s.AgentDefinitions,
+		FileHistory:             s.FileHistory,
+		Todos:                   s.Todos,
+		Notifications:           s.Notifications,
+		Speculation:             s.Speculation,
+		Messages:                s.Messages,
+		IsProcessing:            s.IsProcessing,
+		CurrentToolUse:          s.CurrentToolUse,
+	}
+	return cp
 }
 
 func (s *AppState) Set(f func(prev *AppState) *AppState) {

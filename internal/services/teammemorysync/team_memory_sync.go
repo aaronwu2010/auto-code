@@ -256,37 +256,62 @@ func pushBatch(ctx context.Context, url string, batch map[string]string, state *
 		return 0, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewReader(body))
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("Content-Type", "application/json")
+	var lastErr error
+	for attempt := 0; attempt <= MaxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(1<<uint(attempt-1)) * time.Second
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			}
+		}
 
-	if state.LastKnownChecksum != "" {
-		req.Header.Set("If-Match", state.LastKnownChecksum)
+		req, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewReader(body))
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		if state.LastKnownChecksum != "" {
+			req.Header.Set("If-Match", state.LastKnownChecksum)
+		}
+
+		client := &http.Client{Timeout: TeamMemorySyncTimeoutMs * time.Millisecond}
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
+			resp.Body.Close()
+			return len(batch), nil
+		}
+
+		if resp.StatusCode == http.StatusPreconditionFailed {
+			resp.Body.Close()
+			return 0, fmt.Errorf("conflict: server state changed")
+		}
+
+		if resp.StatusCode == http.StatusRequestEntityTooLarge {
+			resp.Body.Close()
+			return 0, fmt.Errorf("payload too large")
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode >= 500 {
+			lastErr = fmt.Errorf("server returned %d: %s", resp.StatusCode, string(respBody))
+			continue
+		}
+
+		return 0, fmt.Errorf("server returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	client := &http.Client{Timeout: TeamMemorySyncTimeoutMs * time.Millisecond}
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
-		return len(batch), nil
-	}
-
-	if resp.StatusCode == http.StatusPreconditionFailed {
-		return 0, fmt.Errorf("conflict: server state changed")
-	}
-
-	if resp.StatusCode == http.StatusRequestEntityTooLarge {
-		return 0, fmt.Errorf("payload too large")
-	}
-
-	respBody, _ := io.ReadAll(resp.Body)
-	return 0, fmt.Errorf("server returned %d: %s", resp.StatusCode, string(respBody))
+	return 0, lastErr
 }
 
 func writeRemoteEntriesToLocal(entries map[string]string) int {

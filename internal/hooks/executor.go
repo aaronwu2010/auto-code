@@ -30,7 +30,9 @@ func (e *HookExecutor) ExecuteHooks(ctx context.Context, event HookEvent, input 
 	allMatchers := e.registry.GetMatchersForEvent(event)
 	sessionMatchers := e.registry.GetSessionMatchersForEvent(event)
 
-	matchers := append(allMatchers, sessionMatchers...)
+	matchers := make([]HookMatcher, 0, len(allMatchers)+len(sessionMatchers))
+	matchers = append(matchers, allMatchers...)
+	matchers = append(matchers, sessionMatchers...)
 
 	for _, matcher := range matchers {
 		if matcher.Matcher != "" && !matchesHookInput(matcher.Matcher, input) {

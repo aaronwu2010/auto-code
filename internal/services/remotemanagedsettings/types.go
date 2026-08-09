@@ -9,28 +9,28 @@ type RemoteManagedSettingsResponse struct {
 }
 
 type RemoteManagedSettingsFetchResult struct {
-	Success   bool                                  `json:"success"`
-	Settings  map[string]interface{}                `json:"settings,omitempty"`
-	Checksum  string                                `json:"checksum,omitempty"`
-	Error     string                                `json:"error,omitempty"`
-	SkipRetry bool                                  `json:"skipRetry,omitempty"`
+	Success   bool                   `json:"success"`
+	Settings  map[string]interface{} `json:"settings,omitempty"`
+	Checksum  string                 `json:"checksum,omitempty"`
+	Error     string                 `json:"error,omitempty"`
+	SkipRetry bool                   `json:"skipRetry,omitempty"`
 }
 
 type SecurityCheckResult int
 
 const (
-	SecurityCheckApproved      SecurityCheckResult = iota
+	SecurityCheckApproved SecurityCheckResult = iota
 	SecurityCheckRejected
 	SecurityCheckNoCheckNeeded
 )
 
 var DangerousSettingKeys = map[string]bool{
-	"allowedTools":         true,
-	"blockedTools":         true,
-	"shellCommandTimeout":  true,
-	"customInstructions":   true,
-	"mcpServers":           true,
-	"env":                  true,
+	"allowedTools":        true,
+	"blockedTools":        true,
+	"shellCommandTimeout": true,
+	"customInstructions":  true,
+	"mcpServers":          true,
+	"env":                 true,
 }
 
 func HasDangerousSettings(settings map[string]interface{}) bool {
@@ -72,7 +72,7 @@ func CheckManagedSettingsSecurity(cachedSettings, newSettings map[string]interfa
 		return SecurityCheckNoCheckNeeded
 	}
 	if !isInteractive {
-		return SecurityCheckNoCheckNeeded
+		return SecurityCheckRejected
 	}
 	return SecurityCheckApproved
 }

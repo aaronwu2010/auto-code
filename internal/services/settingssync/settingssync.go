@@ -128,10 +128,11 @@ func (s *SettingsSyncService) fetchUserSettingsOnce(ctx context.Context) *Settin
 		Success: true,
 		Data:    &data,
 		IsEmpty: false,
+		ETag:    resp.Header.Get("ETag"),
 	}
 }
 
-func (s *SettingsSyncService) UploadUserSettings(ctx context.Context, entries map[string]string) *SettingsSyncUploadResult {
+func (s *SettingsSyncService) UploadUserSettings(ctx context.Context, entries map[string]string, etag string) *SettingsSyncUploadResult {
 	authHeaders, authErr := s.getAuthHeaders()
 	if authErr != "" {
 		return &SettingsSyncUploadResult{Success: false, Error: authErr}
@@ -149,12 +150,22 @@ func (s *SettingsSyncService) UploadUserSettings(ctx context.Context, entries ma
 	}
 	req.Header.Set("User-Agent", "auto-code-cli")
 	req.Header.Set("Content-Type", "application/json")
+	if etag != "" {
+		req.Header.Set("If-Match", etag)
+	}
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return &SettingsSyncUploadResult{Success: false, Error: err.Error()}
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusPreconditionFailed {
+		return &SettingsSyncUploadResult{
+			Success: false,
+			Error:   "conflict: server state changed since last fetch",
+		}
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		return &SettingsSyncUploadResult{
@@ -207,7 +218,7 @@ func (s *SettingsSyncService) doUploadInBackground(ctx context.Context) error {
 		return nil
 	}
 
-	uploadResult := s.UploadUserSettings(ctx, changedEntries)
+	uploadResult := s.UploadUserSettings(ctx, changedEntries, result.ETag)
 	if !uploadResult.Success {
 		return fmt.Errorf("upload failed: %s", uploadResult.Error)
 	}

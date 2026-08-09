@@ -5,7 +5,10 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -90,11 +93,47 @@ func (t *WebFetchTool) Call(ctx context.Context, input any, toolCtx *tools.ToolU
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		url = "https://" + url
 	}
+	if err := validateURL(url); err != nil {
+		return nil, fmt.Errorf("URL not allowed: %w", err)
+	}
 
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	client := &http.Client{
 		Timeout: requestTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after 10 redirects")
+			}
+			return validateURL(req.URL.String())
+		},
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: false},
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				host, _, err := net.SplitHostPort(addr)
+				if err != nil {
+					return nil, err
+				}
+				if addrIP, err := netip.ParseAddr(host); err == nil {
+					if isBlockedIP(addrIP) {
+						return nil, fmt.Errorf("blocked address %s", host)
+					}
+				} else {
+					ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+					if err != nil {
+						return nil, err
+					}
+					for _, ip := range ips {
+						a, ok := netip.AddrFromSlice(ip.IP)
+						if !ok {
+							continue
+						}
+						if isBlockedIP(a) {
+							return nil, fmt.Errorf("blocked address %s resolves to %s", host, ip.IP)
+						}
+					}
+				}
+				return dialer.DialContext(ctx, network, addr)
+			},
 		},
 	}
 
@@ -323,4 +362,28 @@ func ParseWebFetchInput(raw map[string]any) (WebFetchInput, error) {
 		return inp, fmt.Errorf("url is required")
 	}
 	return inp, nil
+}
+
+func isBlockedIP(ip netip.Addr) bool {
+	return ip.IsUnspecified() || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsMulticast()
+}
+
+func validateURL(rawURL string) error {
+	u, err := neturl.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("scheme %q not allowed, only http and https are permitted", u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("empty host in URL")
+	}
+	if addr, err := netip.ParseAddr(host); err == nil {
+		if isBlockedIP(addr) {
+			return fmt.Errorf("blocked address %s", host)
+		}
+	}
+	return nil
 }

@@ -346,9 +346,10 @@ func (b *WailsBindings) RegisterMCPTool(request RegisterToolRequest) error {
 
 // OllamaConfig 表示 Ollama 配置
 type OllamaConfigRequest struct {
-	BaseURL string `json:"base_url"`
-	APIKey  string `json:"api_key"`
-	Model   string `json:"model"`
+	BaseURL   string `json:"base_url"`
+	APIKey    string `json:"api_key"`
+	HasAPIKey bool   `json:"has_api_key"`
+	Model     string `json:"model"`
 }
 
 // SetOllamaConfig 设置 Ollama 配置
@@ -380,9 +381,9 @@ func (b *WailsBindings) GetOllamaConfig() OllamaConfigRequest {
 	model := string(b.appState.GetMainLoopModel())
 
 	return OllamaConfigRequest{
-		BaseURL: toString(baseURL, "http://localhost:11434/api"),
-		APIKey:  toString(apiKey, ""),
-		Model:   model,
+		BaseURL:   toString(baseURL, "http://localhost:11434/api"),
+		HasAPIKey: apiKey != "",
+		Model:     model,
 	}
 }
 

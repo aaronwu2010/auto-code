@@ -856,6 +856,7 @@ func (qe *QueryEngine) processQueryOutput(ctx context.Context, output query.Quer
 	switch output.Type {
 	case "assistant":
 		if output.Message != nil {
+			qe.mu.Lock()
 			if qe.streamMsgID == "" {
 				qe.streamMsgID = generateMessageID()
 			}
@@ -872,6 +873,7 @@ func (qe *QueryEngine) processQueryOutput(ctx context.Context, output query.Quer
 				ToolCalls: qe.streamToolCalls,
 				Timestamp: time.Now().Unix(),
 			}
+			qe.mu.Unlock()
 			return []SDKMessage{{Type: "stream_chunk", Message: streamMsg, SessionID: qe.sessionID}}
 		}
 	case "user":
@@ -901,7 +903,9 @@ func (qe *QueryEngine) processQueryOutput(ctx context.Context, output query.Quer
 		if t, ok := output.Data.(*query.Terminal); ok {
 			reason = t.Reason
 		}
-		if qe.streamContent != "" || qe.streamThinking != "" || len(qe.streamToolCalls) > 0 {
+		qe.mu.Lock()
+		hasStream := qe.streamContent != "" || qe.streamThinking != "" || len(qe.streamToolCalls) > 0
+		if hasStream {
 			modelName := ""
 			if output.Message != nil {
 				modelName = output.Message.Model
@@ -915,13 +919,12 @@ func (qe *QueryEngine) processQueryOutput(ctx context.Context, output query.Quer
 				Model:     modelName,
 				Timestamp: time.Now().Unix(),
 			}
-			qe.mu.Lock()
 			qe.messages = append(qe.messages, completeMsg)
-			qe.mu.Unlock()
 			qe.streamContent = ""
 			qe.streamThinking = ""
 			qe.streamToolCalls = nil
 			qe.streamMsgID = ""
+			qe.mu.Unlock()
 			extractmemories.NotifyConversationEnd(ctx, qe.GetMessages())
 			qe.triggerAutoDream(ctx)
 			return []SDKMessage{
@@ -933,15 +936,18 @@ func (qe *QueryEngine) processQueryOutput(ctx context.Context, output query.Quer
 		qe.streamThinking = ""
 		qe.streamToolCalls = nil
 		qe.streamMsgID = ""
+		qe.mu.Unlock()
 		extractmemories.NotifyConversationEnd(ctx, qe.GetMessages())
 		qe.triggerAutoDream(ctx)
 		return []SDKMessage{{Type: "result", Subtype: reason, SessionID: qe.sessionID}}
 	case "error":
 		log.Printf("[Engine] query error: %v", output.Error)
+		qe.mu.Lock()
 		qe.streamContent = ""
 		qe.streamThinking = ""
 		qe.streamToolCalls = nil
 		qe.streamMsgID = ""
+		qe.mu.Unlock()
 		return []SDKMessage{{
 			Type:      "error",
 			Subtype:   "api_error",
@@ -950,10 +956,12 @@ func (qe *QueryEngine) processQueryOutput(ctx context.Context, output query.Quer
 		}}
 	case "interrupted":
 		log.Printf("[Engine] query interrupted")
+		qe.mu.Lock()
 		qe.streamContent = ""
 		qe.streamThinking = ""
 		qe.streamToolCalls = nil
 		qe.streamMsgID = ""
+		qe.mu.Unlock()
 		return []SDKMessage{{Type: "result", Subtype: "interrupted", SessionID: qe.sessionID}}
 	}
 	return nil

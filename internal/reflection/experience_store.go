@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/auto-code/auto-code/internal/utils/file"
 )
 
 // FileExperienceStore 基于文件的经验存储
@@ -82,7 +84,7 @@ func (s *FileExperienceStore) Save(ctx context.Context, experience *Experience) 
 	filePath := filepath.Join(s.config.StoragePath, filename)
 
 	// 写入文件
-	if err := ioutil.WriteFile(filePath, data, 0644); err != nil {
+	if err := file.AtomicWrite(filePath, data, 0644); err != nil {
 		s.logger.Error("Failed to write experience file %s: %v", filePath, err)
 		return fmt.Errorf("failed to write experience file: %w", err)
 	}
@@ -127,7 +129,7 @@ func (s *FileExperienceStore) Load(ctx context.Context, experienceID string) (*E
 	}
 
 	// 读取文件
-	data, err := ioutil.ReadFile(filePath)
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read experience file: %w", err)
 	}
@@ -163,7 +165,7 @@ func (s *FileExperienceStore) Search(ctx context.Context, query *ExperienceQuery
 	// 遍历所有经验
 	for _, filePath := range s.fileIndex {
 		// 读取经验
-		data, err := ioutil.ReadFile(filePath)
+		data, err := os.ReadFile(filePath)
 		if err != nil {
 			continue // 跳过无法读取的文件
 		}
@@ -385,7 +387,7 @@ func (s *FileExperienceStore) loadIndex() error {
 	}
 
 	// 遍历目录中的所有JSON文件
-	files, err := ioutil.ReadDir(s.config.StoragePath)
+	files, err := os.ReadDir(s.config.StoragePath)
 	if err != nil {
 		return err
 	}
@@ -447,11 +449,14 @@ func (s *FileExperienceStore) Clear() error {
 // Export 导出所有经验
 func (s *FileExperienceStore) Export(ctx context.Context, outputPath string) error {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	// 收集所有经验
-	experiences := make([]*Experience, 0, len(s.fileIndex))
+	ids := make([]string, 0, len(s.fileIndex))
 	for id := range s.fileIndex {
+		ids = append(ids, id)
+	}
+	s.mu.RUnlock()
+
+	experiences := make([]*Experience, 0, len(ids))
+	for _, id := range ids {
 		exp, err := s.Load(ctx, id)
 		if err != nil {
 			continue
@@ -459,14 +464,12 @@ func (s *FileExperienceStore) Export(ctx context.Context, outputPath string) err
 		experiences = append(experiences, exp)
 	}
 
-	// 序列化
 	data, err := json.MarshalIndent(experiences, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal experiences: %w", err)
 	}
 
-	// 写入文件
-	if err := ioutil.WriteFile(outputPath, data, 0644); err != nil {
+	if err := file.AtomicWrite(outputPath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write export file: %w", err)
 	}
 
@@ -476,7 +479,7 @@ func (s *FileExperienceStore) Export(ctx context.Context, outputPath string) err
 // Import 导入经验
 func (s *FileExperienceStore) Import(ctx context.Context, inputPath string) error {
 	// 读取文件
-	data, err := ioutil.ReadFile(inputPath)
+	data, err := os.ReadFile(inputPath)
 	if err != nil {
 		return fmt.Errorf("failed to read import file: %w", err)
 	}

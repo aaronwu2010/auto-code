@@ -16,6 +16,7 @@ const (
 	toolName        = "Read"
 	maxLinesToRead  = 2000
 	maxResultChars  = 100000
+	maxReadFileSize = 1024 * 1024 * 1024
 	descriptionText = "Reads a file from the local filesystem. You can access any file directly by using this tool."
 )
 
@@ -181,6 +182,13 @@ func (t *FileReadTool) Call(ctx context.Context, input any, toolCtx *tools.ToolU
 		limit = *inp.Limit
 	}
 
+	if offset < 0 {
+		return &tools.ToolResult{Data: fmt.Sprintf("Offset must be non-negative, got %d", offset)}, nil
+	}
+	if limit < 0 {
+		return &tools.ToolResult{Data: fmt.Sprintf("Limit must be non-negative, got %d", limit)}, nil
+	}
+
 	lines := strings.Split(content, "\n")
 	if len(lines) > 0 && lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]
@@ -238,6 +246,13 @@ Usage:
 }
 
 func readFileContent(filePath string) (string, int, error) {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return "", 0, err
+	}
+	if info.Size() > maxReadFileSize {
+		return "", 0, fmt.Errorf("file size %d bytes exceeds maximum allowed %d bytes", info.Size(), maxReadFileSize)
+	}
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", 0, err

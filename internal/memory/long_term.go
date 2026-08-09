@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,7 +83,7 @@ func (m *BaseLongTermMemory) Store(ctx context.Context, item *MemoryItem) error 
 	filename := fmt.Sprintf("%s.json", item.ID)
 	filePath := filepath.Join(m.storageDir, filename)
 
-	if err := ioutil.WriteFile(filePath, data, 0644); err != nil {
+	if err := os.WriteFile(filePath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
@@ -220,7 +220,7 @@ func (m *BaseLongTermMemory) Touch(ctx context.Context, id string) error {
 		if err != nil {
 			return err
 		}
-		if err := ioutil.WriteFile(filePath, data, 0644); err != nil {
+		if err := os.WriteFile(filePath, data, 0644); err != nil {
 			return err
 		}
 	} else {
@@ -230,7 +230,7 @@ func (m *BaseLongTermMemory) Touch(ctx context.Context, id string) error {
 		if err != nil {
 			return err
 		}
-		if err := ioutil.WriteFile(filePath, data, 0644); err != nil {
+		if err := os.WriteFile(filePath, data, 0644); err != nil {
 			return err
 		}
 		m.index[item.ID] = filePath
@@ -487,7 +487,7 @@ func (m *BaseLongTermMemory) Load(ctx context.Context) error {
 // loadIndex 加载索引
 func (m *BaseLongTermMemory) loadIndex() error {
 	// 扫描存储目录
-	files, err := ioutil.ReadDir(m.storageDir)
+	files, err := os.ReadDir(m.storageDir)
 	if err != nil {
 		return err
 	}
@@ -513,7 +513,7 @@ func (m *BaseLongTermMemory) loadIndex() error {
 
 // loadItem 加载记忆项
 func (m *BaseLongTermMemory) loadItem(id, filePath string) (*MemoryItem, error) {
-	data, err := ioutil.ReadFile(filePath)
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
@@ -560,7 +560,7 @@ func (m *BaseLongTermMemory) saveItemNoLock(item *MemoryItem) error {
 		filePath = filepath.Join(m.storageDir, filename)
 		m.index[item.ID] = filePath
 	}
-	return ioutil.WriteFile(filePath, data, 0644)
+	return os.WriteFile(filePath, data, 0644)
 }
 
 // sortResults 排序结果

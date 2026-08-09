@@ -2,19 +2,27 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/auto-code/auto-code/internal/types"
 )
 
+const (
+	maxSessionsPerIP = 5
+	maxTotalSessions = 100
+)
+
 type DirectConnectServer struct {
-	mu       sync.RWMutex
-	server   *http.Server
-	port     int
-	sessions map[string]*DirectConnectSession
+	mu        sync.RWMutex
+	server    *http.Server
+	port      int
+	authToken string
+	sessions  map[string]*DirectConnectSession
 }
 
 type DirectConnectSession struct {
@@ -23,10 +31,11 @@ type DirectConnectSession struct {
 	Active    bool            `json:"active"`
 }
 
-func NewDirectConnectServer(port int) *DirectConnectServer {
+func NewDirectConnectServer(port int, authToken string) *DirectConnectServer {
 	return &DirectConnectServer{
-		port:     port,
-		sessions: make(map[string]*DirectConnectSession),
+		port:      port,
+		authToken: authToken,
+		sessions:  make(map[string]*DirectConnectSession),
 	}
 }
 
@@ -69,6 +78,20 @@ func (s *DirectConnectServer) CreateSession(clientIP string) (*DirectConnectSess
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if len(s.sessions) >= maxTotalSessions {
+		return nil, fmt.Errorf("maximum total sessions reached")
+	}
+
+	ipCount := 0
+	for _, sess := range s.sessions {
+		if sess.ClientIP == clientIP {
+			ipCount++
+		}
+	}
+	if ipCount >= maxSessionsPerIP {
+		return nil, fmt.Errorf("maximum sessions per IP reached")
+	}
+
 	session := &DirectConnectSession{
 		SessionID: types.SessionID(fmt.Sprintf("dc-%d", len(s.sessions)+1)),
 		ClientIP:  clientIP,
@@ -89,9 +112,26 @@ func (s *DirectConnectServer) GetSessions() []*DirectConnectSession {
 }
 
 func (s *DirectConnectServer) handleSession(w http.ResponseWriter, r *http.Request) {
-	session, err := s.CreateSession(r.RemoteAddr)
+	if s.authToken != "" {
+		provided := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(s.authToken)) != 1 {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+	}
+
+	clientIP := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(clientIP); err == nil {
+		clientIP = host
+	}
+
+	session, err := s.CreateSession(clientIP)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		if strings.Contains(err.Error(), "maximum") {
+			http.Error(w, err.Error(), http.StatusTooManyRequests)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 	w.WriteHeader(http.StatusOK)

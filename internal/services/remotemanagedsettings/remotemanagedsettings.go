@@ -1,7 +1,6 @@
 package remotemanagedsettings
 
 import (
-
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -18,11 +17,11 @@ import (
 )
 
 const (
-	settingsTimeoutMS          = 10000
-	defaultMaxRetries          = 5
-	pollingIntervalMS          = 60 * 60 * 1000
-	loadingPromiseTimeoutMS    = 30000
-	remoteSettingsFilename     = "remote-settings.json"
+	settingsTimeoutMS       = 10000
+	defaultMaxRetries       = 5
+	pollingIntervalMS       = 60 * 60 * 1000
+	loadingPromiseTimeoutMS = 30000
+	remoteSettingsFilename  = "remote-settings.json"
 )
 
 type RemoteManagedSettingsService struct {
@@ -30,12 +29,12 @@ type RemoteManagedSettingsService struct {
 	httpClient  *http.Client
 	config      auth.OAuthConfig
 
-	mu                  sync.Mutex
-	sessionCache        map[string]interface{}
-	eligible            *bool
-	pollingCancel       context.CancelFunc
-	loadingDone         chan struct{}
-	loadingStarted      bool
+	mu             sync.Mutex
+	sessionCache   map[string]interface{}
+	eligible       *bool
+	pollingCancel  context.CancelFunc
+	loadingDone    chan struct{}
+	loadingStarted bool
 }
 
 func NewRemoteManagedSettingsService(oauthClient *auth.OAuthClient, config auth.OAuthConfig) *RemoteManagedSettingsService {
@@ -324,12 +323,17 @@ func (s *RemoteManagedSettingsService) LoadRemoteManagedSettings(ctx context.Con
 		s.loadingDone = make(chan struct{})
 		s.loadingStarted = true
 	}
+	ch := s.loadingDone
 	s.mu.Unlock()
 
 	defer func() {
-		select {
-		case s.loadingDone <- struct{}{}:
-		default:
+		if ch != nil {
+			s.mu.Lock()
+			if s.loadingDone == ch {
+				close(ch)
+				s.loadingDone = nil
+			}
+			s.mu.Unlock()
 		}
 	}()
 

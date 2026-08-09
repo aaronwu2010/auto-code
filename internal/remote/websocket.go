@@ -1,5 +1,10 @@
 package remote
 
+// STUB IMPLEMENTATION: This file contains placeholder stubs for the WebSocket-based
+// remote session protocol. Connect() does not establish a real WebSocket connection,
+// Send() is a no-op, and listen() only waits for context cancellation.
+// TODO: Implement real WebSocket transport using gorilla/websocket or nhooyr/websocket.
+
 import (
 	"context"
 	"encoding/json"

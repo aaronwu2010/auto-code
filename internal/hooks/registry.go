@@ -3,6 +3,7 @@ package hooks
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 )
 
 type HookRegistry struct {
@@ -17,16 +18,16 @@ type SessionStore struct {
 }
 
 type SessionHookMatcher struct {
-	Matcher    string
-	SkillRoot  string
-	Hooks      []HookCommand
-	OnSuccess  func(hook HookCommand, result *AggregatedHookResult)
+	Matcher   string
+	SkillRoot string
+	Hooks     []HookCommand
+	OnSuccess func(hook HookCommand, result *AggregatedHookResult)
 }
 
 type HooksConfigSnapshot struct {
-	AllowManagedHooksOnly         bool
+	AllowManagedHooksOnly           bool
 	DisableAllHooksIncludingManaged bool
-	Settings                      HooksSettings
+	Settings                        HooksSettings
 }
 
 func NewHookRegistry() *HookRegistry {
@@ -318,6 +319,6 @@ func isHookEqual(a, b HookCommand) bool {
 var hookIDCounter int64
 
 func fmtHookID() string {
-	hookIDCounter++
-	return fmt.Sprintf("function-hook-%d", hookIDCounter)
+	id := atomic.AddInt64(&hookIDCounter, 1)
+	return fmt.Sprintf("function-hook-%d", id)
 }

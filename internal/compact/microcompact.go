@@ -2,6 +2,7 @@ package compact
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/auto-code/auto-code/internal/prompts"
 )
@@ -19,13 +20,18 @@ type PendingCacheEdits struct {
 	Pinned bool
 }
 
-var pendingEdits *PendingCacheEdits
+var (
+	pendingEdits   *PendingCacheEdits
+	pendingEditsMu sync.Mutex
+)
 
 func init() {
 	pendingEdits = &PendingCacheEdits{Edits: make(map[string]string)}
 }
 
 func ConsumePendingCacheEdits() map[string]string {
+	pendingEditsMu.Lock()
+	defer pendingEditsMu.Unlock()
 	if pendingEdits.Pinned {
 		return nil
 	}
@@ -35,6 +41,8 @@ func ConsumePendingCacheEdits() map[string]string {
 }
 
 func GetPinnedCacheEdits() map[string]string {
+	pendingEditsMu.Lock()
+	defer pendingEditsMu.Unlock()
 	if !pendingEdits.Pinned {
 		return nil
 	}
@@ -42,10 +50,14 @@ func GetPinnedCacheEdits() map[string]string {
 }
 
 func PinCacheEdits() {
+	pendingEditsMu.Lock()
+	defer pendingEditsMu.Unlock()
 	pendingEdits.Pinned = true
 }
 
 func ResetMicrocompactState() {
+	pendingEditsMu.Lock()
+	defer pendingEditsMu.Unlock()
 	pendingEdits = &PendingCacheEdits{Edits: make(map[string]string)}
 }
 
@@ -65,7 +77,7 @@ func MicrocompactMessages(messages []CompactMessage) MicrocompactResult {
 		tokens := EstimateMessageTokens(msg.Content)
 		totalBefore += tokens
 
-		if msg.Role == "system" || (msg.Role == "user" && msg.IsLatest) {
+		if msg.Role == "system" || (msg.Role == "user" && msg.IsLatest) || msg.Role == "tool" {
 			kept = append(kept, msg)
 			totalAfter += tokens
 		} else if strings.TrimSpace(msg.Content) != "" {

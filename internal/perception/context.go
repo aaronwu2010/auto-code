@@ -252,24 +252,30 @@ func (c *Context) Clone() *Context {
 
 	if c.User != nil {
 		clone.User = &UserContext{
-			ID:          c.User.ID,
-			Name:        c.User.Name,
-			Email:       c.User.Email,
-			Role:        c.User.Role,
-			Preferences: copyMap(c.User.Preferences),
-			Permissions: copyStringSlice(c.User.Permissions),
-			Groups:      copyStringSlice(c.User.Groups),
+			ID:           c.User.ID,
+			Name:         c.User.Name,
+			Email:        c.User.Email,
+			Role:         c.User.Role,
+			Preferences:  copyMap(c.User.Preferences),
+			Permissions:  copyStringSlice(c.User.Permissions),
+			Groups:       copyStringSlice(c.User.Groups),
+			LastActive:   c.User.LastActive,
+			SessionCount: c.User.SessionCount,
 		}
 	}
 
 	if c.Session != nil {
 		clone.Session = &SessionContext{
-			ID:           c.Session.ID,
-			StartTime:    c.Session.StartTime,
-			Duration:     c.Session.Duration,
-			Status:       c.Session.Status,
-			Mode:         c.Session.Mode,
-			MessageCount: c.Session.MessageCount,
+			ID:            c.Session.ID,
+			StartTime:     c.Session.StartTime,
+			EndTime:       c.Session.EndTime,
+			Duration:      c.Session.Duration,
+			Status:        c.Session.Status,
+			Mode:          c.Session.Mode,
+			MessageCount:  c.Session.MessageCount,
+			ToolCallCount: c.Session.ToolCallCount,
+			Config:        copyMap(c.Session.Config),
+			Settings:      copyMap(c.Session.Settings),
 		}
 	}
 
@@ -281,17 +287,58 @@ func (c *Context) Clone() *Context {
 			Runtime:     c.Environment.Runtime,
 			Version:     c.Environment.Version,
 			Environment: c.Environment.Environment,
+			CPU:         c.Environment.CPU,
+			Memory:      c.Environment.Memory,
+			DiskSpace:   c.Environment.DiskSpace,
+			IPAddress:   c.Environment.IPAddress,
+			Port:        c.Environment.Port,
+			Variables:   copyStringMap(c.Environment.Variables),
+			Timezone:    c.Environment.Timezone,
+			CurrentTime: c.Environment.CurrentTime,
 		}
 	}
 
 	if c.Project != nil {
 		clone.Project = &ProjectContext{
-			ID:        c.Project.ID,
-			Name:      c.Project.Name,
-			Path:      c.Project.Path,
-			Type:      c.Project.Type,
-			Language:  c.Project.Language,
-			Framework: c.Project.Framework,
+			ID:         c.Project.ID,
+			Name:       c.Project.Name,
+			Path:       c.Project.Path,
+			Type:       c.Project.Type,
+			Language:   c.Project.Language,
+			Framework:  c.Project.Framework,
+			BuildTool:  c.Project.BuildTool,
+			Repository: cloneGitContext(c.Project.Repository),
+			Config:     copyMap(c.Project.Config),
+			Exclude:    copyStringSlice(c.Project.Exclude),
+			Include:    copyStringSlice(c.Project.Include),
+			FileCount:  c.Project.FileCount,
+			LineCount:  c.Project.LineCount,
+			Size:       c.Project.Size,
+		}
+	}
+
+	if c.Workspace != nil {
+		clone.Workspace = &WorkspaceContext{
+			Path:         c.Workspace.Path,
+			Name:         c.Workspace.Name,
+			Config:       copyMap(c.Workspace.Config),
+			Settings:     copyMap(c.Workspace.Settings),
+			OpenFiles:    copyStringSlice(c.Workspace.OpenFiles),
+			ActiveFile:   c.Workspace.ActiveFile,
+			LastAccessed: c.Workspace.LastAccessed,
+			AccessCount:  c.Workspace.AccessCount,
+		}
+	}
+
+	if c.History != nil {
+		clone.History = &HistoryContext{
+			RecentMessages: copyMessageRecords(c.History.RecentMessages),
+			ToolCalls:      copyToolCallRecords(c.History.ToolCalls),
+			Decisions:      copyDecisionRecords(c.History.Decisions),
+			Errors:         copyErrorRecords(c.History.Errors),
+			TotalMessages:  c.History.TotalMessages,
+			TotalToolCalls: c.History.TotalToolCalls,
+			TotalErrors:    c.History.TotalErrors,
 		}
 	}
 
@@ -317,6 +364,69 @@ func copyStringSlice(src []string) []string {
 		return nil
 	}
 	dst := make([]string, len(src))
+	copy(dst, src)
+	return dst
+}
+
+func copyStringMap(src map[string]string) map[string]string {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]string, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+func cloneGitContext(src *GitContext) *GitContext {
+	if src == nil {
+		return nil
+	}
+	return &GitContext{
+		Branch:    src.Branch,
+		Commit:    src.Commit,
+		Tag:       src.Tag,
+		Remote:    src.Remote,
+		Status:    src.Status,
+		Author:    src.Author,
+		Message:   src.Message,
+		Timestamp: src.Timestamp,
+	}
+}
+
+func copyMessageRecords(src []MessageRecord) []MessageRecord {
+	if src == nil {
+		return nil
+	}
+	dst := make([]MessageRecord, len(src))
+	copy(dst, src)
+	return dst
+}
+
+func copyToolCallRecords(src []ToolCallRecord) []ToolCallRecord {
+	if src == nil {
+		return nil
+	}
+	dst := make([]ToolCallRecord, len(src))
+	copy(dst, src)
+	return dst
+}
+
+func copyDecisionRecords(src []DecisionRecord) []DecisionRecord {
+	if src == nil {
+		return nil
+	}
+	dst := make([]DecisionRecord, len(src))
+	copy(dst, src)
+	return dst
+}
+
+func copyErrorRecords(src []ErrorRecord) []ErrorRecord {
+	if src == nil {
+		return nil
+	}
+	dst := make([]ErrorRecord, len(src))
 	copy(dst, src)
 	return dst
 }

@@ -99,6 +99,9 @@ func CreateAutoMemCanUseTool(memoryDir string) CanUseToolFn {
 		case "Bash":
 			if cmd, ok := input["command"].(string); ok {
 				lower := strings.ToLower(strings.TrimSpace(cmd))
+				if containsShellMetacharacters(lower) {
+					return false, "shell metacharacters not allowed in memory extraction"
+				}
 				readOnlyPrefixes := []string{"git log", "git diff", "git show", "git status", "git branch", "ls", "cat", "head", "tail", "find", "grep", "wc", "echo", "pwd", "which", "type", "file", "stat"}
 				for _, prefix := range readOnlyPrefixes {
 					if strings.HasPrefix(lower, prefix) {
@@ -128,6 +131,16 @@ func CreateAutoMemCanUseTool(memoryDir string) CanUseToolFn {
 }
 
 const memdirSubdirMemory = "memory"
+
+func containsShellMetacharacters(cmd string) bool {
+	metachars := []string{";", "&&", "||", "|", "$(", "`", ">", "<", "\n", "\r"}
+	for _, mc := range metachars {
+		if strings.Contains(cmd, mc) {
+			return true
+		}
+	}
+	return false
+}
 
 func (e *ExtractMemories) ExecuteExtractMemories(ctx context.Context, messages []types.Message, appendSystemMsg string) error {
 	if !memdir.IsAutoMemoryEnabled() {

@@ -217,6 +217,16 @@ Usage:
 }
 
 func readFileForEdit(filePath string) (string, bool, error) {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	if info.Size() > maxEditFileSize {
+		return "", false, fmt.Errorf("file size %d bytes exceeds maximum allowed %d bytes", info.Size(), maxEditFileSize)
+	}
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {

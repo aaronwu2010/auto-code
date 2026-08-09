@@ -3,6 +3,7 @@ package planning
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -515,5 +516,5 @@ func defaultTaskExecutor(ctx context.Context, task *Task) (*ExecutionResult, err
 
 // Helper function
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && s[0:len(substr)] == substr
+	return strings.Contains(s, substr)
 }

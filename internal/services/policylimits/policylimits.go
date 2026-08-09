@@ -121,11 +121,11 @@ func (s *PolicyLimitsService) IsPolicyAllowed(policy string) bool {
 }
 
 func (s *PolicyLimitsService) getRestrictionsFromCache() map[string]PolicyRestriction {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if !s.IsEligible() {
 		return nil
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.sessionCache != nil {
 		return s.sessionCache
 	}
@@ -332,12 +332,17 @@ func (s *PolicyLimitsService) LoadPolicyLimits(ctx context.Context) {
 		s.loadingDone = make(chan struct{})
 		s.loadingStarted = true
 	}
+	ch := s.loadingDone
 	s.mu.Unlock()
 
 	defer func() {
-		select {
-		case s.loadingDone <- struct{}{}:
-		default:
+		if ch != nil {
+			s.mu.Lock()
+			if s.loadingDone == ch {
+				close(ch)
+				s.loadingDone = nil
+			}
+			s.mu.Unlock()
 		}
 	}()
 

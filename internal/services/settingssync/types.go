@@ -13,11 +13,12 @@ type UserSyncData struct {
 }
 
 type SettingsSyncFetchResult struct {
-	Success   bool         `json:"success"`
+	Success   bool          `json:"success"`
 	Data      *UserSyncData `json:"data,omitempty"`
-	IsEmpty   bool         `json:"isEmpty,omitempty"`
-	Error     string       `json:"error,omitempty"`
-	SkipRetry bool         `json:"skipRetry,omitempty"`
+	IsEmpty   bool          `json:"isEmpty,omitempty"`
+	Error     string        `json:"error,omitempty"`
+	SkipRetry bool          `json:"skipRetry,omitempty"`
+	ETag      string        `json:"-"`
 }
 
 type SettingsSyncUploadResult struct {

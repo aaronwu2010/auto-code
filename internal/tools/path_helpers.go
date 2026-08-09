@@ -3,6 +3,7 @@ package tools
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -26,6 +27,9 @@ func isUNCPath(path string) bool {
 
 func EnsurePathInProjectDirectory(filePath string, toolCtx *ToolUseContext) string {
 	if toolCtx == nil || toolCtx.ProjectDirectory == "" {
+		if resolved, err := filepath.EvalSymlinks(filePath); err == nil {
+			return resolved
+		}
 		return filePath
 	}
 
@@ -35,12 +39,27 @@ func EnsurePathInProjectDirectory(filePath string, toolCtx *ToolUseContext) stri
 		return filePath
 	}
 
-	if !strings.HasPrefix(absPath, projectDir+string(filepath.Separator)) && absPath != projectDir {
+	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+		absPath = resolved
+	}
+
+	if !isPathWithinProject(absPath, projectDir) {
 		fileName := filepath.Base(filePath)
 		return filepath.Join(projectDir, fileName)
 	}
 
 	return absPath
+}
+
+func isPathWithinProject(path, projectDir string) bool {
+	if path == projectDir {
+		return true
+	}
+	prefix := projectDir + string(filepath.Separator)
+	if runtime.GOOS == "windows" {
+		return len(path) >= len(prefix) && strings.EqualFold(path[:len(prefix)], prefix)
+	}
+	return strings.HasPrefix(path, prefix)
 }
 
 func GetDefaultSearchDir(toolCtx *ToolUseContext) string {

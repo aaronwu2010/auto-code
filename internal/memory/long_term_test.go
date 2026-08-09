@@ -3,7 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,7 +11,7 @@ import (
 
 func TestNewBaseLongTermMemory(t *testing.T) {
 	// 创建临时目录
-	tempDir, err := ioutil.TempDir("", "long_term_test")
+	tempDir, err := os.MkdirTemp("", "long_term_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestNewBaseLongTermMemory(t *testing.T) {
 
 func TestBaseLongTermMemory_StoreAndLoad(t *testing.T) {
 	// 创建临时目录
-	tempDir, err := ioutil.TempDir("", "long_term_test")
+	tempDir, err := os.MkdirTemp("", "long_term_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestBaseLongTermMemory_StoreAndLoad(t *testing.T) {
 
 func TestBaseLongTermMemory_Persistence(t *testing.T) {
 	// 创建临时目录
-	tempDir, err := ioutil.TempDir("", "long_term_persist_test")
+	tempDir, err := os.MkdirTemp("", "long_term_persist_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestBaseLongTermMemory_Persistence(t *testing.T) {
 }
 
 func TestBaseLongTermMemory_Retrieve(t *testing.T) {
-	tempDir, _ := ioutil.TempDir("", "long_term_test")
+	tempDir, _ := os.MkdirTemp("", "long_term_test")
 	defer os.RemoveAll(tempDir)
 
 	config := &MemoryConfig{
@@ -186,7 +186,7 @@ func TestBaseLongTermMemory_Retrieve(t *testing.T) {
 }
 
 func TestBaseLongTermMemory_Delete(t *testing.T) {
-	tempDir, _ := ioutil.TempDir("", "long_term_test")
+	tempDir, _ := os.MkdirTemp("", "long_term_test")
 	defer os.RemoveAll(tempDir)
 
 	config := &MemoryConfig{
@@ -219,7 +219,7 @@ func TestBaseLongTermMemory_Delete(t *testing.T) {
 }
 
 func TestBaseLongTermMemory_Compact(t *testing.T) {
-	tempDir, _ := ioutil.TempDir("", "long_term_test")
+	tempDir, _ := os.MkdirTemp("", "long_term_test")
 	defer os.RemoveAll(tempDir)
 
 	config := &MemoryConfig{
@@ -259,7 +259,7 @@ func TestBaseLongTermMemory_Compact(t *testing.T) {
 }
 
 func TestBaseLongTermMemory_Archive(t *testing.T) {
-	tempDir, _ := ioutil.TempDir("", "long_term_test")
+	tempDir, _ := os.MkdirTemp("", "long_term_test")
 	defer os.RemoveAll(tempDir)
 
 	config := &MemoryConfig{
@@ -291,7 +291,7 @@ func TestBaseLongTermMemory_Archive(t *testing.T) {
 
 	// 验证归档文件存在
 	archiveDir := filepath.Join(tempDir, "long_term", "archive")
-	files, err := ioutil.ReadDir(archiveDir)
+	files, err := os.ReadDir(archiveDir)
 	if err != nil {
 		t.Fatal("Archive directory should exist")
 	}
@@ -308,7 +308,7 @@ func TestBaseLongTermMemory_Archive(t *testing.T) {
 }
 
 func TestBaseLongTermMemory_Stats(t *testing.T) {
-	tempDir, _ := ioutil.TempDir("", "long_term_test")
+	tempDir, _ := os.MkdirTemp("", "long_term_test")
 	defer os.RemoveAll(tempDir)
 
 	config := &MemoryConfig{
@@ -353,7 +353,7 @@ func TestBaseLongTermMemory_Stats(t *testing.T) {
 }
 
 func TestBaseLongTermMemory_Update(t *testing.T) {
-	tempDir, _ := ioutil.TempDir("", "long_term_test")
+	tempDir, _ := os.MkdirTemp("", "long_term_test")
 	defer os.RemoveAll(tempDir)
 
 	config := &MemoryConfig{
@@ -389,7 +389,7 @@ func TestBaseLongTermMemory_Update(t *testing.T) {
 }
 
 func BenchmarkBaseLongTermMemory_Store(b *testing.B) {
-	tempDir, _ := ioutil.TempDir("", "long_term_bench")
+	tempDir, _ := os.MkdirTemp("", "long_term_bench")
 	defer os.RemoveAll(tempDir)
 
 	config := &MemoryConfig{
@@ -411,7 +411,7 @@ func BenchmarkBaseLongTermMemory_Store(b *testing.B) {
 }
 
 func BenchmarkBaseLongTermMemory_Retrieve(b *testing.B) {
-	tempDir, _ := ioutil.TempDir("", "long_term_bench")
+	tempDir, _ := os.MkdirTemp("", "long_term_bench")
 	defer os.RemoveAll(tempDir)
 
 	config := &MemoryConfig{
