@@ -225,6 +225,20 @@ func (e *BasePlanExecutor) executeTasks(ctx context.Context, plan *Plan, status 
 		plan.CurrentTask = task.ID
 		e.mu.Unlock()
 
+		// 注入依赖任务的输出到当前任务
+		if len(task.Dependencies) > 0 {
+			if task.InputFromDeps == nil {
+				task.InputFromDeps = make(map[string]interface{})
+			}
+			for _, depID := range task.Dependencies {
+				for _, t := range plan.Tasks {
+					if t.ID == depID && t.Result != "" {
+						task.InputFromDeps[depID] = t.Result
+					}
+				}
+			}
+		}
+
 		// 执行任务
 		result, err := e.ExecuteTask(ctx, task)
 		if err != nil {

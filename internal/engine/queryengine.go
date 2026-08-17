@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -13,14 +14,25 @@ import (
 	"time"
 
 	"github.com/auto-code/auto-code/internal/api"
+	"github.com/auto-code/auto-code/internal/auth"
 	"github.com/auto-code/auto-code/internal/compact"
+	coordMode "github.com/auto-code/auto-code/internal/coordinator"
 	engineContext "github.com/auto-code/auto-code/internal/engine/context"
 	"github.com/auto-code/auto-code/internal/engine/query"
+	"github.com/auto-code/auto-code/internal/hooks"
 	"github.com/auto-code/auto-code/internal/memdir"
+	"github.com/auto-code/auto-code/internal/memory"
+	"github.com/auto-code/auto-code/internal/migrations"
+	"github.com/auto-code/auto-code/internal/perception"
+	"github.com/auto-code/auto-code/internal/planning"
 	"github.com/auto-code/auto-code/internal/prompts"
+	"github.com/auto-code/auto-code/internal/reflection"
 	"github.com/auto-code/auto-code/internal/services/autodream"
 	"github.com/auto-code/auto-code/internal/services/extractmemories"
+	"github.com/auto-code/auto-code/internal/services/policylimits"
+	"github.com/auto-code/auto-code/internal/services/remotemanagedsettings"
 	"github.com/auto-code/auto-code/internal/services/sessionmemory"
+	"github.com/auto-code/auto-code/internal/services/settingssync"
 	"github.com/auto-code/auto-code/internal/services/teammemorysync"
 	"github.com/auto-code/auto-code/internal/state"
 	"github.com/auto-code/auto-code/internal/tools"
@@ -56,6 +68,12 @@ type QueryEngine struct {
 	autoDream           *autodream.AutoDream
 	lastSummarizedMsgID string
 	teamSyncState       *teammemorysync.SyncState
+	coordinatorMode     *coordMode.CoordinatorMode
+	hookExecutor        *hooks.HookExecutor
+	perceptionMgr       *perception.PerceptionManagerImpl
+	longTermMem         *memory.BaseLongTermMemory
+	reflector           *reflection.BaseReflector
+	taskDecomposer      *planning.BaseTaskDecomposer
 }
 
 type QueryEngineConfig struct {
@@ -116,6 +134,41 @@ func NewQueryEngine(appState *state.AppState, config *QueryEngineConfig) *QueryE
 func (qe *QueryEngine) Startup(ctx context.Context) {
 	qe.ctx, qe.cancel = context.WithCancel(ctx)
 	qe.setupAgentTool()
+	qe.coordinatorMode = coordMode.NewCoordinatorMode()
+
+	hookReg := hooks.NewHookRegistry()
+	if hookSettings, ok := qe.appState.GetSetting("hooks"); ok {
+		if data, err := json.Marshal(hookSettings); err == nil {
+			var hs hooks.HooksSettings
+			if json.Unmarshal(data, &hs) == nil {
+				hookReg.RegisterSettings(hs)
+			}
+		}
+	}
+	qe.hookExecutor = hooks.NewHookExecutor(hookReg)
+
+	perceptionCfg := perception.DefaultPerceptionConfig()
+	qe.perceptionMgr = perception.NewPerceptionManager(perceptionCfg)
+	qe.perceptionMgr.RegisterProcessor(perception.NewBaseInputProcessor(perceptionCfg))
+
+	memCfg := memory.DefaultMemoryConfig()
+	if qe.config.CWD != "" {
+		memCfg.StoragePath = filepath.Join(qe.config.CWD, ".auto")
+	}
+	if ltm, err := memory.NewBaseLongTermMemory(memCfg); err == nil {
+		qe.longTermMem = ltm
+	}
+
+	reflCfg := reflection.DefaultReflectionConfig()
+	if qe.config.CWD != "" {
+		reflCfg.StoragePath = filepath.Join(qe.config.CWD, ".auto", "reflections")
+	}
+	if refl, err := reflection.NewBaseReflector(reflCfg); err == nil {
+		qe.reflector = refl
+	}
+
+	qe.taskDecomposer = planning.NewBaseTaskDecomposer(planning.DefaultPlannerConfig())
+
 	compact.SetSummarizeFunc(qe.summarizeWithLLM)
 	memdir.RegisterSideQueryFn(qe.sideQuery)
 
@@ -128,6 +181,16 @@ func (qe *QueryEngine) Startup(ctx context.Context) {
 	}
 
 	qe.startTeamMemorySync()
+
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		runner := migrations.NewMigrationRunner(filepath.Join(homeDir, ".auto"))
+		runner.RegisterDefaults()
+		if err := runner.RunAll(); err != nil {
+			log.Printf("[Engine] migrations failed: %v", err)
+		}
+	}
+
+	go qe.initRemoteServices(ctx)
 }
 
 // SetContextBuilder 注入上下文构建器，用于在系统提示中包含记忆文件和 Git 状态
@@ -368,6 +431,56 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
+func (qe *QueryEngine) reflectOnTurn(ctx context.Context, msgs []types.Message) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[Engine] reflection panic: %v", r)
+		}
+	}()
+
+	rc := &reflection.ReflectionContext{
+		EndTime: time.Now(),
+	}
+	for _, m := range msgs {
+		if m.Role == types.RoleUser && !m.IsMeta {
+			rc.Goal = m.Content
+			break
+		}
+	}
+	if len(msgs) > 0 {
+		last := msgs[len(msgs)-1]
+		rc.Result = last.Content
+		if last.Role == types.RoleTool && strings.Contains(strings.ToLower(last.Content), "error") {
+			rc.Errors = []reflection.ErrorInfo{{
+				Message:   last.Content,
+				Timestamp: time.Now(),
+			}}
+			if analysis, err := qe.reflector.AnalyzeError(ctx, &rc.Errors[0]); err == nil && analysis != nil {
+				log.Printf("[Engine] error analyzed: rootCause=%s", analysis.RootCause)
+			}
+			return
+		}
+	}
+	if _, err := qe.reflector.Reflect(ctx, rc); err != nil {
+		log.Printf("[Engine] reflection failed: %v", err)
+	}
+}
+
+func (qe *QueryEngine) initRemoteServices(ctx context.Context) {
+	oauthConfig := auth.DefaultOAuthConfig()
+	oauthClient := auth.NewOAuthClient(oauthConfig)
+
+	if pls := policylimits.NewPolicyLimitsService(oauthClient, oauthConfig, false); pls != nil {
+		pls.LoadPolicyLimits(ctx)
+	}
+	if rms := remotemanagedsettings.NewRemoteManagedSettingsService(oauthClient, oauthConfig); rms != nil {
+		rms.LoadRemoteManagedSettings(ctx)
+	}
+	if sss := settingssync.NewSettingsSyncService(oauthClient, oauthConfig); sss != nil {
+		sss.DownloadUserSettings(ctx)
+	}
+}
+
 func (qe *QueryEngine) Shutdown(_ context.Context) {
 	if qe.cancel != nil {
 		qe.cancel()
@@ -456,6 +569,33 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 			qe.mu.Unlock()
 		}
 
+		if qe.perceptionMgr != nil {
+			inputData := &perception.InputData{
+				ID:        generateMessageID(),
+				Type:      perception.InputTypeText,
+				Content:   prompt,
+				Timestamp: time.Now(),
+				Source:    "user",
+			}
+			if output, err := qe.perceptionMgr.Process(submitCtx, inputData); err == nil && output != nil && len(output.Features) > 0 {
+				featureParts := make([]string, 0, len(output.Features))
+				for k, v := range output.Features {
+					featureParts = append(featureParts, fmt.Sprintf("%s: %v", k, v))
+				}
+				perceptionMsg := types.Message{
+					ID:        generateMessageID(),
+					Role:      types.RoleUser,
+					Content:   "<system-reminder>用户输入特征: " + strings.Join(featureParts, ", ") + "</system-reminder>",
+					Timestamp: time.Now().Unix(),
+					IsMeta:    true,
+					UUID:      "perception",
+				}
+				qe.mu.Lock()
+				qe.messages = append(qe.messages, perceptionMsg)
+				qe.mu.Unlock()
+			}
+		}
+
 		systemPrompt, err := qe.buildSystemPrompt(submitCtx)
 		if err != nil {
 			log.Printf("[Engine] buildSystemPrompt failed: %v", err)
@@ -468,6 +608,10 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		log.Printf("[Engine] SubmitMessage: assembling tool pool...")
 		allTools := qe.toolReg.AssembleToolPool(permissionCtx, nil)
 		coreTools := qe.toolReg.GetCoreTools(permissionCtx, nil)
+		if qe.coordinatorMode != nil {
+			allTools = qe.coordinatorMode.FilterTools(allTools)
+			coreTools = qe.coordinatorMode.FilterTools(coreTools)
+		}
 		log.Printf("[Engine] SubmitMessage: tools assembled, all=%d, core=%d", len(allTools), len(coreTools))
 
 		canUseTool := qe.config.CanUseTool
@@ -564,6 +708,9 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 				}
 			},
 			OnTurnComplete: func(turnCtx context.Context, msgs []types.Message) {
+				if qe.reflector != nil && len(msgs) > 0 {
+					go qe.reflectOnTurn(turnCtx, msgs)
+				}
 				if qe.sessionMemory == nil || !memdir.IsAutoMemoryEnabled() {
 					return
 				}
@@ -584,6 +731,7 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 					}
 				}()
 			},
+			HookExecutor: qe.hookExecutor,
 		}
 
 		log.Printf("[Engine] SubmitMessage: starting query.Query...")
@@ -971,6 +1119,11 @@ func (qe *QueryEngine) buildSystemPrompt(ctx context.Context) (*types.SystemProm
 	config := prompts.SystemPromptConfig{
 		LanguagePreference: "Chinese",
 	}
+	if style, ok := qe.appState.GetSetting("output_style"); ok {
+		if s, ok := style.(string); ok && s != "" {
+			config.OutputStyle = prompts.OutputStyle(s)
+		}
+	}
 
 	var blocks []types.SystemPromptBlock
 
@@ -987,6 +1140,37 @@ func (qe *QueryEngine) buildSystemPrompt(ctx context.Context) (*types.SystemProm
 		}
 		if gitStatus, err := qe.ctxBuilder.GetGitStatus(ctx); err == nil && gitStatus != "" {
 			blocks = append(blocks, types.SystemPromptBlock{Text: "# Git Status\n" + gitStatus, CacheScope: ""})
+		}
+	}
+
+	if qe.longTermMem != nil {
+		queryText := ""
+		qe.mu.RLock()
+		for i := len(qe.messages) - 1; i >= 0; i-- {
+			if qe.messages[i].Role == types.RoleUser && !qe.messages[i].IsMeta {
+				queryText = qe.messages[i].Content
+				break
+			}
+		}
+		qe.mu.RUnlock()
+		if queryText != "" {
+			result, err := qe.longTermMem.Retrieve(ctx, &memory.MemoryQuery{
+				Keywords: []string{queryText},
+				Limit:    5,
+				SortBy:   "importance",
+				SortDesc: true,
+			})
+			if err == nil && result != nil && len(result.Items) > 0 {
+				var memContents []string
+				for _, item := range result.Items {
+					if item.Content != "" {
+						memContents = append(memContents, item.Content)
+					}
+				}
+				if len(memContents) > 0 {
+					blocks = append(blocks, types.SystemPromptBlock{Text: "# Long-term Memory\n" + strings.Join(memContents, "\n\n"), CacheScope: ""})
+				}
+			}
 		}
 	}
 

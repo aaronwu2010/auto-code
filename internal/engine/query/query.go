@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/auto-code/auto-code/internal/compact"
+	"github.com/auto-code/auto-code/internal/hooks"
 	"github.com/auto-code/auto-code/internal/tools"
 	"github.com/auto-code/auto-code/internal/types"
 )
@@ -52,6 +53,7 @@ type QueryDeps struct {
 	GetTools       func() []tools.Tool
 	OnPhaseChange  func(phase string, toolName string, toolInput any)
 	OnTurnComplete func(ctx context.Context, messages []types.Message)
+	HookExecutor   *hooks.HookExecutor
 }
 
 type CompactionResult struct {
@@ -126,16 +128,18 @@ type StreamingToolExecutor struct {
 	doneCount  int
 	toolCtx    *tools.ToolUseContext
 	canUseTool func(tool tools.Tool, input any) (types.PermissionResult, error)
+	hookExec   *hooks.HookExecutor
 	wg         sync.WaitGroup
 }
 
-func NewStreamingToolExecutor(toolCtx *tools.ToolUseContext, canUseTool func(tool tools.Tool, input any) (types.PermissionResult, error)) *StreamingToolExecutor {
+func NewStreamingToolExecutor(toolCtx *tools.ToolUseContext, canUseTool func(tool tools.Tool, input any) (types.PermissionResult, error), hookExec *hooks.HookExecutor) *StreamingToolExecutor {
 	return &StreamingToolExecutor{
 		pending:    make(map[string]*toolExecution),
 		results:    make(map[string]*toolExecutionResult),
 		resultsCh:  make(chan *toolExecutionResult, 128),
 		toolCtx:    toolCtx,
 		canUseTool: canUseTool,
+		hookExec:   hookExec,
 	}
 }
 
@@ -224,9 +228,27 @@ func (e *StreamingToolExecutor) executeTool(ctx context.Context, tool tools.Tool
 		}
 	}
 
+	if e.hookExec != nil {
+		if pre := e.hookExec.ExecutePreToolUseHooks(ctx, tool.Name(), inputToMap(input)); pre != nil && pre.PreventContinuation {
+			return &toolExecutionResult{
+				Message: &types.Message{
+					Role:       types.RoleTool,
+					Content:    "blocked by PreToolUse hook",
+					ToolCallID: toolUseID,
+					Timestamp:  time.Now().Unix(),
+				},
+				ToolUseID:   toolUseID,
+				ToolCallIdx: toolCallIndex,
+			}
+		}
+	}
+
 	toolResult, err := tool.Call(ctx, input, e.toolCtx, func(progress any) {})
 	if err != nil {
 		log.Printf("[Query] tool.Call error for %s: %v", tool.Name(), err)
+		if e.hookExec != nil {
+			e.hookExec.ExecutePostToolUseFailureHooks(ctx, tool.Name(), inputToMap(input), err.Error())
+		}
 		return &toolExecutionResult{
 			Message: &types.Message{
 				Role:       types.RoleTool,
@@ -238,6 +260,10 @@ func (e *StreamingToolExecutor) executeTool(ctx context.Context, tool tools.Tool
 			ToolUseID:   toolUseID,
 			ToolCallIdx: toolCallIndex,
 		}
+	}
+
+	if e.hookExec != nil {
+		e.hookExec.ExecutePostToolUseHooks(ctx, tool.Name(), inputToMap(input))
 	}
 
 	output := formatToolOutput(toolResult)
@@ -448,7 +474,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		var (
 			needsFollowUp        bool
 			stopReason           string
-			streamingExecutor    = NewStreamingToolExecutor(state.ToolUseContext, params.CanUseTool)
+			streamingExecutor    = NewStreamingToolExecutor(state.ToolUseContext, params.CanUseTool, deps.HookExecutor)
 			assistantBuffer      *types.Message
 			assistantHasAppended bool
 			firstStreamMsg       = true
@@ -645,7 +671,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 				deps.OnPhaseChange("tool_start", tool.Name(), input)
 			}
 
-			result := executeToolCall(ctx, tool, input, toolUseID, params.CanUseTool, state.ToolUseContext)
+			result := executeToolCall(ctx, tool, input, toolUseID, params.CanUseTool, state.ToolUseContext, deps.HookExecutor)
 
 			if deps.OnPhaseChange != nil {
 				status := "done"
@@ -738,7 +764,7 @@ func getLastToolCalls(messages []types.Message) []types.ToolCall {
 	return nil
 }
 
-func executeToolCall(ctx context.Context, tool tools.Tool, input any, toolUseID string, canUseTool func(tool tools.Tool, input any) (types.PermissionResult, error), toolCtx *tools.ToolUseContext) *toolExecutionResult {
+func executeToolCall(ctx context.Context, tool tools.Tool, input any, toolUseID string, canUseTool func(tool tools.Tool, input any) (types.PermissionResult, error), toolCtx *tools.ToolUseContext, hookExec *hooks.HookExecutor) *toolExecutionResult {
 	log.Printf("[Query] executeToolCall: tool='%s'", tool.Name())
 	if canUseTool != nil {
 		permResult, err := canUseTool(tool, input)
@@ -802,10 +828,27 @@ func executeToolCall(ctx context.Context, tool tools.Tool, input any, toolUseID 
 		}
 	}
 
+	if hookExec != nil {
+		if pre := hookExec.ExecutePreToolUseHooks(ctx, tool.Name(), inputToMap(input)); pre != nil && pre.PreventContinuation {
+			return &toolExecutionResult{
+				Message: &types.Message{
+					Role:       types.RoleTool,
+					Content:    "blocked by PreToolUse hook",
+					ToolCallID: toolUseID,
+					Timestamp:  time.Now().Unix(),
+				},
+				ToolUseID: toolUseID,
+			}
+		}
+	}
+
 	log.Printf("[Query] executeToolCall: calling tool.Call for '%s'...", tool.Name())
 	toolResult, err := tool.Call(ctx, input, toolCtx, func(progress any) {})
 	if err != nil {
 		log.Printf("[Query] executeToolCall tool.Call error for %s: %v", tool.Name(), err)
+		if hookExec != nil {
+			hookExec.ExecutePostToolUseFailureHooks(ctx, tool.Name(), inputToMap(input), err.Error())
+		}
 		return &toolExecutionResult{
 			Message: &types.Message{
 				Role:       types.RoleTool,
@@ -816,6 +859,10 @@ func executeToolCall(ctx context.Context, tool tools.Tool, input any, toolUseID 
 			Err:       err,
 			ToolUseID: toolUseID,
 		}
+	}
+
+	if hookExec != nil {
+		hookExec.ExecutePostToolUseHooks(ctx, tool.Name(), inputToMap(input))
 	}
 
 	output := formatToolOutput(toolResult)
@@ -830,6 +877,21 @@ func executeToolCall(ctx context.Context, tool tools.Tool, input any, toolUseID 
 		Result:    toolResult,
 		ToolUseID: toolUseID,
 	}
+}
+
+func inputToMap(input any) map[string]interface{} {
+	if input == nil {
+		return nil
+	}
+	data, err := json.Marshal(input)
+	if err != nil {
+		return nil
+	}
+	m := make(map[string]interface{})
+	if json.Unmarshal(data, &m) != nil {
+		return nil
+	}
+	return m
 }
 
 func formatToolOutput(result *tools.ToolResult) string {

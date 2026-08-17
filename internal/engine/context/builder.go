@@ -336,7 +336,7 @@ func (cb *ContextBuilder) GetMemoryEntrypointContent(ctx context.Context) string
 	if md == nil || !memdir.IsAutoMemoryEnabled() {
 		return ""
 	}
-	content, err := md.BuildMemoryPrompt(ctx)
+	content, err := md.LoadUnifiedMemoryPrompt(ctx)
 	if err != nil || content == "" {
 		return ""
 	}

@@ -119,7 +119,7 @@ In order to encourage learning, ask the human to contribute 2-10 line code piece
 Share one insight connecting their code to broader patterns or system effects. Avoid praise or repetition.
 
 ## Insights
-%s`, explanatoryFeaturePrompt, explanatoryFeaturePrompt),
+%s`, explanatoryFeaturePrompt),
 	},
 }
 
