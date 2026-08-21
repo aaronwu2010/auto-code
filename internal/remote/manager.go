@@ -6,7 +6,9 @@ package remote
 // TODO: Implement real remote session management with server-side permission proxy.
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -111,7 +113,53 @@ func (m *RemoteSessionManager) GetSessions() []*RemoteSession {
 }
 
 func (m *RemoteSessionManager) ProxyPermission(ctx context.Context, sessionID types.SessionID, toolName string, input any) (types.PermissionResult, error) {
-	return types.PermissionResult{Behavior: types.DecisionAllow}, nil
+	m.mu.RLock()
+	session, ok := m.sessions[string(sessionID)]
+	m.mu.RUnlock()
+
+	if !ok {
+		return types.PermissionResult{Behavior: types.DecisionAllow}, nil
+	}
+
+	if session.Status != StatusConnected {
+		return types.PermissionResult{Behavior: types.DecisionAllow}, nil
+	}
+
+	// 构造权限检查请求
+	reqBody := map[string]any{
+		"session_id": string(sessionID),
+		"tool_name":  toolName,
+		"input":      input,
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return types.PermissionResult{Behavior: types.DecisionAllow}, nil
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.url+"/api/permission/proxy", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return types.PermissionResult{Behavior: types.DecisionAllow}, nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := m.httpClient.Do(req)
+	if err != nil {
+		// 服务端不可用时，降级为允许（本地安全策略可覆盖）
+		return types.PermissionResult{Behavior: types.DecisionAllow}, nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return types.PermissionResult{Behavior: types.DecisionAllow}, nil
+	}
+
+	var result types.PermissionResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return types.PermissionResult{Behavior: types.DecisionAllow}, nil
+	}
+
+	return result, nil
 }
 
 func (m *RemoteSessionManager) setStatus(status ConnectionStatus) {

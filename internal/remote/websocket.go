@@ -1,16 +1,23 @@
 package remote
 
-// STUB IMPLEMENTATION: This file contains placeholder stubs for the WebSocket-based
-// remote session protocol. Connect() does not establish a real WebSocket connection,
-// Send() is a no-op, and listen() only waits for context cancellation.
-// TODO: Implement real WebSocket transport using gorilla/websocket or nhooyr/websocket.
-
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sync"
 	"sync/atomic"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
+
+const (
+	writeWait      = 10 * time.Second
+	readWait       = 60 * time.Second
+	pongWait       = 60 * time.Second
+	pingPeriod     = (pongWait * 9) / 10
+	maxMessageSize = 65536
 )
 
 type RemotePermissionResponse struct {
@@ -45,6 +52,11 @@ type SessionsWebSocket struct {
 	connected bool
 	callbacks SessionsWebSocketCallbacks
 	cancel    context.CancelFunc
+	conn      *websocket.Conn
+	writeMu   sync.Mutex
+	sendCh    chan []byte
+	doneCh    chan struct{}
+	wg        sync.WaitGroup
 }
 
 type SessionsWebSocketCallbacks struct {
@@ -58,34 +70,151 @@ func NewSessionsWebSocket(url string, callbacks SessionsWebSocketCallbacks) *Ses
 	return &SessionsWebSocket{
 		url:       url,
 		callbacks: callbacks,
+		sendCh:    make(chan []byte, 256),
+		doneCh:    make(chan struct{}),
 	}
 }
 
 func (ws *SessionsWebSocket) Connect(ctx context.Context) error {
-	ws.mu.Lock()
-	ws.connected = true
-	ws.mu.Unlock()
+	header := make(http.Header)
+	header.Set("User-Agent", "auto-code-remote-client/1.0")
 
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 10 * time.Second,
+	}
+
+	conn, resp, err := dialer.DialContext(ctx, ws.url, header)
+	if err != nil {
+		if ws.callbacks.OnError != nil {
+			ws.callbacks.OnError(err)
+		}
+		return fmt.Errorf("websocket dial failed: %w (http status: %v)", err, resp)
+	}
+
+	ws.mu.Lock()
+	ws.conn = conn
+	ws.connected = true
 	wsCtx, cancel := context.WithCancel(ctx)
 	ws.cancel = cancel
+	ws.mu.Unlock()
 
 	if ws.callbacks.OnOpen != nil {
 		ws.callbacks.OnOpen()
 	}
 
-	go ws.listen(wsCtx)
+	ws.wg.Add(2)
+	go ws.readPump(wsCtx)
+	go ws.writePump(wsCtx)
 
 	return nil
 }
 
-func (ws *SessionsWebSocket) listen(ctx context.Context) {
-	<-ctx.Done()
-	ws.mu.Lock()
-	ws.connected = false
-	ws.mu.Unlock()
+func (ws *SessionsWebSocket) readPump(ctx context.Context) {
+	defer ws.wg.Done()
+	defer func() {
+		ws.mu.Lock()
+		ws.connected = false
+		ws.mu.Unlock()
 
-	if ws.callbacks.OnClose != nil {
-		ws.callbacks.OnClose(nil)
+		if ws.callbacks.OnClose != nil {
+			ws.callbacks.OnClose(nil)
+		}
+	}()
+
+	ws.mu.RLock()
+	conn := ws.conn
+	ws.mu.RUnlock()
+	if conn == nil {
+		return
+	}
+
+	conn.SetReadLimit(maxMessageSize)
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+				if ws.callbacks.OnError != nil {
+					ws.callbacks.OnError(err)
+				}
+			}
+			return
+		}
+
+		if ws.callbacks.OnMessage != nil {
+			ws.callbacks.OnMessage(message)
+		}
+	}
+}
+
+func (ws *SessionsWebSocket) writePump(ctx context.Context) {
+	defer ws.wg.Done()
+
+	ticker := time.NewTicker(pingPeriod)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ws.doneCh:
+			return
+		case message, ok := <-ws.sendCh:
+			ws.writeMu.Lock()
+			ws.mu.RLock()
+			conn := ws.conn
+			ws.mu.RUnlock()
+			if conn == nil {
+				ws.writeMu.Unlock()
+				return
+			}
+
+			_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if !ok {
+				_ = conn.WriteMessage(websocket.CloseMessage, []byte{})
+				ws.writeMu.Unlock()
+				return
+			}
+
+			err := conn.WriteMessage(websocket.TextMessage, message)
+			ws.writeMu.Unlock()
+			if err != nil {
+				if ws.callbacks.OnError != nil {
+					ws.callbacks.OnError(err)
+				}
+				return
+			}
+		case <-ticker.C:
+			ws.writeMu.Lock()
+			ws.mu.RLock()
+			conn := ws.conn
+			ws.mu.RUnlock()
+			if conn == nil {
+				ws.writeMu.Unlock()
+				return
+			}
+
+			_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				ws.writeMu.Unlock()
+				if ws.callbacks.OnError != nil {
+					ws.callbacks.OnError(err)
+				}
+				return
+			}
+			ws.writeMu.Unlock()
+		}
 	}
 }
 
@@ -93,10 +222,19 @@ func (ws *SessionsWebSocket) Close() {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
 
+	ws.connected = false
 	if ws.cancel != nil {
 		ws.cancel()
+		ws.cancel = nil
 	}
-	ws.connected = false
+
+	if ws.conn != nil {
+		_ = ws.conn.Close()
+		ws.conn = nil
+	}
+
+	close(ws.doneCh)
+	ws.wg.Wait()
 }
 
 func (ws *SessionsWebSocket) IsConnected() bool {
@@ -113,6 +251,13 @@ func (ws *SessionsWebSocket) Send(data []byte) error {
 	if !connected {
 		return ErrNotConnected
 	}
+
+	select {
+	case ws.sendCh <- data:
+	default:
+		return fmt.Errorf("send buffer full (capacity: 256)")
+	}
+
 	return nil
 }
 

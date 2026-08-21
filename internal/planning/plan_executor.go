@@ -387,10 +387,44 @@ func (e *BasePlanExecutor) orderTasksByDependencies(plan *Plan) ([]*Task, error)
 }
 
 // shouldContinue 判断是否应该继续执行
+// 当任务失败时，检查 OnFailure 处理任务，执行它们以决定后续行为
+// 返回 true 表示继续执行计划，false 表示停止
 func (e *BasePlanExecutor) shouldContinue(plan *Plan, task *Task, result *ExecutionResult) bool {
-	// 如果任务有 OnFailure 处理，执行它
+	// 如果任务有 OnFailure 处理，执行它们
 	if len(task.OnFailure) > 0 {
-		// TODO: 执行失败处理任务
+		failureTasks := make([]*Task, 0, len(task.OnFailure))
+		for _, failureTaskID := range task.OnFailure {
+			for _, t := range plan.Tasks {
+				if t.ID == failureTaskID {
+					failureTasks = append(failureTasks, t)
+					break
+				}
+			}
+		}
+
+		// 执行所有失败处理任务
+		handlerSucceeded := false
+		for _, ft := range failureTasks {
+			handlerResult, handlerErr := e.taskExecutor(context.Background(), ft)
+			if handlerErr == nil && handlerResult != nil {
+				ft.Status = TaskStatusCompleted
+				ft.Result = handlerResult.Result
+				handlerSucceeded = true
+			} else {
+				ft.Status = TaskStatusFailed
+				if handlerErr != nil {
+					ft.Error = handlerErr.Error()
+				}
+			}
+		}
+
+		// 如果任何一个处理任务成功，认为可以继续
+		if handlerSucceeded {
+			return true
+		}
+
+		// 所有处理任务都失败，停止执行
+		return false
 	}
 
 	// 默认：失败任务停止计划执行

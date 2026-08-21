@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
 
 	"github.com/auto-code/auto-code/internal/auth"
 )
@@ -20,6 +21,10 @@ const (
 	closeStreamMsg       = `{"type":"CloseStream"}`
 	finalizeSafetyMS     = 5000
 	finalizeNoDataMS     = 1500
+	wsWriteTimeout       = 10 * time.Second
+	wsReadTimeout        = 30 * time.Second
+	wsMaxMessageSize     = 65536
+	wsPingInterval       = 25 * time.Second
 )
 
 type FinalizeSource string
@@ -142,7 +147,22 @@ func (c *VoiceStreamClient) ConnectVoiceStream(ctx context.Context, callbacks Vo
 
 	url := fmt.Sprintf("%s%s?%s", wsBaseURL, voiceStreamPath, strings.Join(params, "&"))
 
-	_ = url
+	// 建立 WebSocket 连接
+	header := make(http.Header)
+	header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	header.Set("User-Agent", "auto-code-voice-client/1.0")
+
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 15 * time.Second,
+	}
+
+	wsConn, resp, err := dialer.DialContext(ctx, url, header)
+	if err != nil {
+		if resp != nil {
+			return nil, fmt.Errorf("websocket dial failed (status %d): %w", resp.StatusCode, err)
+		}
+		return nil, fmt.Errorf("websocket dial failed: %w", err)
+	}
 
 	conn := &VoiceStreamConnection{}
 
@@ -150,13 +170,31 @@ func (c *VoiceStreamClient) ConnectVoiceStream(ctx context.Context, callbacks Vo
 	var finalizing bool
 	var lastTranscriptText string
 	var resolveFinalize func(source FinalizeSource)
+	var wsMu sync.Mutex
+	var wsWriteMu sync.Mutex
+	var wsDone chan struct{}
 
+	wsDone = make(chan struct{})
+
+	// 发送音频数据
 	conn.send = func(audioChunk []byte) {
-		if finalized {
+		wsMu.Lock()
+		if finalized || wsConn == nil {
+			wsMu.Unlock()
 			return
 		}
+		wsMu.Unlock()
+
+		wsWriteMu.Lock()
+		defer wsWriteMu.Unlock()
+		if finalized || wsConn == nil {
+			return
+		}
+		_ = wsConn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
+		_ = wsConn.WriteMessage(websocket.BinaryMessage, audioChunk)
 	}
 
+	// 结束流
 	conn.finalize = func() FinalizeSource {
 		if finalizing || finalized {
 			return FinalizeWSAlreadyClosed
@@ -177,6 +215,14 @@ func (c *VoiceStreamClient) ConnectVoiceStream(ctx context.Context, callbacks Vo
 			}
 		}
 
+		// 发送关闭消息
+		wsWriteMu.Lock()
+		if wsConn != nil {
+			_ = wsConn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
+			_ = wsConn.WriteMessage(websocket.TextMessage, []byte(closeStreamMsg))
+		}
+		wsWriteMu.Unlock()
+
 		finalized = true
 
 		go func() {
@@ -184,41 +230,95 @@ func (c *VoiceStreamClient) ConnectVoiceStream(ctx context.Context, callbacks Vo
 			case source := <-resolveCh:
 				_ = source
 			case <-safetyTimer.C:
+				resolveFinalize(FinalizeSafetyTimeout)
 			case <-noDataTimer.C:
+				resolveFinalize(FinalizeNoDataTimeout)
 			}
 		}()
 
 		return <-resolveCh
 	}
 
+	// 关闭连接
 	conn.close = func() {
+		wsMu.Lock()
+		defer wsMu.Unlock()
 		finalized = true
+		if wsConn != nil {
+			_ = wsConn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
+			_ = wsConn.WriteMessage(websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseNormalClosure, "client closing"))
+			_ = wsConn.Close()
+		}
+		wsConn = nil
 	}
 
+	// 检查连接状态
 	conn.isConnected = func() bool {
-		return !finalized
+		wsMu.Lock()
+		defer wsMu.Unlock()
+		return !finalized && wsConn != nil
 	}
 
+	// 读取 WebSocket 消息
 	go func() {
+		defer close(wsDone)
+		defer func() {
+			wsMu.Lock()
+			wsConn = nil
+			wsMu.Unlock()
+
+			if callbacks.OnClose != nil {
+				callbacks.OnClose()
+			}
+		}()
+
+		_ = wsConn.SetReadDeadline(time.Now().Add(wsReadTimeout))
+		wsConn.SetPongHandler(func(string) error {
+			_ = wsConn.SetReadDeadline(time.Now().Add(wsReadTimeout))
+			return nil
+		})
+
+		// 心跳 goroutine
+		go func() {
+			ticker := time.NewTicker(wsPingInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-wsDone:
+					return
+				case <-ticker.C:
+					wsWriteMu.Lock()
+					if wsConn != nil {
+						_ = wsConn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
+						_ = wsConn.WriteMessage(websocket.PingMessage, nil)
+					}
+					wsWriteMu.Unlock()
+				}
+			}
+		}()
+
 		for {
 			select {
 			case <-ctx.Done():
-				if callbacks.OnClose != nil {
-					callbacks.OnClose()
-				}
 				return
 			default:
 			}
 
-			msg, err := readMockMessage(ctx)
+			wsConn.SetReadLimit(wsMaxMessageSize)
+			_, rawMsg, err := wsConn.ReadMessage()
 			if err != nil {
-				if callbacks.OnError != nil {
-					callbacks.OnError(err.Error(), false)
-				}
-				if callbacks.OnClose != nil {
-					callbacks.OnClose()
+				if !finalized {
+					if callbacks.OnError != nil {
+						callbacks.OnError(err.Error(), true)
+					}
 				}
 				return
+			}
+
+			msg, err := parseVoiceStreamMessage(rawMsg)
+			if err != nil {
+				continue
 			}
 
 			switch msg.Type {
@@ -270,11 +370,6 @@ func (c *VoiceStreamClient) ConnectVoiceStream(ctx context.Context, callbacks Vo
 	return conn, nil
 }
 
-func readMockMessage(ctx context.Context) (*voiceStreamMessage, error) {
-	<-ctx.Done()
-	return nil, ctx.Err()
-}
-
 type VoiceStreamOptions struct {
 	Language string
 	Keyterms []string
@@ -286,14 +381,4 @@ func parseVoiceStreamMessage(data []byte) (*voiceStreamMessage, error) {
 		return nil, err
 	}
 	return &msg, nil
-}
-
-func (c *VoiceStreamClient) SendKeepalive(w io.Writer) error {
-	_, err := w.Write([]byte(keepaliveMsg))
-	return err
-}
-
-func (c *VoiceStreamClient) SendCloseStream(w io.Writer) error {
-	_, err := w.Write([]byte(closeStreamMsg))
-	return err
 }
