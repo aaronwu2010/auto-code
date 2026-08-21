@@ -78,12 +78,15 @@ func (cb *ContextBuilder) fetchGitStatus(_ context.Context) (string, error) {
 	cmd.Dir = cb.cwd
 	output, err := cmd.Output()
 	if err != nil {
-		return "", nil
+		return "", err
 	}
 
 	branchCmd := executil.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
 	branchCmd.Dir = cb.cwd
-	branch, _ := branchCmd.Output()
+	branch, branchErr := branchCmd.Output()
+	if branchErr != nil {
+		return "", branchErr
+	}
 
 	result := fmt.Sprintf("Branch: %s\n%s", strings.TrimSpace(string(branch)), string(output))
 	return result, nil
@@ -142,7 +145,7 @@ func (cb *ContextBuilder) LoadMemoryFiles(ctx context.Context) error {
 		{filepath.Join(string(os.PathSeparator), "etc", "auto-code", "CLAUDE.md"), "Managed"},
 	}
 	if homeDir != "" {
-		sources = append(sources, claudeMdSource{filepath.Join(homeDir, ".auto", "CLAUDE.md"), "User"})
+		sources = append(sources, claudeMdSource{filepath.Join(homeDir, ".auto-code", "CLAUDE.md"), "User"})
 	}
 	if cb.cwd != "" {
 		sources = append(sources,

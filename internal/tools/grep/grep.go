@@ -201,7 +201,6 @@ func grepSearch(root string, pattern *regexp.Regexp, includePattern *regexp.Rege
 		if err != nil {
 			return nil
 		}
-		defer file.Close()
 
 		scanner := bufio.NewScanner(file)
 		lineNum := 0
@@ -222,10 +221,17 @@ func grepSearch(root string, pattern *regexp.Regexp, includePattern *regexp.Rege
 				})
 
 				if len(matches) >= limit {
+					_ = file.Close()
 					truncated = true
 					return fmt.Errorf("limit reached")
 				}
 			}
+		}
+
+		// 显式关闭，避免 defer 在 WalkDir 回调中累积导致文件描述符泄漏
+		_ = file.Close()
+		if err := scanner.Err(); err != nil {
+			return nil
 		}
 
 		return nil

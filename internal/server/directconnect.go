@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/auto-code/auto-code/internal/types"
 )
@@ -45,7 +46,10 @@ func (s *DirectConnectServer) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/health", s.handleHealth)
 
 	s.server = &http.Server{
-		Handler: mux,
+		Handler:      mux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", s.port))

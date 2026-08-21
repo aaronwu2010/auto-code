@@ -5,9 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -371,7 +371,7 @@ func (m *BaseLongTermMemory) GetStats(ctx context.Context) (*MemoryStats, error)
 
 	if stats.TotalItems > 0 {
 		stats.AverageAccess = float64(stats.TotalAccessCount) / float64(stats.TotalItems)
-		stats.AverageSize = stats.TotalSize / stats.TotalItems
+		stats.AverageSize = int64(float64(stats.TotalSize) / float64(stats.TotalItems))
 	}
 
 	// 缓存统计
@@ -563,36 +563,30 @@ func (m *BaseLongTermMemory) saveItemNoLock(item *MemoryItem) error {
 	return os.WriteFile(filePath, data, 0644)
 }
 
-// sortResults 排序结果
+// sortResults 使用 sort.Slice 高效排序
 func (m *BaseLongTermMemory) sortResults(results []*MemoryItem, query *MemoryQuery) {
 	if len(results) <= 1 {
 		return
 	}
 
-	// 简单的排序实现
-	for i := 0; i < len(results)-1; i++ {
-		for j := 0; j < len(results)-i-1; j++ {
-			shouldSwap := false
-			switch query.SortBy {
-			case "importance":
-				shouldSwap = results[j].Importance < results[j+1].Importance
-			case "access_count":
-				shouldSwap = results[j].AccessCount < results[j+1].AccessCount
-			case "created_at":
-				shouldSwap = results[j].CreatedAt.After(results[j+1].CreatedAt)
-			default:
-				shouldSwap = results[j].CreatedAt.After(results[j+1].CreatedAt)
-			}
-
-			if query.SortDesc {
-				shouldSwap = !shouldSwap
-			}
-
-			if shouldSwap {
-				results[j], results[j+1] = results[j+1], results[j]
-			}
+	sort.Slice(results, func(i, j int) bool {
+		var less bool
+		switch query.SortBy {
+		case "importance":
+			less = results[i].Importance > results[j].Importance
+		case "access_count":
+			less = results[i].AccessCount > results[j].AccessCount
+		case "created_at":
+			less = results[i].CreatedAt.Before(results[j].CreatedAt)
+		default:
+			less = results[i].CreatedAt.Before(results[j].CreatedAt)
 		}
-	}
+
+		if query.SortDesc {
+			less = !less
+		}
+		return less
+	})
 }
 
 // logOperation 记录操作日志

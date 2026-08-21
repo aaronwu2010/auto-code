@@ -101,6 +101,20 @@ func (t *HTTPTransport) SendNotification(_ context.Context, notif *JSONRPCNotifi
 	}
 	defer resp.Body.Close()
 
+	// 必须消费掉响应体，否则底层连接无法复用
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return fmt.Errorf("read notification response: %w", readErr)
+	}
+
+	// 非 2xx 都视为失败，避免"通知静默丢失"
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		truncated := string(body)
+		if len(truncated) > 512 {
+			truncated = truncated[:512] + "..."
+		}
+		return fmt.Errorf("notification rejected by server with status %d: %s", resp.StatusCode, truncated)
+	}
 	return nil
 }
 

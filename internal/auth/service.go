@@ -107,7 +107,9 @@ func (s *OAuthService) RefreshTokens(ctx context.Context) (*OAuthTokens, error) 
 		tokens.RefreshToken = stored.RefreshToken
 	}
 
-	_ = s.client.StoreTokens(tokens)
+	if err := s.client.StoreTokens(tokens); err != nil {
+		return nil, fmt.Errorf("store refreshed tokens: %w", err)
+	}
 
 	return tokens, nil
 }

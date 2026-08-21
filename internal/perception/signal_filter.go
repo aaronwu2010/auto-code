@@ -238,10 +238,11 @@ func (f *BaseSignalFilter) getSortedRules() []*FilterRule {
 	sorted := make([]*FilterRule, len(f.rules))
 	copy(sorted, f.rules)
 
-	// 按优先级排序（高优先级先执行）
-	// 使用简单的冒泡排序
+	// 按优先级从高到低排序（高优先级先执行）
+	// 使用冒泡排序
 	for i := 0; i < len(sorted)-1; i++ {
 		for j := 0; j < len(sorted)-i-1; j++ {
+			// 注意：Priority 值越大优先级越高，所以大的应排在前面
 			if sorted[j].Priority < sorted[j+1].Priority {
 				sorted[j], sorted[j+1] = sorted[j+1], sorted[j]
 			}

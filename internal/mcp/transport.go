@@ -31,6 +31,8 @@ type StdioTransport struct {
 	onNotif func(*JSONRPCNotification)
 	closed  bool
 	closeCh chan struct{}
+	// readDone 用于等待 readLoop goroutine 退出
+	readDone chan struct{}
 }
 
 func NewStdioTransport(command string, args []string, env map[string]string) (*StdioTransport, error) {
@@ -59,12 +61,13 @@ func NewStdioTransport(command string, args []string, env map[string]string) (*S
 	}
 
 	t := &StdioTransport{
-		cmd:     cmd,
-		stdin:   stdinPipe,
-		stdout:  bufio.NewScanner(stdoutPipe),
-		stderr:  stderrPipe,
-		pending: make(map[any]chan *JSONRPCResponse),
-		closeCh: make(chan struct{}),
+		cmd:      cmd,
+		stdin:    stdinPipe,
+		stdout:   bufio.NewScanner(stdoutPipe),
+		stderr:   stderrPipe,
+		pending:  make(map[any]chan *JSONRPCResponse),
+		closeCh:  make(chan struct{}),
+		readDone: make(chan struct{}),
 	}
 
 	go t.readLoop()
@@ -153,6 +156,9 @@ func (t *StdioTransport) Close() error {
 	_ = t.cmd.Process.Kill()
 	_ = t.cmd.Wait()
 
+	// 等待 readLoop goroutine 退出，避免泄漏
+	<-t.readDone
+
 	return nil
 }
 
@@ -163,6 +169,8 @@ func (t *StdioTransport) OnNotification(handler func(*JSONRPCNotification)) {
 }
 
 func (t *StdioTransport) readLoop() {
+	defer close(t.readDone)
+
 	t.stdout.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 
 	for t.stdout.Scan() {
@@ -200,25 +208,32 @@ type InProcessTransport struct {
 	closed  bool
 	onNotif func(*JSONRPCNotification)
 	onMsg   func(*JSONRPCResponse)
+	// responseChans 存储等待响应的请求
+	responseChans map[any]chan *JSONRPCResponse
 }
 
 func NewInProcessTransportPair() (*InProcessTransport, *InProcessTransport) {
-	a := &InProcessTransport{}
-	b := &InProcessTransport{}
+	a := &InProcessTransport{responseChans: make(map[any]chan *JSONRPCResponse)}
+	b := &InProcessTransport{responseChans: make(map[any]chan *JSONRPCResponse)}
 	a.peer = b
 	b.peer = a
 	return a, b
 }
 
-func (t *InProcessTransport) Send(_ context.Context, msg *JSONRPCRequest) (*JSONRPCResponse, error) {
+func (t *InProcessTransport) Send(ctx context.Context, msg *JSONRPCRequest) (*JSONRPCResponse, error) {
 	t.mu.Lock()
 	if t.closed || t.peer == nil {
 		t.mu.Unlock()
 		return nil, fmt.Errorf("transport closed")
 	}
+
+	ch := make(chan *JSONRPCResponse, 1)
+	t.responseChans[msg.ID] = ch
 	peer := t.peer
 	t.mu.Unlock()
 
+	// 将请求转发给 peer 的 onMsg 处理器
+	// peer 的 onMsg 处理器应调用 t.SendResponse(id, resp) 来返回响应
 	if peer.onMsg != nil {
 		peer.onMsg(&JSONRPCResponse{
 			JSONRPC: JSONRPCVersion,
@@ -227,11 +242,26 @@ func (t *InProcessTransport) Send(_ context.Context, msg *JSONRPCRequest) (*JSON
 		})
 	}
 
-	return &JSONRPCResponse{
-		JSONRPC: JSONRPCVersion,
-		ID:      msg.ID,
-		Result:  struct{}{},
-	}, nil
+	// 等待 peer 通过 SendResponse 返回实际响应
+	select {
+	case <-ctx.Done():
+		t.mu.Lock()
+		delete(t.responseChans, msg.ID)
+		t.mu.Unlock()
+		return nil, ctx.Err()
+	case resp := <-ch:
+		return resp, nil
+	}
+}
+
+// SendResponse 由 peer 的 onMsg 处理器调用，用于将响应路由回请求方
+func (t *InProcessTransport) SendResponse(id any, resp *JSONRPCResponse) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if ch, ok := t.responseChans[id]; ok {
+		ch <- resp
+		delete(t.responseChans, id)
+	}
 }
 
 func (t *InProcessTransport) SendNotification(_ context.Context, notif *JSONRPCNotification) error {

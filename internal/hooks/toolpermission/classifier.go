@@ -74,7 +74,14 @@ func (c *ToolClassifier) Classify(ctx context.Context, toolName string, toolInpu
 		}, nil
 	}
 
-	inputJSON, _ := json.MarshalIndent(toolInput, "", "  ")
+	inputJSON, err := json.MarshalIndent(toolInput, "", "  ")
+	if err != nil {
+		return ClassifierResult{
+			Decision:   PermissionAsk,
+			Confidence: 0,
+			Reason:     fmt.Sprintf("failed to marshal tool input: %v", err),
+		}, nil
+	}
 
 	prompt := fmt.Sprintf(`%s
 

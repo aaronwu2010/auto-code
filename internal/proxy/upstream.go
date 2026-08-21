@@ -7,12 +7,14 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"sync"
+	"time"
 )
 
 type UpstreamProxy struct {
 	mu       sync.RWMutex
 	target   *url.URL
 	proxy    *httputil.ReverseProxy
+	client   *http.Client
 	enabled  bool
 }
 
@@ -25,6 +27,7 @@ func NewUpstreamProxy(targetURL string) (*UpstreamProxy, error) {
 	return &UpstreamProxy{
 		target:  target,
 		proxy:   httputil.NewSingleHostReverseProxy(target),
+		client:  &http.Client{Timeout: 30 * time.Second},
 		enabled: true,
 	}, nil
 }
@@ -44,13 +47,15 @@ func (p *UpstreamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (p *UpstreamProxy) Relay(ctx context.Context, req *http.Request) (*http.Response, error) {
 	p.mu.RLock()
-	defer p.mu.RUnlock()
+	client := p.client
+	enabled := p.enabled
+	p.mu.RUnlock()
 
-	if !p.enabled {
+	if !enabled {
 		return nil, fmt.Errorf("proxy disabled")
 	}
 
-	return http.DefaultClient.Do(req.WithContext(ctx))
+	return client.Do(req.WithContext(ctx))
 }
 
 func (p *UpstreamProxy) Enable() {

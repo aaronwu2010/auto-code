@@ -72,7 +72,7 @@ func BuildCollapseSummary(collapsedTurns []CollapsedTurn) string {
 	var sb strings.Builder
 	sb.WriteString("=== Earlier Conversation Summary (Context Collapse) ===\n\n")
 
-	for i, turn := range collapsedTurns {
+	for _, turn := range collapsedTurns {
 		sb.WriteString(fmt.Sprintf("--- Turn %d ---\n", turn.TurnIndex))
 		if turn.UserSummary != "" {
 			sb.WriteString(fmt.Sprintf("User asked: %s\n", turn.UserSummary))
@@ -92,7 +92,6 @@ func BuildCollapseSummary(collapsedTurns []CollapsedTurn) string {
 			sb.WriteString(fmt.Sprintf("Outcome: %s\n", turn.Conclusion))
 		}
 		sb.WriteString("\n")
-		_ = i
 	}
 
 	sb.WriteString("=== End of Summary ===\n\n")

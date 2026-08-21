@@ -159,6 +159,15 @@ func (t *WebFetchTool) Call(ctx context.Context, input any, toolCtx *tools.ToolU
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
+	// 对非 2xx 状态码返回明确的错误信息，避免模型误判页面内容
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		truncated := string(body)
+		if len(truncated) > 512 {
+			truncated = truncated[:512] + "..."
+		}
+		return nil, fmt.Errorf("HTTP %d for %s: %s", resp.StatusCode, url, truncated)
+	}
+
 	truncated := len(body) > maxResponseSize
 	if truncated {
 		body = body[:maxResponseSize]

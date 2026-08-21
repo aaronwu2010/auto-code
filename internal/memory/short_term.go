@@ -113,6 +113,7 @@ func (m *BaseShortTermMemory) Retrieve(ctx context.Context, query *MemoryQuery) 
 
 // Get 获取单个记忆项
 func (m *BaseShortTermMemory) Get(ctx context.Context, id string) (*MemoryItem, error) {
+	// 使用 Lock 而非 RLock，因为 Touch() 会修改 item 状态
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

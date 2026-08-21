@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -32,14 +33,15 @@ func (c *DoctorCommand) Execute(_ context.Context, _ *clitypes.CommandContext) (
 	if gitPath, err := exec.LookPath("git"); err == nil {
 		cmd := executil.Command(gitPath, "--version")
 		if output, err := cmd.Output(); err == nil {
-			sb.WriteString(fmt.Sprintf("  Git: %s", string(output)))
+			sb.WriteString(fmt.Sprintf("  Git: %s\n", string(output)))
 		}
 	} else {
 		sb.WriteString("  Git: not found\n")
 	}
 
 	home, _ := os.UserHomeDir()
-	configDir := home + "/.autocode"
+	// 与 ConfigManager 保持一致：配置存储于 ~/.auto-code/config.json
+	configDir := filepath.Join(home, ".auto-code")
 	if info, err := os.Stat(configDir); err == nil && info.IsDir() {
 		sb.WriteString(fmt.Sprintf("  Config: %s (exists)\n", configDir))
 	} else {

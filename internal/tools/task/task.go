@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/auto-code/auto-code/internal/tools"
@@ -21,7 +22,8 @@ const (
 )
 
 var (
-	taskStore sync.Map
+	taskStore   sync.Map
+	taskIDCount int64
 )
 
 type TaskCreateInput struct {
@@ -181,7 +183,7 @@ func (t *TaskCreateTool) Call(ctx context.Context, input any, toolCtx *tools.Too
 	default:
 		return nil, fmt.Errorf("invalid input type for TaskCreateTool: expected TaskCreateInput or map[string]any, got %T", input)
 	}
-	taskID := fmt.Sprintf("task_%d", time.Now().UnixNano())
+	taskID := fmt.Sprintf("task_%d_%d", time.Now().UnixNano(), atomic.AddInt64(&taskIDCount, 1))
 	task := &TaskData{
 		TaskID:      taskID,
 		Title:       inp.Title,
@@ -283,7 +285,10 @@ func (t *TaskStopTool) Call(ctx context.Context, input any, toolCtx *tools.ToolU
 	if !ok {
 		return &tools.ToolResult{Data: fmt.Sprintf("Task not found: %s", inp.TaskID)}, nil
 	}
-	task := val.(*TaskData)
+	task, ok := val.(*TaskData)
+	if !ok {
+		return &tools.ToolResult{Data: "Task data corruption"}, nil
+	}
 	task.Status = "stopped"
 	task.UpdatedAt = time.Now()
 	taskStore.Store(inp.TaskID, task)
@@ -312,7 +317,10 @@ func (t *TaskUpdateTool) Call(ctx context.Context, input any, toolCtx *tools.Too
 	if !ok {
 		return &tools.ToolResult{Data: fmt.Sprintf("Task not found: %s", inp.TaskID)}, nil
 	}
-	task := val.(*TaskData)
+	task, ok := val.(*TaskData)
+	if !ok {
+		return &tools.ToolResult{Data: "Task data corruption"}, nil
+	}
 	if inp.Title != "" {
 		task.Title = inp.Title
 	}

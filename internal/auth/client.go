@@ -106,7 +106,10 @@ func (c *OAuthClient) ExchangeCodeForTokens(ctx context.Context, code, state, co
 		"client_id":     c.config.ClientID,
 	}
 
-	data, _ := json.Marshal(body)
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal token request: %w", err)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.config.TokenURL, bytes.NewReader(data))
 	if err != nil {
@@ -144,7 +147,10 @@ func (c *OAuthClient) RefreshOAuthToken(ctx context.Context, refreshToken string
 		"client_id":     c.config.ClientID,
 	}
 
-	data, _ := json.Marshal(body)
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal refresh request: %w", err)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.config.TokenURL, bytes.NewReader(data))
 	if err != nil {
@@ -378,7 +384,7 @@ type TokenStore struct {
 func NewTokenStore() *TokenStore {
 	homeDir, _ := os.UserHomeDir()
 	return &TokenStore{
-		dir: filepath.Join(homeDir, ".auto"),
+		dir: filepath.Join(homeDir, ".auto-code"),
 	}
 }
 

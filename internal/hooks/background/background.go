@@ -34,12 +34,13 @@ const (
 )
 
 type BackgroundTaskManager struct {
-	mu    sync.RWMutex
-	tasks []*BackgroundTask
+	mu        sync.RWMutex
+	tasks     []*BackgroundTask
+	cursorIdx int // 当前导航位置，-1 表示未选择
 }
 
 func NewBackgroundTaskManager() *BackgroundTaskManager {
-	return &BackgroundTaskManager{}
+	return &BackgroundTaskManager{cursorIdx: -1}
 }
 
 func (m *BackgroundTaskManager) AddTask(task *BackgroundTask) {
@@ -57,20 +58,30 @@ func (m *BackgroundTaskManager) GetTasks() []*BackgroundTask {
 }
 
 func (m *BackgroundTaskManager) Navigate(dir TaskNavigationDirection) *BackgroundTask {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	if len(m.tasks) == 0 {
 		return nil
 	}
 
+	// 初始化 cursor
+	if m.cursorIdx < 0 || m.cursorIdx >= len(m.tasks) {
+		m.cursorIdx = len(m.tasks) - 1
+		return m.tasks[m.cursorIdx]
+	}
+
 	switch dir {
 	case NavigationUp:
-		return m.tasks[len(m.tasks)-1]
+		if m.cursorIdx > 0 {
+			m.cursorIdx--
+		}
 	case NavigationDown:
-		return m.tasks[0]
+		if m.cursorIdx < len(m.tasks)-1 {
+			m.cursorIdx++
+		}
 	}
-	return nil
+	return m.tasks[m.cursorIdx]
 }
 
 func (m *BackgroundTaskManager) UpdateTaskStatus(id string, status TaskStatus) {

@@ -121,7 +121,9 @@ func (r *ToolRegistry) Register(tool tools.Tool) {
 }
 
 func (r *ToolRegistry) GetAllBaseTools() []tools.Tool {
-	return r.baseTools
+	result := make([]tools.Tool, len(r.baseTools))
+	copy(result, r.baseTools)
+	return result
 }
 
 func (r *ToolRegistry) GetTools(permissionCtx types.ToolPermissionContext) []tools.Tool {

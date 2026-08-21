@@ -71,16 +71,50 @@ func MicrocompactMessages(messages []CompactMessage) MicrocompactResult {
 	}
 
 	var totalBefore, totalAfter int
-	var kept []CompactMessage
+	kept := make([]CompactMessage, 0, len(messages))
+	// mustKeep[i] = true 表示必须保留该索引消息（用于 assistant<->tool 配对）
+	mustKeep := make([]bool, len(messages))
 
-	for _, msg := range messages {
+	// 1) 第一遍：为每条 tool 消息标记前一个 assistant 为必须保留（配对），并标记 tool 自身
+	hasToolOrAssistant := false
+	for i, msg := range messages {
 		tokens := EstimateMessageTokens(msg.Content)
 		totalBefore += tokens
 
-		if msg.Role == "system" || (msg.Role == "user" && msg.IsLatest) || msg.Role == "tool" {
-			kept = append(kept, msg)
-			totalAfter += tokens
+		if msg.Role == "tool" {
+			mustKeep[i] = true
+			hasToolOrAssistant = true
+			// 向前找最近的 assistant（发起方）
+			for j := i - 1; j >= 0; j-- {
+				if messages[j].Role == "assistant" {
+					mustKeep[j] = true
+					hasToolOrAssistant = true
+					break
+				}
+			}
+		}
+		if msg.Role == "assistant" {
+			hasToolOrAssistant = true
+		}
+	}
+
+	// 2) 第二遍：按规则保留消息
+	for i, msg := range messages {
+		tokens := EstimateMessageTokens(msg.Content)
+		shouldKeep := false
+		if msg.Role == "system" || (msg.Role == "user" && msg.IsLatest) {
+			shouldKeep = true
+		} else if mustKeep[i] {
+			shouldKeep = true
 		} else if strings.TrimSpace(msg.Content) != "" {
+			shouldKeep = true
+		}
+		// 有 tool/assistant 链时，过滤掉孤立的无内容 assistant（无 tool_calls 且无内容）
+		if hasToolOrAssistant && msg.Role == "assistant" &&
+			strings.TrimSpace(msg.Content) == "" && !mustKeep[i] {
+			shouldKeep = false
+		}
+		if shouldKeep {
 			kept = append(kept, msg)
 			totalAfter += tokens
 		}

@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -75,7 +76,9 @@ func (c *GlobalConfig) load() {
 	if err != nil {
 		return
 	}
-	json.Unmarshal(data, &c.data)
+	if err := json.Unmarshal(data, &c.data); err != nil {
+		log.Printf("[GlobalConfig] failed to parse config file %s: %v", c.path, err)
+	}
 }
 
 func (c *GlobalConfig) save() error {

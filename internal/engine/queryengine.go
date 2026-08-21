@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/auto-code/auto-code/internal/api"
@@ -365,7 +368,6 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 		qe.appState.SetStatusLineText(mainStatusText)
 	}()
 
-	var lastAssistantContent string
 	var lastError error
 	var assistantAccum string
 	var assistantThinkingAccum string
@@ -373,18 +375,18 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 	for output := range outputCh {
 		select {
 		case <-runCtx.Done():
-			return lastAssistantContent, runCtx.Err()
+			return assistantAccum, runCtx.Err()
 		default:
 		}
 
 		switch output.Type {
 		case "assistant":
 			if output.Message != nil {
-				lastAssistantContent += output.Message.Content
 				assistantAccum += output.Message.Content
 				assistantThinkingAccum += output.Message.Thinking
+				// ToolCalls 采用追加语义：流式模型分多次传递时需要累加
 				if len(output.Message.ToolCalls) > 0 {
-					toolCallsAccum = output.Message.ToolCalls
+					toolCallsAccum = append(toolCallsAccum, output.Message.ToolCalls...)
 				}
 			}
 		case "stream_event":
@@ -403,7 +405,7 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 			if onProgress != nil {
 				onProgress("Sub-agent completed successfully")
 			}
-			return lastAssistantContent, nil
+			return assistantAccum, nil
 		case "error":
 			lastError = output.Error
 			log.Printf("[SubAgent] query output error: %v", output.Error)
@@ -412,16 +414,16 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 			}
 		case "interrupted":
 			log.Printf("[SubAgent] interrupted")
-			return lastAssistantContent, runCtx.Err()
+			return assistantAccum, runCtx.Err()
 		}
 	}
 
 	if lastError != nil {
 		log.Printf("[SubAgent] ended with error: %v", lastError)
-		return lastAssistantContent, lastError
+		return assistantAccum, lastError
 	}
 
-	return lastAssistantContent, nil
+	return assistantAccum, nil
 }
 
 func truncateString(s string, maxLen int) string {
@@ -738,6 +740,12 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		outputCh := query.Query(submitCtx, queryParams, deps)
 		log.Printf("[Engine] SubmitMessage: query.Query started, processing outputs")
 
+		// 使用 defer 确保任何退出路径（含 outputCh 异常关闭）都能清理 UI 状态
+		defer func() {
+			qe.appState.SetCurrentToolUse(nil)
+			qe.appState.SetStatusLineText("")
+		}()
+
 		outputCount := 0
 		for output := range outputCh {
 			outputCount++
@@ -748,8 +756,6 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 
 			if output.Type == "terminal" || output.Type == "error" || output.Type == "interrupted" {
 				log.Printf("[Engine] conversation ended: %s, outputs=%d", output.Type, outputCount)
-				qe.appState.SetCurrentToolUse(nil)
-				qe.appState.SetStatusLineText("")
 				return
 			}
 		}
@@ -1504,13 +1510,58 @@ func (qe *QueryEngine) getMessagesAfterCompactBoundary() []types.Message {
 	qe.mu.RLock()
 	defer qe.mu.RUnlock()
 
+	if len(qe.messages) == 0 {
+		return nil
+	}
+
+	// 先找到最后一条非 meta User 的索引（若找不到则从 0 开始）
+	lastNonMetaUserIdx := -1
 	for i := len(qe.messages) - 1; i >= 0; i-- {
-		if qe.messages[i].IsMeta {
-			return qe.messages[i:]
+		if qe.messages[i].Role == types.RoleUser && !qe.messages[i].IsMeta {
+			lastNonMetaUserIdx = i
+			break
+		}
+	}
+	startIdx := 0
+	if lastNonMetaUserIdx >= 0 {
+		startIdx = lastNonMetaUserIdx
+	}
+
+	// 必须保留的索引集合
+	keepIdx := make(map[int]struct{})
+
+	// 1. 始终保留所有 System 消息和所有 IsMeta 消息（user-context / perception / active-recall / 压缩摘要等注入信息）
+	for i := range qe.messages {
+		if qe.messages[i].Role == types.RoleSystem || qe.messages[i].IsMeta {
+			keepIdx[i] = struct{}{}
 		}
 	}
 
-	return qe.messages
+	// 2. 最后一个非 meta user 及其之后的所有消息（当前轮次上下文）
+	for i := startIdx; i < len(qe.messages); i++ {
+		keepIdx[i] = struct{}{}
+	}
+
+	// 3. 为落在保留区域里的 tool 消息向前找最近的 assistant 发起者（避免 tool_call_id 孤儿）
+	for i := startIdx; i < len(qe.messages); i++ {
+		if qe.messages[i].Role == types.RoleTool {
+			for j := i - 1; j >= 0; j-- {
+				if qe.messages[j].Role == types.RoleAssistant {
+					keepIdx[j] = struct{}{}
+					break
+				}
+			}
+		}
+	}
+
+	// 保持原顺序输出
+	result := make([]types.Message, 0, len(keepIdx))
+	for i := range qe.messages {
+		if _, ok := keepIdx[i]; ok {
+			result = append(result, qe.messages[i])
+		}
+	}
+	return result
 }
 
 func (qe *QueryEngine) getConfig() *QueryEngineConfig {
@@ -1858,6 +1909,16 @@ func generateSessionID() types.SessionID {
 	return types.SessionID("session-" + time.Now().Format("20060102150405"))
 }
 
+// msgIDCounter 用于 generateMessageID 在同一纳秒内单调递增
+var msgIDCounter uint64
+
 func generateMessageID() string {
-	return fmt.Sprintf("msg-%d", time.Now().UnixNano())
+	// 组合：时间戳(ns) + 原子自增计数 + 4字节随机后缀，避免高并发下 ID 冲突
+	nano := time.Now().UnixNano()
+	cnt := atomic.AddUint64(&msgIDCounter, 1)
+	var randBuf [4]byte
+	if _, err := rand.Read(randBuf[:]); err != nil {
+		binary.LittleEndian.PutUint32(randBuf[:], uint32(cnt))
+	}
+	return fmt.Sprintf("msg-%d-%d-%s", nano, cnt, hex.EncodeToString(randBuf[:]))
 }

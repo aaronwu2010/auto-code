@@ -2,6 +2,7 @@ package tools
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -224,6 +225,9 @@ func CopyFile(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("获取源文件信息失败: %v", err)
 	}
+	if sourceInfo.IsDir() {
+		return fmt.Errorf("源路径是目录不是文件: %s", src)
+	}
 
 	destFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, sourceInfo.Mode())
 	if err != nil {
@@ -231,21 +235,14 @@ func CopyFile(src, dst string) error {
 	}
 	defer destFile.Close()
 
-	// 使用缓冲区复制
-	buf := make([]byte, 32*1024)
-	for {
-		n, err := sourceFile.Read(buf)
-		if err != nil && err.Error() != "EOF" {
-			break
-		}
-		if n == 0 {
-			break
-		}
-		if _, err := destFile.Write(buf[:n]); err != nil {
-			return fmt.Errorf("写入目标文件失败: %v", err)
-		}
+	// 使用 io.Copy（标准库正确处理 io.EOF 与其他错误，并使用 32KB 内部缓冲）
+	if _, err := io.Copy(destFile, sourceFile); err != nil {
+		return fmt.Errorf("复制文件数据失败: %w", err)
 	}
-
+	// 显式 Sync 确保数据落盘，避免延迟写入导致的不一致
+	if err := destFile.Sync(); err != nil {
+		return fmt.Errorf("同步目标文件失败: %w", err)
+	}
 	return nil
 }
 

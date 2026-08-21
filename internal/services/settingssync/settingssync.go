@@ -139,7 +139,10 @@ func (s *SettingsSyncService) UploadUserSettings(ctx context.Context, entries ma
 	}
 
 	payload := map[string]map[string]string{"entries": entries}
-	data, _ := json.Marshal(payload)
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return &SettingsSyncUploadResult{Success: false, Error: fmt.Sprintf("marshal request: %v", err)}
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, s.getEndpoint(), bytes.NewReader(data))
 	if err != nil {
@@ -178,8 +181,13 @@ func (s *SettingsSyncService) UploadUserSettings(ctx context.Context, entries ma
 		Checksum     string `json:"checksum"`
 		LastModified string `json:"lastModified"`
 	}
-	body, _ := io.ReadAll(resp.Body)
-	_ = json.Unmarshal(body, &result)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return &SettingsSyncUploadResult{Success: false, Error: "read response body failed"}
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return &SettingsSyncUploadResult{Success: false, Error: "invalid response format"}
+	}
 
 	return &SettingsSyncUploadResult{
 		Success:      true,
@@ -260,7 +268,7 @@ func BuildEntriesFromLocalFiles(projectID string) map[string]string {
 	entries := map[string]string{}
 
 	homeDir, _ := os.UserHomeDir()
-	autoDir := filepath.Join(homeDir, ".auto")
+	autoDir := filepath.Join(homeDir, ".auto-code")
 
 	userSettingsPath := filepath.Join(autoDir, "settings.json")
 	if content := tryReadFileForSync(userSettingsPath); content != "" {
@@ -275,7 +283,7 @@ func BuildEntriesFromLocalFiles(projectID string) map[string]string {
 	if projectID != "" {
 		projectDir := filepath.Join(autoDir, "projects", projectID)
 
-		localSettingsPath := filepath.Join(projectDir, ".auto", "settings.local.json")
+		localSettingsPath := filepath.Join(projectDir, ".auto-code", "settings.local.json")
 		if content := tryReadFileForSync(localSettingsPath); content != "" {
 			entries[SyncKeys.ProjectSettings(projectID)] = content
 		}
@@ -292,7 +300,9 @@ func BuildEntriesFromLocalFiles(projectID string) map[string]string {
 func writeFileForSync(filePath, content string) bool {
 	dir := filepath.Dir(filePath)
 	if dir != "" {
-		_ = os.MkdirAll(dir, 0o755)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return false
+		}
 	}
 	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
 		return false
@@ -302,7 +312,7 @@ func writeFileForSync(filePath, content string) bool {
 
 func ApplyRemoteEntriesToLocal(entries map[string]string, projectID string) {
 	homeDir, _ := os.UserHomeDir()
-	autoDir := filepath.Join(homeDir, ".auto")
+	autoDir := filepath.Join(homeDir, ".auto-code")
 
 	if content, ok := entries[SyncKeys.UserSettings]; ok && len(content) <= maxFileSizeBytes {
 		path := filepath.Join(autoDir, "settings.json")
@@ -319,7 +329,7 @@ func ApplyRemoteEntriesToLocal(entries map[string]string, projectID string) {
 
 		key := SyncKeys.ProjectSettings(projectID)
 		if content, ok := entries[key]; ok && len(content) <= maxFileSizeBytes {
-			path := filepath.Join(projectDir, ".auto", "settings.local.json")
+			path := filepath.Join(projectDir, ".auto-code", "settings.local.json")
 			writeFileForSync(path, content)
 		}
 

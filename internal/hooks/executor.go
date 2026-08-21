@@ -152,7 +152,13 @@ func (e *HookExecutor) executeCommandHook(ctx context.Context, hook *BashCommand
 	hookCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
 	defer cancel()
 
-	inputJSON, _ := json.Marshal(input)
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return &HookResult{
+			Outcome: HookOutcomeNonBlockingError,
+			Message: fmt.Sprintf("Failed to marshal hook input: %s", err.Error()),
+		}
+	}
 	shell := "sh"
 	if hook.Shell == "powershell" {
 		shell = "pwsh"
@@ -192,7 +198,13 @@ func (e *HookExecutor) executePromptHook(ctx context.Context, hook *PromptHook, 
 	hookCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
 	defer cancel()
 
-	inputJSON, _ := json.Marshal(input)
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return &HookResult{
+			Outcome: HookOutcomeNonBlockingError,
+			Message: fmt.Sprintf("Failed to marshal hook input: %s", err.Error()),
+		}
+	}
 	promptText := strings.ReplaceAll(hook.Prompt, "$ARGUMENTS", string(inputJSON))
 
 	cmd := executil.CommandContext(hookCtx, "sh", "-c", promptText)
@@ -224,7 +236,13 @@ func (e *HookExecutor) executeHTTPHook(ctx context.Context, hook *HTTPHook, inpu
 	hookCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
 	defer cancel()
 
-	inputJSON, _ := json.Marshal(input)
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return &HookResult{
+			Outcome: HookOutcomeNonBlockingError,
+			Message: fmt.Sprintf("Failed to marshal hook input: %s", err.Error()),
+		}
+	}
 
 	req, err := http.NewRequestWithContext(hookCtx, http.MethodPost, hook.URL, bytes.NewReader(inputJSON))
 	if err != nil {
@@ -261,6 +279,18 @@ func (e *HookExecutor) executeHTTPHook(ctx context.Context, hook *HTTPHook, inpu
 		}
 	}
 
+	// 检查 HTTP 状态码：非 2xx 视为失败
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		truncated := string(body)
+		if len(truncated) > 256 {
+			truncated = truncated[:256] + "..."
+		}
+		return &HookResult{
+			Outcome: HookOutcomeNonBlockingError,
+			Message: fmt.Sprintf("Hook HTTP %d: %s", resp.StatusCode, truncated),
+		}
+	}
+
 	return parseHookOutput(hook.URL, string(body))
 }
 
@@ -273,7 +303,13 @@ func (e *HookExecutor) executeAgentHook(ctx context.Context, hook *AgentHook, in
 	hookCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
 	defer cancel()
 
-	inputJSON, _ := json.Marshal(input)
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return &HookResult{
+			Outcome: HookOutcomeNonBlockingError,
+			Message: fmt.Sprintf("Failed to marshal hook input: %s", err.Error()),
+		}
+	}
 	promptText := strings.ReplaceAll(hook.Prompt, "$ARGUMENTS", string(inputJSON))
 
 	cmd := executil.CommandContext(hookCtx, "sh", "-c", promptText)
@@ -305,9 +341,7 @@ func (e *HookExecutor) executeFunctionHook(ctx context.Context, hook *FunctionHo
 	fnCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
 	defer cancel()
 
-	_ = fnCtx
-
-	passed, err := hook.Callback(input, nil)
+	passed, err := hook.Callback(input, fnCtx)
 	if err != nil {
 		return &HookResult{
 			Outcome:             HookOutcomeNonBlockingError,
@@ -398,7 +432,12 @@ func parseHookOutput(command, output string) *HookResult {
 
 func aggregateResult(agg *AggregatedHookResult, hr *HookResult) {
 	if hr.Message != "" {
-		agg.Message = hr.Message
+		if agg.Message == "" {
+			agg.Message = hr.Message
+		} else {
+			// 多个 hook 产生的消息以分号拼接，避免相互覆盖
+			agg.Message = agg.Message + "; " + hr.Message
+		}
 	}
 
 	if hr.BlockingError != nil {

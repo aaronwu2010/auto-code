@@ -16,12 +16,13 @@ import (
 )
 
 type RemoteSessionManager struct {
-	mu       sync.RWMutex
-	ctx      context.Context
-	cancel   context.CancelFunc
-	sessions map[string]*RemoteSession
-	url      string
-	status   ConnectionStatus
+	mu        sync.RWMutex
+	ctx       context.Context
+	cancel    context.CancelFunc
+	sessions  map[string]*RemoteSession
+	url       string
+	status    ConnectionStatus
+	httpClient *http.Client
 }
 
 type ConnectionStatus string
@@ -42,9 +43,10 @@ type RemoteSession struct {
 
 func NewRemoteSessionManager(url string) *RemoteSessionManager {
 	return &RemoteSessionManager{
-		sessions: make(map[string]*RemoteSession),
-		url:      url,
-		status:   StatusConnecting,
+		sessions:  make(map[string]*RemoteSession),
+		url:       url,
+		status:    StatusConnecting,
+		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -129,7 +131,12 @@ func (m *RemoteSessionManager) reconnectLoop() {
 		case <-ticker.C:
 			if m.GetStatus() == StatusDisconnected || m.GetStatus() == StatusReconnecting {
 				m.setStatus(StatusReconnecting)
-				if _, err := http.Get(m.url + "/health"); err == nil {
+				req, err := http.NewRequestWithContext(m.ctx, http.MethodGet, m.url+"/health", nil)
+				if err != nil {
+					continue
+				}
+				if resp, err := m.httpClient.Do(req); err == nil {
+					resp.Body.Close()
 					m.setStatus(StatusConnected)
 				}
 			}

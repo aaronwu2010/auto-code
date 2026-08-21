@@ -103,12 +103,12 @@ type NotificationsState struct {
 }
 
 func NewAppState() *AppState {
-	// 获取用户配置目录
-	configDir, err := os.UserConfigDir()
+	// 使用用户主目录下的 .auto-code 目录存储配置（与 doctor.go 保持一致）
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		configDir = "."
+		homeDir = "."
 	}
-	configPath := filepath.Join(configDir, "auto-code", "config.json")
+	configPath := filepath.Join(homeDir, ".auto-code", "config.json")
 
 	s := &AppState{
 		Settings:               make(map[string]any),
@@ -230,9 +230,11 @@ func (s *AppState) GetSnapshot() AppStateSnapshot {
 }
 
 // Get 保留向后兼容，但标记为已废弃，应使用 GetSnapshot
+// 返回的是深拷贝，避免 map/slice 共享引用导致的并发问题
 func (s *AppState) Get() *AppState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	cp := &AppState{
 		Settings:                s.Settings,
 		Verbose:                 s.Verbose,
@@ -252,19 +254,72 @@ func (s *AppState) Get() *AppState {
 		ThinkingEnabled:         s.ThinkingEnabled,
 		PromptSuggestionEnabled: s.PromptSuggestionEnabled,
 		FastMode:                s.FastMode,
-		Tasks:                   s.Tasks,
-		MCP:                     s.MCP,
+		Tasks:                   cloneTasks(s.Tasks),
+		MCP:                     cloneMCP(s.MCP),
 		Plugins:                 s.Plugins,
 		AgentDefinitions:        s.AgentDefinitions,
-		FileHistory:             s.FileHistory,
-		Todos:                   s.Todos,
+		FileHistory:             cloneFileHistory(s.FileHistory),
+		Todos:                   cloneTodos(s.Todos),
 		Notifications:           s.Notifications,
 		Speculation:             s.Speculation,
-		Messages:                s.Messages,
+		Messages:                cloneMessages(s.Messages),
 		IsProcessing:            s.IsProcessing,
 		CurrentToolUse:          s.CurrentToolUse,
 	}
 	return cp
+}
+
+func cloneTasks(m map[string]TaskState) map[string]TaskState {
+	if m == nil {
+		return nil
+	}
+	cp := make(map[string]TaskState, len(m))
+	for k, v := range m {
+		cp[k] = v
+	}
+	return cp
+}
+
+func cloneMCP(m MCPState) MCPState {
+	cp := MCPState{
+		Clients:   append([]MCPServerState(nil), m.Clients...),
+		Tools:     append([]any(nil), m.Tools...),
+		Commands:  append([]any(nil), m.Commands...),
+		Resources: make(map[string]any, len(m.Resources)),
+	}
+	for k, v := range m.Resources {
+		cp.Resources[k] = v
+	}
+	return cp
+}
+
+func cloneFileHistory(m map[string][]string) map[string][]string {
+	if m == nil {
+		return nil
+	}
+	cp := make(map[string][]string, len(m))
+	for k, v := range m {
+		cp[k] = append([]string(nil), v...)
+	}
+	return cp
+}
+
+func cloneTodos(m map[string]TodoState) map[string]TodoState {
+	if m == nil {
+		return nil
+	}
+	cp := make(map[string]TodoState, len(m))
+	for k, v := range m {
+		cp[k] = v
+	}
+	return cp
+}
+
+func cloneMessages(m []types.Message) []types.Message {
+	if m == nil {
+		return nil
+	}
+	return append([]types.Message(nil), m...)
 }
 
 func (s *AppState) Set(f func(prev *AppState) *AppState) {

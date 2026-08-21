@@ -300,7 +300,11 @@ func (c *BaseMemoryConsolidator) autoConsolidate() {
 		case <-ticker.C:
 			// 执行巩固
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute*5)
-			_, _ = c.Consolidate(ctx)
+			result, err := c.Consolidate(ctx)
+			if err != nil {
+				// 记录错误但不停止自动巩固循环
+				_ = result
+			}
 			cancel()
 
 		case <-c.stopChan:
@@ -323,7 +327,7 @@ func (c *BaseMemoryConsolidator) consolidateItem(ctx context.Context, item *Memo
 	// 从短期记忆删除
 	err = c.shortTerm.Delete(ctx, item.ID)
 	if err != nil {
-		// 如果删除失败，尝试从长期记忆删除
+		// 如果删除失败，尝试从长期记忆删除回滚
 		_ = c.longTerm.Delete(ctx, item.ID)
 		return err
 	}

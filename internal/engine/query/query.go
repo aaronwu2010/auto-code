@@ -173,6 +173,9 @@ func (e *StreamingToolExecutor) AddTool(ctx context.Context, tool tools.Tool, in
 		select {
 		case e.resultsCh <- result:
 		default:
+			// 通道缓冲区满时仍保留 results 中的结果，仅丢失实时事件通知
+			log.Printf("[Query] resultsCh full for tool '%s' (idx=%d, id=%s); result remains in map",
+				tool.Name(), toolCallIndex, toolUseID)
 		}
 	}()
 	return true
@@ -434,9 +437,9 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 
 		if len(messages) > 0 {
 			lastMsg := messages[len(messages)-1]
-			if lastMsg.Role == types.RoleUser || lastMsg.Role == types.RoleTool {
-			} else {
-				log.Printf("[Query] terminal: no follow up needed")
+			// 仅当最后一条是 user 或 tool 消息时，才需要继续下一轮（assistant/meta 无需 follow-up）
+			if lastMsg.Role != types.RoleUser && lastMsg.Role != types.RoleTool {
+				log.Printf("[Query] terminal: no follow up needed (last role=%s)", lastMsg.Role)
 				ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "no_follow_up_needed"}}
 				return
 			}
@@ -742,8 +745,42 @@ func mergeAssistantFragment(prev, fragment *types.Message) *types.Message {
 		prev.Thinking += fragment.Thinking
 	}
 	if len(fragment.ToolCalls) > 0 {
-		prev.ToolCalls = make([]types.ToolCall, len(fragment.ToolCalls))
-		copy(prev.ToolCalls, fragment.ToolCalls)
+		// 将每个新的 tool_call 按 ID 合并到 prev 中：相同 ID 视为增量更新（追加 Arguments），否则追加到列表末尾
+		for _, newTC := range fragment.ToolCalls {
+			matched := -1
+			if newTC.ID != "" {
+				for i := range prev.ToolCalls {
+					if prev.ToolCalls[i].ID == newTC.ID {
+						matched = i
+						break
+					}
+				}
+			}
+			if matched >= 0 {
+				// 合并参数：如果旧参数为空则直接替换，否则追加原始 Arguments
+				if len(prev.ToolCalls[matched].Function.Arguments) == 0 {
+					prev.ToolCalls[matched].Function.Name = newTC.Function.Name
+					prev.ToolCalls[matched].Function.Arguments = newTC.Function.Arguments
+				} else if len(newTC.Function.Arguments) > 0 {
+					prev.ToolCalls[matched].Function.Arguments = append(
+						prev.ToolCalls[matched].Function.Arguments,
+						newTC.Function.Arguments...,
+					)
+				}
+				if prev.ToolCalls[matched].Type == "" && newTC.Type != "" {
+					prev.ToolCalls[matched].Type = newTC.Type
+				}
+			} else {
+				cp := newTC
+				if cp.ID == "" {
+					cp.ID = fmt.Sprintf("call_%d", len(prev.ToolCalls))
+				}
+				if cp.Type == "" {
+					cp.Type = "function"
+				}
+				prev.ToolCalls = append(prev.ToolCalls, cp)
+			}
+		}
 	}
 	if fragment.Model != "" {
 		prev.Model = fragment.Model

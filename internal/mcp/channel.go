@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"sync"
+	"time"
 )
 
 type ChannelAllowlist struct {
@@ -67,6 +68,8 @@ func NewChannelPermission() *ChannelPermission {
 	}
 }
 
+// RequestPermission 向权限 handler 发起请求并阻塞等待响应
+// 若 30 秒内无响应，则返回拒绝
 func (p *ChannelPermission) RequestPermission(req *ChannelPermissionRequest) *ChannelPermissionResponse {
 	ch := make(chan *ChannelPermissionResponse, 1)
 
@@ -80,11 +83,15 @@ func (p *ChannelPermission) RequestPermission(req *ChannelPermissionRequest) *Ch
 		p.mu.Unlock()
 	}()
 
+	// 阻塞等待，带 30 秒超时
 	select {
 	case resp := <-ch:
-		return resp
-	default:
-		return &ChannelPermissionResponse{Approved: false, Reason: "no handler registered"}
+		if resp != nil {
+			return resp
+		}
+		return &ChannelPermissionResponse{Approved: false, Reason: "nil response"}
+	case <-time.After(30 * time.Second):
+		return &ChannelPermissionResponse{Approved: false, Reason: "permission handler timeout"}
 	}
 }
 

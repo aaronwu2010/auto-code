@@ -1,6 +1,9 @@
 package compact
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type TimeBasedMCConfig struct {
 	Enabled         bool          `json:"enabled"`
@@ -91,12 +94,34 @@ func CompactConversation(messages []CompactMessage, windowSize, currentTokens in
 
 	result := MicrocompactMessages(messages)
 
+	// 重建 Messages：保留顺序与过滤一致（根据 MicrocompactMessages 规则）
+	kept := make([]CompactMessage, 0, len(messages))
+	mustKeep := make([]bool, len(messages))
+	for i, msg := range messages {
+		if msg.Role == "tool" {
+			mustKeep[i] = true
+			for j := i - 1; j >= 0; j-- {
+				if messages[j].Role == "assistant" {
+					mustKeep[j] = true
+					break
+				}
+			}
+		}
+	}
+	for i, msg := range messages {
+		if msg.Role == "system" || (msg.Role == "user" && msg.IsLatest) ||
+			mustKeep[i] || strings.TrimSpace(msg.Content) != "" {
+			kept = append(kept, msg)
+		}
+	}
+
 	return &CompactionResult{
 		TotalTokensBefore: currentTokens,
 		TotalTokensAfter:  currentTokens - result.TokensSaved,
 		MessagesRemoved:   result.MessagesBefore - result.MessagesAfter,
 		MessagesKept:      result.MessagesAfter,
 		WasPartial:        false,
+		Messages:          kept,
 	}
 }
 
@@ -107,11 +132,22 @@ func PartialCompactConversation(messages []CompactMessage, keepCount int) *Compa
 
 	kept := messages[len(messages)-keepCount:]
 
+	// 估算 token
+	beforeTokens := 0
+	afterTokens := 0
+	for _, m := range messages {
+		beforeTokens += EstimateMessageTokens(m.Content)
+	}
+	for _, m := range kept {
+		afterTokens += EstimateMessageTokens(m.Content)
+	}
+
 	return &CompactionResult{
-		TotalTokensBefore: 0,
-		TotalTokensAfter:  0,
+		TotalTokensBefore: beforeTokens,
+		TotalTokensAfter:  afterTokens,
 		MessagesRemoved:   len(messages) - len(kept),
 		MessagesKept:      len(kept),
 		WasPartial:        true,
+		Messages:          kept,
 	}
 }

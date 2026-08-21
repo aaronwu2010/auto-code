@@ -124,7 +124,10 @@ type showResponse struct {
 func (c *Client) ShowModel(ctx context.Context, modelName string) (int, error) {
 	modelName = NormalizeModelName(modelName)
 
-	reqBody, _ := json.Marshal(map[string]string{"name": modelName})
+	reqBody, err := json.Marshal(map[string]string{"name": modelName})
+	if err != nil {
+		return 0, fmt.Errorf("marshal show request: %w", err)
+	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.config.BaseURL+"/show", bytes.NewReader(reqBody))
 	if err != nil {
 		return 0, fmt.Errorf("creating show request: %w", err)
@@ -160,7 +163,10 @@ func (c *Client) ShowModel(ctx context.Context, modelName string) (int, error) {
 			case float64:
 				return int(v), nil
 			case json.Number:
-				n, _ := v.Int64()
+				n, nErr := v.Int64()
+				if nErr != nil {
+					continue
+				}
 				return int(n), nil
 			}
 		}

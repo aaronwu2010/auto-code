@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -101,7 +102,16 @@ func NewPluginOptionsStorage() *PluginOptionsStorage {
 func (s *PluginOptionsStorage) LoadPluginOptions(pluginID string) map[string]string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.options
+
+	// 按 pluginID 前缀过滤选项（key 格式: "{pluginID}.{optionKey}"）
+	prefix := pluginID + "."
+	result := make(map[string]string)
+	for k, v := range s.options {
+		if strings.HasPrefix(k, prefix) {
+			result[strings.TrimPrefix(k, prefix)] = v
+		}
+	}
+	return result
 }
 
 func (s *PluginOptionsStorage) SubstituteUserConfigVariables(template string, vars map[string]string) string {

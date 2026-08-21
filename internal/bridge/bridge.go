@@ -74,7 +74,10 @@ func (b *BridgeMain) RegisterWorker(workerID string) error {
 
 func (b *BridgeMain) GetWork(ctx context.Context) (*WorkData, error) {
 	if b.onWorkReceived != nil {
-		if err := b.onWorkReceived(nil); err == nil {
+		work := &WorkData{
+			WorkID: "pending",
+		}
+		if err := b.onWorkReceived(work); err == nil {
 			b.mu.RLock()
 			var found *WorkData
 			for _, h := range b.sessions {
@@ -145,11 +148,12 @@ func (b *BridgeMain) heartbeatLoop() {
 		case <-b.ctx.Done():
 			return
 		case <-ticker.C:
-			b.mu.RLock()
+			b.mu.Lock()
+			now := time.Now()
 			for _, h := range b.sessions {
-				h.LastActive = time.Now()
+				h.LastActive = now
 			}
-			b.mu.RUnlock()
+			b.mu.Unlock()
 		}
 	}
 }

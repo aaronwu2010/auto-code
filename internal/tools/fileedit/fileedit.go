@@ -86,10 +86,7 @@ func (t *FileEditTool) UserFacingName(input any) string {
 func (t *FileEditTool) CheckPermissions(_ context.Context, input any, toolCtx *tools.ToolUseContext) (types.PermissionResult, error) {
 	// 使用通用的权限检查函数
 	result := tools.CheckToolPermission(t, toolCtx)
-	if result.Behavior == types.DecisionDeny {
-		return result, nil
-	}
-	return types.PermissionResult{Behavior: types.DecisionAllow}, nil
+	return result, nil
 }
 
 func (t *FileEditTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {
@@ -235,7 +232,7 @@ func readFileForEdit(filePath string) (string, bool, error) {
 		return "", false, err
 	}
 	content := string(data)
-	content = strings.ReplaceAll(content, "\r\n", "\n")
+	// 注意：不转换 CRLF → LF，保留原始文件行尾格式
 	return content, true, nil
 }
 

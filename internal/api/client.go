@@ -400,9 +400,15 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 		if firstLine {
 			log.Printf("[API] parseNDJSONStream: first line received (%d bytes): %s", len(line), truncateStr(line, 500))
 			firstLine = false
-		}
-		if line == "" {
-			continue
+			if line == "" {
+				continue
+			}
+		} else {
+			// 非首行的详细事件日志：注意如果 line 为空我们仍跳过但不记日志
+			if line == "" {
+				continue
+			}
+			log.Printf("[API] stream event: (skip first line verbose logging for: %d bytes)", len(line))
 		}
 
 		var event OllamaChatStreamEvent
@@ -411,10 +417,8 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 			continue
 		}
 
-		if firstLine == false {
-			log.Printf("[API] stream event: done=%v, role=%q, content_len=%d, thinking_len=%d, tool_calls=%d, done_reason=%q",
-				event.Done, event.Message.Role, len(event.Message.Content), len(event.Message.Thinking), len(event.Message.ToolCalls), event.DoneReason)
-		}
+		log.Printf("[API] stream event: done=%v, role=%q, content_len=%d, thinking_len=%d, tool_calls=%d, done_reason=%q",
+			event.Done, event.Message.Role, len(event.Message.Content), len(event.Message.Thinking), len(event.Message.ToolCalls), event.DoneReason)
 
 		if event.Message.Content != "" {
 			assistantContent += event.Message.Content

@@ -86,10 +86,7 @@ func (t *FileWriteTool) UserFacingName(input any) string {
 func (t *FileWriteTool) CheckPermissions(_ context.Context, input any, toolCtx *tools.ToolUseContext) (types.PermissionResult, error) {
 	// 使用通用的权限检查函数
 	result := tools.CheckToolPermission(t, toolCtx)
-	if result.Behavior == types.DecisionDeny {
-		return result, nil
-	}
-	return types.PermissionResult{Behavior: types.DecisionAllow}, nil
+	return result, nil
 }
 
 func (t *FileWriteTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseContext, onProgress tools.ToolCallProgress) (*tools.ToolResult, error) {

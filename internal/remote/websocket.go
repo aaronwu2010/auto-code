@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"sync/atomic"
 )
 
 type RemotePermissionResponse struct {
@@ -164,8 +165,8 @@ func CreateToolStub(toolName, toolID string) SDKMessage {
 var remoteSessionIDCounter int64
 
 func fmtRemoteSessionID() string {
-	remoteSessionIDCounter++
-	return fmtRemoteID(remoteSessionIDCounter)
+	n := atomic.AddInt64(&remoteSessionIDCounter, 1)
+	return fmtRemoteID(n)
 }
 
 func fmtRemoteID(n int64) string {

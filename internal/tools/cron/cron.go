@@ -143,15 +143,24 @@ func (t *CronTool) runTask(ctx context.Context, task *scheduledTask, interval ti
 			t.mu.Unlock()
 
 			if onExec != nil {
-				onExec(task.Command)
+				result, err := onExec(task.Command)
+				t.mu.Lock()
+				if err != nil {
+					task.Status = fmt.Sprintf("failed: %s", err.Error())
+				} else {
+					task.Status = fmt.Sprintf("completed: %s", result)
+				}
+				t.mu.Unlock()
 			}
 
 			t.mu.Lock()
-			task.Status = "scheduled"
 			task.NextRun = time.Now().Add(interval)
+			// 如果任务仍然存在于 tasks map 中，重置定时器
+			if _, exists := t.tasks[task.TaskID]; exists {
+				task.Status = "scheduled"
+				timer.Reset(interval)
+			}
 			t.mu.Unlock()
-
-			timer.Reset(interval)
 		}
 	}
 }
