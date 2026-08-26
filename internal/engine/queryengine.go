@@ -50,6 +50,8 @@ type QueryEngine struct {
 	appState            *state.AppState
 	toolReg             *registry.ToolRegistry
 	apiClient           *api.Client
+	localaiClient       *api.LocalAIClient
+	useLocalAI          bool
 	messages            []types.Message
 	mu                  sync.RWMutex
 	ctx                 context.Context
@@ -94,6 +96,7 @@ type QueryEngineConfig struct {
 	MaxBudgetUsd       float64
 	Verbose            bool
 	OllamaConfig       api.OllamaConfig
+	LocalAIConfig      *api.LocalAIConfig
 	ModelOptions       *api.ModelOptions
 }
 
@@ -120,12 +123,25 @@ func NewQueryEngine(appState *state.AppState, config *QueryEngineConfig) *QueryE
 
 	apiClient := api.NewClient(ollamaConfig)
 
+	var localaiClient *api.LocalAIClient
+	useLocalAI := false
+	if config.LocalAIConfig != nil {
+		localaiConfig := *config.LocalAIConfig
+		if localaiConfig.Model == "" && config.UserSpecifiedModel != "" {
+			localaiConfig.Model = string(config.UserSpecifiedModel)
+		}
+		localaiClient = api.NewLocalAIClient(localaiConfig)
+		useLocalAI = true
+	}
+
 	toolReg := registry.NewDefaultToolRegistry()
 
 	return &QueryEngine{
 		appState:        appState,
 		toolReg:         toolReg,
 		apiClient:       apiClient,
+		localaiClient:   localaiClient,
+		useLocalAI:      useLocalAI,
 		messages:        make([]types.Message, 0),
 		sessionID:       generateSessionID(),
 		config:          config,
@@ -820,6 +836,40 @@ func (qe *QueryEngine) SetOllamaConfig(baseURL, apiKey, model string) {
 		qe.appState.SetMainLoopModel(types.ModelSetting(model))
 	}
 	qe.config.OllamaConfig = cfg
+}
+
+func (qe *QueryEngine) SetLocalAIConfig(baseURL, apiKey, model string) {
+	if baseURL == "" {
+		baseURL = api.DefaultLocalAIConfig().BaseURL
+	}
+
+	cfg := api.LocalAIConfig{
+		BaseURL:   baseURL,
+		APIKey:    apiKey,
+		Model:     model,
+		Timeout:   api.DefaultLocalAIConfig().Timeout,
+		KeepAlive: api.DefaultLocalAIConfig().KeepAlive,
+	}
+	qe.localaiClient = api.NewLocalAIClient(cfg)
+	qe.useLocalAI = true
+
+	if model != "" {
+		qe.config.UserSpecifiedModel = types.ModelSetting(model)
+		qe.appState.SetMainLoopModel(types.ModelSetting(model))
+	}
+	qe.config.LocalAIConfig = &cfg
+}
+
+func (qe *QueryEngine) GetLocalAIClient() *api.LocalAIClient {
+	return qe.localaiClient
+}
+
+func (qe *QueryEngine) UseLocalAI() bool {
+	return qe.useLocalAI
+}
+
+func (qe *QueryEngine) SwitchToLocalAI(enable bool) {
+	qe.useLocalAI = enable
 }
 
 func (qe *QueryEngine) GetSessionID() types.SessionID {

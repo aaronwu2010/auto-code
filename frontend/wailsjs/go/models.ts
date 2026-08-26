@@ -227,6 +227,54 @@ export namespace state {
 		    return a;
 		}
 	}
+	export class MCPServerUI {
+	    name: string;
+	    type: string;
+	    tools: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPServerUI(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.type = source["type"];
+	        this.tools = source["tools"];
+	    }
+	}
+	export class ListLocalAIMCPServersResponse {
+	    servers: MCPServerUI[];
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListLocalAIMCPServersResponse(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.servers = this.convertValues(source["servers"], MCPServerUI);
+	        this.error = source["error"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ModelInfoUI {
 	    name: string;
 	    size?: string;
@@ -248,6 +296,38 @@ export namespace state {
 	        this.quantization = source["quantization"];
 	        this.context_length = source["context_length"];
 	    }
+	}
+	export class ListLocalAIModelsResponse {
+	    models: ModelInfoUI[];
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListLocalAIModelsResponse(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.models = this.convertValues(source["models"], ModelInfoUI);
+	        this.error = source["error"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class ListModelsResponse {
 	    models: ModelInfoUI[];
@@ -281,6 +361,49 @@ export namespace state {
 		    return a;
 		}
 	}
+	export class LocalAIConfigRequest {
+	    base_url: string;
+	    api_key: string;
+	    has_api_key: boolean;
+	    model: string;
+	    enabled: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new LocalAIConfigRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.base_url = source["base_url"];
+	        this.api_key = source["api_key"];
+	        this.has_api_key = source["has_api_key"];
+	        this.model = source["model"];
+	        this.enabled = source["enabled"];
+	    }
+	}
+	export class LocalAIHealthResponse {
+	    connected: boolean;
+	    error?: string;
+	    base_url: string;
+	    model: string;
+	    enabled: boolean;
+	    available_models: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new LocalAIHealthResponse(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.connected = source["connected"];
+	        this.error = source["error"];
+	        this.base_url = source["base_url"];
+	        this.model = source["model"];
+	        this.enabled = source["enabled"];
+	        this.available_models = source["available_models"];
+	    }
+	}
+	
 	
 	
 	

@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/auto-code/auto-code/internal/api"
+	"github.com/auto-code/auto-code/internal/types"
 )
 
 type OllamaBridge struct {
@@ -116,4 +117,80 @@ func (b *OllamaBridge) GatherAllToolDefinitions() []api.ToolFunction {
 
 func DefaultOllamaBridge() *OllamaBridge {
 	return NewOllamaBridge(api.DefaultOllamaConfig())
+}
+
+func (b *OllamaBridge) ChatWithMCP(
+	ctx context.Context,
+	messages []types.Message,
+	model string,
+	serverNames []string,
+	onStream func(msg *api.StreamMessage),
+) (*api.StreamMessage, error) {
+	ollamaMessages := api.ConvertMessagesToOllama(messages, "")
+	toolDefs := b.GatherAllToolDefinitions()
+	ollamaTools := api.ConvertToolsToOllama(toolDefs)
+
+	req := api.OllamaChatRequest{
+		Model:    model,
+		Messages: ollamaMessages,
+		Tools:    ollamaTools,
+		Stream:   onStream != nil,
+	}
+
+	if onStream != nil {
+		ch, err := b.client.ChatWithStreaming(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+
+		var lastMsg api.StreamMessage
+		for msg := range ch {
+			onStream(&msg)
+			if msg.Done {
+				lastMsg = msg
+			}
+		}
+		return &lastMsg, nil
+	}
+
+	resp, err := b.client.ChatWithoutStreaming(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	return &api.StreamMessage{
+		Type:    "done",
+		Message: resp,
+		Done:    true,
+	}, nil
+}
+
+func (b *OllamaBridge) ListMCPServers(_ context.Context, _ string) ([]api.LocalAIServerInfo, error) {
+	allTools := b.server.ListAllTools()
+	var servers []api.LocalAIServerInfo
+
+	for serverName, tools := range allTools {
+		toolNames := make([]string, len(tools))
+		for i, t := range tools {
+			toolNames[i] = t.Name
+		}
+		servers = append(servers, api.LocalAIServerInfo{
+			Name:  serverName,
+			Type:  "local",
+			Tools: toolNames,
+		})
+	}
+
+	return servers, nil
+}
+
+func (b *OllamaBridge) CheckHealthError(ctx context.Context) error {
+	status := b.client.CheckHealth(ctx)
+	if status.Error != "" {
+		return fmt.Errorf("health check failed: %s", status.Error)
+	}
+	if !status.Connected {
+		return fmt.Errorf("not connected")
+	}
+	return nil
 }

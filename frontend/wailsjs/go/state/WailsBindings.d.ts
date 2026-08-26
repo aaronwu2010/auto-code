@@ -7,6 +7,8 @@ import {context} from '../models';
 
 export function AddTodo(arg1:state.TodoRequest):Promise<void>;
 
+export function CheckLocalAIHealth():Promise<state.LocalAIHealthResponse>;
+
 export function CheckOllamaHealth():Promise<state.OllamaHealthResponse>;
 
 export function GetAppState():Promise<state.AppStateSnapshot>;
@@ -14,6 +16,8 @@ export function GetAppState():Promise<state.AppStateSnapshot>;
 export function GetAvailableTools():Promise<Array<state.ToolInfo>>;
 
 export function GetContextUsage():Promise<types.ContextUsage>;
+
+export function GetLocalAIConfig():Promise<state.LocalAIConfigRequest>;
 
 export function GetMCPStatus():Promise<state.MCPState>;
 
@@ -31,6 +35,10 @@ export function ListAvailableModels():Promise<state.ListModelsResponse>;
 
 export function ListDirectoryContents(arg1:string):Promise<Array<state.FileInfo>>;
 
+export function ListLocalAIMCPServers(arg1:string):Promise<state.ListLocalAIMCPServersResponse>;
+
+export function ListLocalAIModels():Promise<state.ListLocalAIModelsResponse>;
+
 export function RefreshContext():Promise<void>;
 
 export function RegisterMCPTool(arg1:state.RegisterToolRequest):Promise<void>;
@@ -42,6 +50,8 @@ export function SendMessage(arg1:state.SendMessageRequest):Promise<state.SendMes
 export function SetEngine(arg1:state.MessageSubmitter):Promise<void>;
 
 export function SetFastMode(arg1:state.SetFastModeRequest):Promise<void>;
+
+export function SetLocalAIConfig(arg1:state.LocalAIConfigRequest):Promise<void>;
 
 export function SetModel(arg1:state.SetModelRequest):Promise<void>;
 

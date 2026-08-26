@@ -8,6 +8,11 @@ import {
   GetOllamaConfig,
   ListAvailableModels,
   CheckOllamaHealth,
+  SetLocalAIConfig,
+  GetLocalAIConfig,
+  ListLocalAIModels,
+  ListLocalAIMCPServers,
+  CheckLocalAIHealth,
   SelectProjectDirectory,
   SetProjectDirectory,
   GetProjectDirectory,
@@ -23,6 +28,9 @@ type ContentBlock = types.ContentBlock;
 type AppStateSnapshot = state.AppStateSnapshot;
 type OllamaConfig = state.OllamaConfigRequest;
 type OllamaHealth = state.OllamaHealthResponse;
+type LocalAIConfig = state.LocalAIConfigRequest;
+type LocalAIHealth = state.LocalAIHealthResponse;
+type MCPServer = state.MCPServerUI;
 type ModelInfo = state.ModelInfoUI;
 type ContextUsage = types.ContextUsage;
 type FileInfo = state.FileInfo;
@@ -62,6 +70,20 @@ function App() {
   const [loadingModels, setLoadingModels] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [healthCheckResult, setHealthCheckResult] = useState<string | null>(null);
+
+  const [localaiConfig, setLocalaiConfig] = useState<LocalAIConfig>({
+    base_url: "http://localhost:8080",
+    api_key: "",
+    has_api_key: false,
+    model: "",
+    enabled: false,
+  });
+  const [localaiHealth, setLocalaiHealth] = useState<LocalAIHealth | null>(null);
+  const [localaiModels, setLocalaiModels] = useState<ModelInfo[]>([]);
+  const [localaiMCPServers, setLocalaiMCPServers] = useState<MCPServer[]>([]);
+  const [loadingLocalaiModels, setLoadingLocalaiModels] = useState(false);
+  const [loadingLocalaiMCPServers, setLoadingLocalaiMCPServers] = useState(false);
+  const [activeConfigTab, setActiveConfigTab] = useState<"ollama" | "localai">("ollama");
 
   const [projectDir, setProjectDir] = useState<string>("");
   const [files, setFiles] = useState<FileInfo[]>([]);
@@ -218,6 +240,78 @@ function App() {
     } catch {}
   };
 
+  const loadLocalAIConfig = async () => {
+    try {
+      const config = await GetLocalAIConfig();
+      if (config) {
+        setLocalaiConfig(config);
+      }
+    } catch {}
+  };
+
+  const loadLocalAIModels = async () => {
+    setLoadingLocalaiModels(true);
+    try {
+      const result = await ListLocalAIModels();
+      if (result) {
+        setLocalaiModels(result.models || []);
+      }
+    } catch (err) {
+      console.error("加载 LocalAI 模型失败:", err);
+      setLocalaiModels([]);
+    }
+    setLoadingLocalaiModels(false);
+  };
+
+  const loadLocalAIMCPServers = async (model: string) => {
+    if (!model) return;
+    setLoadingLocalaiMCPServers(true);
+    try {
+      const result = await ListLocalAIMCPServers(model);
+      if (result) {
+        setLocalaiMCPServers(result.servers || []);
+      }
+    } catch (err) {
+      console.error("加载 LocalAI MCP 服务器失败:", err);
+      setLocalaiMCPServers([]);
+    }
+    setLoadingLocalaiMCPServers(false);
+  };
+
+  const checkLocalAIHealth = async () => {
+    try {
+      const health = await CheckLocalAIHealth();
+      if (health) {
+        setLocalaiHealth(health);
+        return health.connected;
+      }
+    } catch (err) {
+      console.error("检查 LocalAI 健康状态失败:", err);
+      setLocalaiHealth({
+        connected: false,
+        error: String(err),
+        base_url: localaiConfig.base_url,
+        model: localaiConfig.model,
+        enabled: localaiConfig.enabled,
+        available_models: 0,
+      });
+    }
+    return false;
+  };
+
+  const saveLocalAIConfig = async () => {
+    try {
+      await SetLocalAIConfig(localaiConfig);
+      await checkLocalAIHealth();
+      await loadLocalAIModels();
+      if (localaiConfig.model) {
+        await loadLocalAIMCPServers(localaiConfig.model);
+      }
+    } catch (err) {
+      console.error("保存 LocalAI 配置失败:", err);
+    }
+  };
+
   const handleSelectDirectory = async () => {
     try {
       const dir = await SelectProjectDirectory();
@@ -368,6 +462,8 @@ function App() {
       await loadConfig();
       await checkHealth();
       await loadModels();
+      await loadLocalAIConfig();
+      await loadLocalAIModels();
       await loadProjectDir();
       GetContextUsage().then(setContextUsage).catch(() => {});
     } catch {}
@@ -670,22 +766,49 @@ function App() {
       {showSettings && (
         <div className="border-b border-slate-800/50 bg-slate-900/50 backdrop-blur-sm p-6">
           <div className="max-w-3xl mx-auto">
-            <h2 className="text-lg font-semibold bg-gradient-to-r from-sky-400 to-indigo-400 bg-clip-text text-transparent mb-5 flex items-center gap-2">
-              <span className="text-xl">🔌</span> Ollama 配置
-            </h2>
+            {/* 选项卡 */}
+            <div className="flex gap-2 mb-5 border-b border-slate-800 pb-2">
+              <button
+                onClick={() => setActiveConfigTab("ollama")}
+                className={`px-4 py-2 text-sm font-medium transition-all duration-200 ${
+                  activeConfigTab === "ollama"
+                    ? "text-sky-400 border-b-2 border-sky-400"
+                    : "text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                🔌 Ollama
+              </button>
+              <button
+                onClick={() => setActiveConfigTab("localai")}
+                className={`px-4 py-2 text-sm font-medium transition-all duration-200 ${
+                  activeConfigTab === "localai"
+                    ? "text-violet-400 border-b-2 border-violet-400"
+                    : "text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                🤖 LocalAI (MCP)
+              </button>
+            </div>
 
-            {ollamaHealth && (
-              <div className={`text-sm p-3 rounded-xl border mb-5 flex items-center gap-2 ${
-                ollamaHealth.connected
-                  ? "bg-emerald-900/20 text-emerald-400 border-emerald-800/30"
-                  : "bg-red-900/20 text-red-400 border-red-800/30"
-              }`}>
-                <span className="text-lg">{ollamaHealth.connected ? "✅" : "❌"}</span>
-                {ollamaHealth.connected
-                  ? `已连接到 ${ollamaHealth.base_url}`
-                  : `连接失败: ${ollamaHealth.error || "未知错误"}`}
-              </div>
-            )}
+            {/* Ollama 配置 */}
+            {activeConfigTab === "ollama" && (
+              <div>
+                <h2 className="text-lg font-semibold bg-gradient-to-r from-sky-400 to-indigo-400 bg-clip-text text-transparent mb-5 flex items-center gap-2">
+                  <span className="text-xl">🔌</span> Ollama 配置
+                </h2>
+
+                {ollamaHealth && (
+                  <div className={`text-sm p-3 rounded-xl border mb-5 flex items-center gap-2 ${
+                    ollamaHealth.connected
+                      ? "bg-emerald-900/20 text-emerald-400 border-emerald-800/30"
+                      : "bg-red-900/20 text-red-400 border-red-800/30"
+                  }`}>
+                    <span className="text-lg">{ollamaHealth.connected ? "✅" : "❌"}</span>
+                    {ollamaHealth.connected
+                      ? `已连接到 ${ollamaHealth.base_url}`
+                      : `连接失败: ${ollamaHealth.error || "未知错误"}`}
+                  </div>
+                )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
               <div>
@@ -782,6 +905,182 @@ function App() {
             {healthCheckResult && (
               <div className={`text-sm mt-3 flex items-center gap-2 ${healthCheckResult.includes("✓") ? "text-emerald-400" : "text-red-400"}`}>
                 {healthCheckResult}
+              </div>
+            )}
+              </div>
+            )}
+
+            {/* LocalAI 配置 */}
+            {activeConfigTab === "localai" && (
+              <div>
+                <h2 className="text-lg font-semibold bg-gradient-to-r from-violet-400 to-purple-400 bg-clip-text text-transparent mb-5 flex items-center gap-2">
+                  <span className="text-xl">🤖</span> LocalAI MCP 配置
+                </h2>
+
+                {/* 启用开关 */}
+                <div className="mb-5 p-4 bg-slate-800/30 rounded-xl border border-slate-700/50">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-sm font-medium text-slate-200">启用 LocalAI</label>
+                      <p className="text-xs text-slate-500 mt-1">使用 LocalAI 服务进行对话，支持 MCP 工具调用</p>
+                    </div>
+                    <button
+                      onClick={() => setLocalaiConfig({ ...localaiConfig, enabled: !localaiConfig.enabled })}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        localaiConfig.enabled ? "bg-violet-600" : "bg-slate-700"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          localaiConfig.enabled ? "translate-x-6" : "translate-x-1"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {localaiHealth && (
+                  <div className={`text-sm p-3 rounded-xl border mb-5 flex items-center gap-2 ${
+                    localaiHealth.connected
+                      ? "bg-emerald-900/20 text-emerald-400 border-emerald-800/30"
+                      : "bg-red-900/20 text-red-400 border-red-800/30"
+                  }`}>
+                    <span className="text-lg">{localaiHealth.connected ? "✅" : "❌"}</span>
+                    {localaiHealth.connected
+                      ? `已连接到 ${localaiHealth.base_url}，发现 ${localaiHealth.available_models || 0} 个模型`
+                      : `连接失败: ${localaiHealth.error || "未知错误"}`}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-2 font-medium">LocalAI URL</label>
+                    <input
+                      type="text"
+                      value={localaiConfig.base_url}
+                      onChange={(e) => setLocalaiConfig({ ...localaiConfig, base_url: e.target.value })}
+                      placeholder="http://localhost:8080"
+                      className="w-full bg-slate-800/50 text-slate-200 border border-slate-700/50 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-violet-600/50 focus:ring-2 focus:ring-violet-500/20 transition-all duration-200 placeholder-slate-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-2 font-medium">API Key（可选）</label>
+                    <input
+                      type="password"
+                      value={localaiConfig.api_key}
+                      onChange={(e) => setLocalaiConfig({ ...localaiConfig, api_key: e.target.value })}
+                      placeholder="留空使用本地模式"
+                      className="w-full bg-slate-800/50 text-slate-200 border border-slate-700/50 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-violet-600/50 focus:ring-2 focus:ring-violet-500/20 transition-all duration-200 placeholder-slate-600"
+                    />
+                  </div>
+                </div>
+
+                <div className="mb-5">
+                  <label className="text-xs text-slate-400 block mb-2 font-medium">选择模型</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={localaiConfig.model}
+                      onChange={(e) => {
+                        const newModel = e.target.value;
+                        setLocalaiConfig({ ...localaiConfig, model: newModel });
+                        if (newModel) {
+                          loadLocalAIMCPServers(newModel);
+                        }
+                      }}
+                      className="flex-1 bg-slate-800/50 text-slate-200 border border-slate-700/50 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-violet-600/50 focus:ring-2 focus:ring-violet-500/20 transition-all duration-200 cursor-pointer"
+                    >
+                      <option value="">选择模型...</option>
+                      {localaiModels.map((m) => (
+                        <option key={m.name} value={m.name}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        loadLocalAIModels();
+                      }}
+                      disabled={loadingLocalaiModels}
+                      className="bg-slate-800/80 text-slate-300 px-5 py-2.5 rounded-xl hover:bg-slate-700/80 disabled:opacity-50 text-sm cursor-pointer border border-slate-700/50 transition-all duration-200 flex items-center gap-1.5"
+                    >
+                      {loadingLocalaiModels ? "⟳" : "🔄"} {loadingLocalaiModels ? "加载中" : "刷新"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mb-5">
+                  <label className="text-xs text-slate-400 block mb-2 font-medium">或手动输入模型名称</label>
+                  <input
+                    type="text"
+                    value={localaiConfig.model}
+                    onChange={(e) => {
+                      const newModel = e.target.value;
+                      setLocalaiConfig({ ...localaiConfig, model: newModel });
+                      if (newModel && localaiConfig.enabled) {
+                        loadLocalAIMCPServers(newModel);
+                      }
+                    }}
+                    placeholder="例如: my-mcp-model"
+                    className="w-full bg-slate-800/50 text-slate-200 border border-slate-700/50 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-violet-600/50 focus:ring-2 focus:ring-violet-500/20 transition-all duration-200 placeholder-slate-600"
+                  />
+                </div>
+
+                {/* MCP 服务器列表 */}
+                {localaiMCPServers.length > 0 && (
+                  <div className="mb-5">
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-xs text-slate-400 font-medium">可用的 MCP 服务器</label>
+                      {loadingLocalaiMCPServers && (
+                        <span className="text-xs text-slate-500">加载中...</span>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      {localaiMCPServers.map((server) => (
+                        <div key={server.name} className="p-3 bg-slate-800/30 rounded-lg border border-slate-700/50">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium text-slate-200">{server.name}</span>
+                            <span className="text-xs px-2 py-0.5 rounded bg-violet-900/30 text-violet-400">
+                              {server.type}
+                            </span>
+                          </div>
+                          {server.tools && server.tools.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {server.tools.map((tool) => (
+                                <span key={tool} className="text-xs px-2 py-0.5 rounded bg-slate-700/50 text-slate-400">
+                                  {tool}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={saveLocalAIConfig}
+                    className="bg-gradient-to-r from-violet-600 to-purple-600 text-white px-6 py-2.5 rounded-xl hover:from-violet-500 hover:to-purple-500 text-sm font-medium transition-all duration-200 shadow-lg shadow-violet-900/30 hover:shadow-violet-800/40 flex items-center gap-2"
+                  >
+                    💾 保存配置
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      checkLocalAIHealth();
+                    }}
+                    className="bg-slate-800/80 text-slate-300 px-6 py-2.5 rounded-xl hover:bg-slate-700/80 text-sm font-medium border border-slate-700/50 transition-all duration-200 flex items-center gap-2"
+                  >
+                    🔌 测试连接
+                  </button>
+                </div>
               </div>
             )}
           </div>

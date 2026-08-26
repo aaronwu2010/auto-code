@@ -22,6 +22,10 @@ type MessageSubmitter interface {
 	GetMessages() []types.Message
 	SetModel(model types.ModelSetting)
 	SetOllamaConfig(baseURL, apiKey, model string)
+	SetLocalAIConfig(baseURL, apiKey, model string)
+	GetLocalAIClient() *api.LocalAIClient
+	UseLocalAI() bool
+	SwitchToLocalAI(enable bool)
 	GetSessionID() types.SessionID
 	GetContextUsage(ctx stdctx.Context) (*types.ContextUsage, error)
 }
@@ -342,6 +346,192 @@ func (b *WailsBindings) RegisterMCPTool(request RegisterToolRequest) error {
 	}
 
 	return nil
+}
+
+// LocalAIConfigRequest 表示 LocalAI 配置请求
+type LocalAIConfigRequest struct {
+	BaseURL   string `json:"base_url"`
+	APIKey    string `json:"api_key"`
+	HasAPIKey bool   `json:"has_api_key"`
+	Model     string `json:"model"`
+	Enabled   bool   `json:"enabled"`
+}
+
+// SetLocalAIConfig 设置 LocalAI 配置
+func (b *WailsBindings) SetLocalAIConfig(request LocalAIConfigRequest) error {
+	b.appState.SetSetting("localai_base_url", request.BaseURL)
+	b.appState.SetSetting("localai_api_key", request.APIKey)
+	b.appState.SetSetting("localai_model", request.Model)
+	b.appState.SetSetting("localai_enabled", request.Enabled)
+
+	if request.Model != "" {
+		b.appState.SetMainLoopModel(types.ModelSetting(request.Model))
+	}
+
+	b.mu.RLock()
+	eng := b.engine
+	b.mu.RUnlock()
+
+	if eng != nil {
+		eng.SetLocalAIConfig(request.BaseURL, request.APIKey, request.Model)
+		eng.SwitchToLocalAI(request.Enabled)
+	}
+
+	return nil
+}
+
+// GetLocalAIConfig 获取 LocalAI 配置
+func (b *WailsBindings) GetLocalAIConfig() LocalAIConfigRequest {
+	baseURL, _ := b.appState.GetSetting("localai_base_url")
+	apiKey, _ := b.appState.GetSetting("localai_api_key")
+	model := string(b.appState.GetMainLoopModel())
+	enabled, _ := b.appState.GetSetting("localai_enabled")
+
+	if model == "" {
+		if savedModel, ok := b.appState.GetSetting("localai_model"); ok {
+			if s, ok := savedModel.(string); ok {
+				model = s
+			}
+		}
+	}
+
+	isEnabled := false
+	if enabled != nil {
+		if b, ok := enabled.(bool); ok {
+			isEnabled = b
+		}
+	}
+
+	return LocalAIConfigRequest{
+		BaseURL:   toString(baseURL, "http://localhost:8080"),
+		HasAPIKey: apiKey != "",
+		Model:     model,
+		Enabled:   isEnabled,
+	}
+}
+
+// ListLocalAIModelsResponse 表示 LocalAI 模型列表响应
+type ListLocalAIModelsResponse struct {
+	Models []ModelInfoUI `json:"models"`
+	Error  string        `json:"error,omitempty"`
+}
+
+// ListLocalAIMCPServersResponse 表示 LocalAI MCP 服务器列表响应
+type ListLocalAIMCPServersResponse struct {
+	Servers []MCPServerUI `json:"servers"`
+	Error   string        `json:"error,omitempty"`
+}
+
+// MCPServerUI 表示前端显示的 MCP 服务器信息
+type MCPServerUI struct {
+	Name  string   `json:"name"`
+	Type  string   `json:"type"`
+	Tools []string `json:"tools"`
+}
+
+// ListLocalAIModels 获取 LocalAI 可用模型列表
+func (b *WailsBindings) ListLocalAIModels() ListLocalAIModelsResponse {
+	config := b.GetLocalAIConfig()
+
+	client := b.createLocalAIClient(config)
+
+	models, err := client.ListModels(b.ctx)
+	if err != nil {
+		log.Printf("[Bindings] ListLocalAIModels failed: %v", err)
+		return ListLocalAIModelsResponse{
+			Error: err.Error(),
+		}
+	}
+
+	result := make([]ModelInfoUI, 0, len(models))
+	for _, m := range models {
+		result = append(result, ModelInfoUI{
+			Name: m.Name,
+		})
+	}
+
+	return ListLocalAIModelsResponse{Models: result}
+}
+
+// ListLocalAIMCPServers 获取 LocalAI 的 MCP 服务器列表
+func (b *WailsBindings) ListLocalAIMCPServers(model string) ListLocalAIMCPServersResponse {
+	config := b.GetLocalAIConfig()
+
+	client := b.createLocalAIClient(config)
+
+	servers, err := client.ListMCPServers(b.ctx, model)
+	if err != nil {
+		log.Printf("[Bindings] ListLocalAIMCPServers failed: %v", err)
+		return ListLocalAIMCPServersResponse{
+			Error: err.Error(),
+		}
+	}
+
+	result := make([]MCPServerUI, 0, len(servers))
+	for _, s := range servers {
+		result = append(result, MCPServerUI{
+			Name:  s.Name,
+			Type:  s.Type,
+			Tools: s.Tools,
+		})
+	}
+
+	return ListLocalAIMCPServersResponse{Servers: result}
+}
+
+// LocalAIHealthResponse 表示 LocalAI 健康检查响应
+type LocalAIHealthResponse struct {
+	Connected       bool   `json:"connected"`
+	Error           string `json:"error,omitempty"`
+	BaseURL         string `json:"base_url"`
+	Model           string `json:"model"`
+	Enabled         bool   `json:"enabled"`
+	AvailableModels int    `json:"available_models"`
+}
+
+// CheckLocalAIHealth 检查 LocalAI 服务健康状态
+func (b *WailsBindings) CheckLocalAIHealth() LocalAIHealthResponse {
+	config := b.GetLocalAIConfig()
+
+	client := b.createLocalAIClient(config)
+
+	err := client.CheckHealth(b.ctx)
+	connected := err == nil
+
+	availableModels := 0
+	if connected {
+		if models, err := client.ListModels(b.ctx); err == nil {
+			availableModels = len(models)
+		}
+	}
+
+	errMsg := ""
+	if err != nil {
+		errMsg = err.Error()
+	}
+
+	return LocalAIHealthResponse{
+		Connected:       connected,
+		Error:           errMsg,
+		BaseURL:         config.BaseURL,
+		Model:           config.Model,
+		Enabled:         config.Enabled,
+		AvailableModels: availableModels,
+	}
+}
+
+func (b *WailsBindings) createLocalAIClient(config LocalAIConfigRequest) *api.LocalAIClient {
+	localaiConfig := api.DefaultLocalAIConfig()
+	if config.BaseURL != "" {
+		localaiConfig.BaseURL = config.BaseURL
+	}
+	if config.APIKey != "" {
+		localaiConfig.APIKey = config.APIKey
+	}
+	if config.Model != "" {
+		localaiConfig.Model = config.Model
+	}
+	return api.NewLocalAIClient(localaiConfig)
 }
 
 // OllamaConfig 表示 Ollama 配置

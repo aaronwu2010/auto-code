@@ -6,6 +6,10 @@ export function AddTodo(arg1) {
   return window['go']['state']['WailsBindings']['AddTodo'](arg1);
 }
 
+export function CheckLocalAIHealth() {
+  return window['go']['state']['WailsBindings']['CheckLocalAIHealth']();
+}
+
 export function CheckOllamaHealth() {
   return window['go']['state']['WailsBindings']['CheckOllamaHealth']();
 }
@@ -20,6 +24,10 @@ export function GetAvailableTools() {
 
 export function GetContextUsage() {
   return window['go']['state']['WailsBindings']['GetContextUsage']();
+}
+
+export function GetLocalAIConfig() {
+  return window['go']['state']['WailsBindings']['GetLocalAIConfig']();
 }
 
 export function GetMCPStatus() {
@@ -54,6 +62,14 @@ export function ListDirectoryContents(arg1) {
   return window['go']['state']['WailsBindings']['ListDirectoryContents'](arg1);
 }
 
+export function ListLocalAIMCPServers(arg1) {
+  return window['go']['state']['WailsBindings']['ListLocalAIMCPServers'](arg1);
+}
+
+export function ListLocalAIModels() {
+  return window['go']['state']['WailsBindings']['ListLocalAIModels']();
+}
+
 export function RefreshContext() {
   return window['go']['state']['WailsBindings']['RefreshContext']();
 }
@@ -76,6 +92,10 @@ export function SetEngine(arg1) {
 
 export function SetFastMode(arg1) {
   return window['go']['state']['WailsBindings']['SetFastMode'](arg1);
+}
+
+export function SetLocalAIConfig(arg1) {
+  return window['go']['state']['WailsBindings']['SetLocalAIConfig'](arg1);
 }
 
 export function SetModel(arg1) {
