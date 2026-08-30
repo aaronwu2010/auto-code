@@ -11,6 +11,8 @@ export function CheckLocalAIHealth():Promise<state.LocalAIHealthResponse>;
 
 export function CheckOllamaHealth():Promise<state.OllamaHealthResponse>;
 
+export function CheckOpenAIHealth():Promise<state.OpenAIHealthResponse>;
+
 export function GetAppState():Promise<state.AppStateSnapshot>;
 
 export function GetAvailableTools():Promise<Array<state.ToolInfo>>;
@@ -25,6 +27,8 @@ export function GetMessages():Promise<state.GetMessagesResponse>;
 
 export function GetOllamaConfig():Promise<state.OllamaConfigRequest>;
 
+export function GetOpenAIConfig():Promise<state.OpenAIConfigRequest>;
+
 export function GetProjectDirectory():Promise<string>;
 
 export function GetSessionID():Promise<string>;
@@ -38,6 +42,8 @@ export function ListDirectoryContents(arg1:string):Promise<Array<state.FileInfo>
 export function ListLocalAIMCPServers(arg1:string):Promise<state.ListLocalAIMCPServersResponse>;
 
 export function ListLocalAIModels():Promise<state.ListLocalAIModelsResponse>;
+
+export function ListOpenAIModels():Promise<state.ListOpenAIModelsResponse>;
 
 export function RefreshContext():Promise<void>;
 
@@ -56,6 +62,8 @@ export function SetLocalAIConfig(arg1:state.LocalAIConfigRequest):Promise<void>;
 export function SetModel(arg1:state.SetModelRequest):Promise<void>;
 
 export function SetOllamaConfig(arg1:state.OllamaConfigRequest):Promise<void>;
+
+export function SetOpenAIConfig(arg1:state.OpenAIConfigRequest):Promise<void>;
 
 export function SetPermissionMode(arg1:state.SetPermissionModeRequest):Promise<void>;
 

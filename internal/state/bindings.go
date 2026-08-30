@@ -26,6 +26,10 @@ type MessageSubmitter interface {
 	GetLocalAIClient() *api.LocalAIClient
 	UseLocalAI() bool
 	SwitchToLocalAI(enable bool)
+	SetOpenAIConfig(baseURL, apiKey, model string)
+	GetOpenAIClient() *api.OpenAIClient
+	UseOpenAI() bool
+	SwitchToOpenAI(enable bool)
 	GetSessionID() types.SessionID
 	GetContextUsage(ctx stdctx.Context) (*types.ContextUsage, error)
 }
@@ -532,6 +536,142 @@ func (b *WailsBindings) createLocalAIClient(config LocalAIConfigRequest) *api.Lo
 		localaiConfig.Model = config.Model
 	}
 	return api.NewLocalAIClient(localaiConfig)
+}
+
+// ========== OpenAI 配置 ==========
+
+// OpenAIConfigRequest 表示 OpenAI（或任何 OpenAI 兼容端点）配置请求
+type OpenAIConfigRequest struct {
+	BaseURL   string `json:"base_url"` // 默认 https://api.openai.com/v1
+	APIKey    string `json:"api_key"`
+	HasAPIKey bool   `json:"has_api_key"`
+	Model     string `json:"model"`
+	Enabled   bool   `json:"enabled"`
+}
+
+// SetOpenAIConfig 设置 OpenAI 配置
+func (b *WailsBindings) SetOpenAIConfig(request OpenAIConfigRequest) error {
+	b.appState.SetSetting("openai_base_url", request.BaseURL)
+	b.appState.SetSetting("openai_api_key", request.APIKey)
+	b.appState.SetSetting("openai_model", request.Model)
+	b.appState.SetSetting("openai_enabled", request.Enabled)
+
+	if request.Model != "" {
+		b.appState.SetMainLoopModel(types.ModelSetting(request.Model))
+	}
+
+	b.mu.RLock()
+	eng := b.engine
+	b.mu.RUnlock()
+
+	if eng != nil {
+		eng.SetOpenAIConfig(request.BaseURL, request.APIKey, request.Model)
+		eng.SwitchToOpenAI(request.Enabled)
+	}
+
+	return nil
+}
+
+// GetOpenAIConfig 获取 OpenAI 配置
+func (b *WailsBindings) GetOpenAIConfig() OpenAIConfigRequest {
+	baseURL, _ := b.appState.GetSetting("openai_base_url")
+	apiKey, _ := b.appState.GetSetting("openai_api_key")
+	model := string(b.appState.GetMainLoopModel())
+	enabled, _ := b.appState.GetSetting("openai_enabled")
+
+	if model == "" {
+		if savedModel, ok := b.appState.GetSetting("openai_model"); ok {
+			if s, ok := savedModel.(string); ok {
+				model = s
+			}
+		}
+	}
+
+	isEnabled := false
+	if enabled != nil {
+		if bb, ok := enabled.(bool); ok {
+			isEnabled = bb
+		}
+	}
+
+	return OpenAIConfigRequest{
+		BaseURL:   toString(baseURL, api.DefaultOpenAIConfig().BaseURL),
+		HasAPIKey: apiKey != "",
+		Model:     model,
+		Enabled:   isEnabled,
+	}
+}
+
+// ListOpenAIModelsResponse 表示 OpenAI 模型列表响应
+type ListOpenAIModelsResponse struct {
+	Models []ModelInfoUI `json:"models"`
+	Error  string        `json:"error,omitempty"`
+}
+
+// ListOpenAIModels 获取 OpenAI 可用模型列表
+func (b *WailsBindings) ListOpenAIModels() ListOpenAIModelsResponse {
+	config := b.GetOpenAIConfig()
+
+	client := b.createOpenAIClient(config)
+
+	models, err := client.ListModels(b.ctx)
+	if err != nil {
+		log.Printf("[Bindings] ListOpenAIModels failed: %v", err)
+		return ListOpenAIModelsResponse{Error: err.Error()}
+	}
+
+	result := make([]ModelInfoUI, 0, len(models))
+	for _, m := range models {
+		ctxLen, _ := client.ShowModel(b.ctx, m.Name)
+		result = append(result, ModelInfoUI{
+			Name:          m.Name,
+			ContextLength: ctxLen,
+		})
+	}
+
+	return ListOpenAIModelsResponse{Models: result}
+}
+
+// OpenAIHealthResponse 表示 OpenAI 健康检查响应
+type OpenAIHealthResponse struct {
+	Connected       bool   `json:"connected"`
+	Error           string `json:"error,omitempty"`
+	BaseURL         string `json:"base_url"`
+	Model           string `json:"model"`
+	Enabled         bool   `json:"enabled"`
+	AvailableModels int    `json:"available_models"`
+}
+
+// CheckOpenAIHealth 检查 OpenAI API 健康状态（通过 GET /v1/models 验证 API Key 有效性）
+func (b *WailsBindings) CheckOpenAIHealth() OpenAIHealthResponse {
+	config := b.GetOpenAIConfig()
+
+	client := b.createOpenAIClient(config)
+
+	status := client.CheckHealth(b.ctx)
+
+	return OpenAIHealthResponse{
+		Connected:       status.Connected,
+		Error:           status.Error,
+		BaseURL:         config.BaseURL,
+		Model:           config.Model,
+		Enabled:         config.Enabled,
+		AvailableModels: status.AvailableModels,
+	}
+}
+
+func (b *WailsBindings) createOpenAIClient(config OpenAIConfigRequest) *api.OpenAIClient {
+	cfg := api.DefaultOpenAIConfig()
+	if config.BaseURL != "" {
+		cfg.BaseURL = config.BaseURL
+	}
+	if config.APIKey != "" {
+		cfg.APIKey = config.APIKey
+	}
+	if config.Model != "" {
+		cfg.Model = config.Model
+	}
+	return api.NewOpenAIClient(cfg)
 }
 
 // OllamaConfig 表示 Ollama 配置

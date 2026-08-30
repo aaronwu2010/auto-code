@@ -52,6 +52,8 @@ type QueryEngine struct {
 	apiClient           *api.Client
 	localaiClient       *api.LocalAIClient
 	useLocalAI          bool
+	openaiClient        *api.OpenAIClient
+	useOpenAI           bool
 	messages            []types.Message
 	mu                  sync.RWMutex
 	ctx                 context.Context
@@ -97,6 +99,7 @@ type QueryEngineConfig struct {
 	Verbose            bool
 	OllamaConfig       api.OllamaConfig
 	LocalAIConfig      *api.LocalAIConfig
+	OpenAIConfig       *api.OpenAIConfig
 	ModelOptions       *api.ModelOptions
 }
 
@@ -134,6 +137,17 @@ func NewQueryEngine(appState *state.AppState, config *QueryEngineConfig) *QueryE
 		useLocalAI = true
 	}
 
+	var openaiClient *api.OpenAIClient
+	useOpenAI := false
+	if config.OpenAIConfig != nil {
+		openaiConfig := *config.OpenAIConfig
+		if openaiConfig.Model == "" && config.UserSpecifiedModel != "" {
+			openaiConfig.Model = string(config.UserSpecifiedModel)
+		}
+		openaiClient = api.NewOpenAIClient(openaiConfig)
+		useOpenAI = true
+	}
+
 	toolReg := registry.NewDefaultToolRegistry()
 
 	return &QueryEngine{
@@ -142,6 +156,8 @@ func NewQueryEngine(appState *state.AppState, config *QueryEngineConfig) *QueryE
 		apiClient:       apiClient,
 		localaiClient:   localaiClient,
 		useLocalAI:      useLocalAI,
+		openaiClient:    openaiClient,
+		useOpenAI:       useOpenAI,
 		messages:        make([]types.Message, 0),
 		sessionID:       generateSessionID(),
 		config:          config,
@@ -830,6 +846,8 @@ func (qe *QueryEngine) SetOllamaConfig(baseURL, apiKey, model string) {
 		KeepAlive: api.DefaultOllamaConfig().KeepAlive,
 	}
 	qe.apiClient = api.NewClient(cfg)
+	qe.useOpenAI = false
+	qe.useLocalAI = false
 
 	if model != "" {
 		qe.config.UserSpecifiedModel = types.ModelSetting(model)
@@ -852,6 +870,7 @@ func (qe *QueryEngine) SetLocalAIConfig(baseURL, apiKey, model string) {
 	}
 	qe.localaiClient = api.NewLocalAIClient(cfg)
 	qe.useLocalAI = true
+	qe.useOpenAI = false
 
 	if model != "" {
 		qe.config.UserSpecifiedModel = types.ModelSetting(model)
@@ -870,6 +889,42 @@ func (qe *QueryEngine) UseLocalAI() bool {
 
 func (qe *QueryEngine) SwitchToLocalAI(enable bool) {
 	qe.useLocalAI = enable
+	if enable {
+		qe.useOpenAI = false
+	}
+}
+
+// SetOpenAIConfig 配置并启用 OpenAI（或任何 OpenAI 格式兼容端点，如 OneAPI、DeepSeek、Groq 等）
+func (qe *QueryEngine) SetOpenAIConfig(baseURL, apiKey, model string) {
+	cfg := api.DefaultOpenAIConfig()
+	if baseURL != "" {
+		cfg.BaseURL = baseURL
+	}
+	cfg.APIKey = apiKey
+	cfg.Model = model
+	qe.openaiClient = api.NewOpenAIClient(cfg)
+	qe.useOpenAI = true
+
+	if model != "" {
+		qe.config.UserSpecifiedModel = types.ModelSetting(model)
+		qe.appState.SetMainLoopModel(types.ModelSetting(model))
+	}
+	qe.config.OpenAIConfig = &cfg
+}
+
+func (qe *QueryEngine) GetOpenAIClient() *api.OpenAIClient {
+	return qe.openaiClient
+}
+
+func (qe *QueryEngine) UseOpenAI() bool {
+	return qe.useOpenAI
+}
+
+func (qe *QueryEngine) SwitchToOpenAI(enable bool) {
+	qe.useOpenAI = enable
+	if enable {
+		qe.useLocalAI = false
+	}
 }
 
 func (qe *QueryEngine) GetSessionID() types.SessionID {
@@ -887,25 +942,66 @@ func (qe *QueryEngine) GetTotalCost() float64 {
 }
 
 func (qe *QueryEngine) CheckHealth(ctx context.Context) *api.HealthStatus {
-	if qe.apiClient == nil {
-		return &api.HealthStatus{Connected: false, Error: "API client not initialized"}
+	switch qe.currentBackend() {
+	case backendOpenAI:
+		if qe.openaiClient != nil {
+			return qe.openaiClient.CheckHealth(ctx)
+		}
+	case backendLocalAI:
+		if qe.localaiClient != nil {
+			status := &api.HealthStatus{IsLocal: false}
+			if err := qe.localaiClient.CheckHealth(ctx); err != nil {
+				status.Error = err.Error()
+			} else {
+				status.Connected = true
+				if models, mErr := qe.localaiClient.ListModels(ctx); mErr == nil {
+					status.AvailableModels = len(models)
+				}
+			}
+			return status
+		}
+	default:
+		if qe.apiClient != nil {
+			return qe.apiClient.CheckHealth(ctx)
+		}
 	}
-	return qe.apiClient.CheckHealth(ctx)
+	return &api.HealthStatus{Connected: false, Error: "API client not initialized"}
 }
 
 func (qe *QueryEngine) ListModels(ctx context.Context) ([]api.ModelInfo, error) {
-	if qe.apiClient == nil {
-		return nil, fmt.Errorf("API client not initialized")
+	switch qe.currentBackend() {
+	case backendOpenAI:
+		if qe.openaiClient != nil {
+			return qe.openaiClient.ListModels(ctx)
+		}
+	case backendLocalAI:
+		if qe.localaiClient != nil {
+			return qe.localaiClient.ListModels(ctx)
+		}
+	default:
+		if qe.apiClient != nil {
+			return qe.apiClient.ListModels(ctx)
+		}
 	}
-	return qe.apiClient.ListModels(ctx)
+	return nil, fmt.Errorf("API client not initialized")
 }
 
 // ShowModel 返回模型的最大上下文 token 数
 func (qe *QueryEngine) ShowModel(ctx context.Context, modelName string) (int, error) {
-	if qe.apiClient == nil {
-		return 0, fmt.Errorf("API client not initialized")
+	switch qe.currentBackend() {
+	case backendOpenAI:
+		if qe.openaiClient != nil {
+			return qe.openaiClient.ShowModel(ctx, modelName)
+		}
+	case backendLocalAI:
+		// LocalAI 没有 ShowModel，用保守默认值
+		return 0, nil
+	default:
+		if qe.apiClient != nil {
+			return qe.apiClient.ShowModel(ctx, modelName)
+		}
 	}
-	return qe.apiClient.ShowModel(ctx, modelName)
+	return 0, fmt.Errorf("API client not initialized")
 }
 
 // GetContextUsage 评估当前对话（system prompt + messages）占模型最大 token 窗口的比例
@@ -958,7 +1054,39 @@ func (qe *QueryEngine) GetContextUsage(ctx context.Context) (*types.ContextUsage
 	}, nil
 }
 
+// backendType 标识当前走哪个 API 后端
+type backendType int
+
+const (
+	backendOllama  backendType = iota // 默认
+	backendLocalAI
+	backendOpenAI
+)
+
+func (qe *QueryEngine) currentBackend() backendType {
+	if qe.useOpenAI && qe.openaiClient != nil {
+		return backendOpenAI
+	}
+	if qe.useLocalAI && qe.localaiClient != nil {
+		return backendLocalAI
+	}
+	return backendOllama
+}
+
 func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) (<-chan query.QueryOutput, error) {
+	backend := qe.currentBackend()
+
+	switch backend {
+	case backendOpenAI:
+		return qe.callModelOpenAI(ctx, params)
+	case backendLocalAI:
+		return qe.callModelLocalAI(ctx, params)
+	default:
+		return qe.callModelOllama(ctx, params)
+	}
+}
+
+func (qe *QueryEngine) callModelOllama(ctx context.Context, params query.QueryParams) (<-chan query.QueryOutput, error) {
 	if qe.apiClient == nil {
 		log.Printf("[Engine] apiClient not configured")
 		ch := make(chan query.QueryOutput, 1)
@@ -968,7 +1096,7 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 	}
 
 	ollamaMessages := api.ConvertMessagesToOllama(params.Messages, params.SystemPrompt.Content)
-	log.Printf("[Engine] callModel: model=%s, ollama_msgs=%d, tools=%d", params.Model, len(ollamaMessages), len(params.Tools))
+	log.Printf("[Engine] callModel(Ollama): model=%s, ollama_msgs=%d, tools=%d", params.Model, len(ollamaMessages), len(params.Tools))
 	for i, m := range ollamaMessages {
 		toolCallsInfo := ""
 		if len(m.ToolCalls) > 0 {
@@ -986,7 +1114,7 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 		if len(contentPreview) > 80 {
 			contentPreview = contentPreview[:80] + "..."
 		}
-		log.Printf("[Engine] callModel: msg[%d] role=%s, content_len=%d%s%s, preview=%q",
+		log.Printf("[Engine] callModel(Ollama): msg[%d] role=%s, content_len=%d%s%s, preview=%q",
 			i, m.Role, len(m.Content), toolCallsInfo, toolCallIDInfo, contentPreview)
 	}
 
@@ -1015,14 +1143,101 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 		req.Think = true
 	}
 
-	log.Printf("[Engine] callModel: calling ChatWithStreaming...")
+	log.Printf("[Engine] callModel(Ollama): calling ChatWithStreaming...")
 	streamCh, err := qe.apiClient.ChatWithStreaming(ctx, req)
 	if err != nil {
 		log.Printf("[Engine] ChatWithStreaming failed: %v", err)
 		return nil, err
 	}
-	log.Printf("[Engine] callModel: ChatWithStreaming returned, starting bridge goroutine")
+	log.Printf("[Engine] callModel(Ollama): ChatWithStreaming returned, starting bridge goroutine")
 
+	return qe.bridgeStream(streamCh), nil
+}
+
+func (qe *QueryEngine) callModelLocalAI(ctx context.Context, params query.QueryParams) (<-chan query.QueryOutput, error) {
+	if qe.localaiClient == nil {
+		ch := make(chan query.QueryOutput, 1)
+		ch <- query.QueryOutput{Type: "error", Error: fmt.Errorf("LocalAI 客户端未配置")}
+		close(ch)
+		return ch, nil
+	}
+
+	msgs := api.ConvertMessagesToLocalAI(params.Messages)
+	log.Printf("[Engine] callModel(LocalAI): model=%s, msgs=%d, tools=%d", params.Model, len(msgs), len(params.Tools))
+
+	toolDefs := make([]api.ToolFunction, 0, len(params.Tools))
+	for _, t := range params.Tools {
+		desc, _ := t.Description(ctx, nil)
+		toolDefs = append(toolDefs, api.ToolFunction{
+			Name:        t.Name(),
+			Description: desc,
+			Parameters:  t.InputSchema(),
+		})
+	}
+
+	req := api.LocalAIChatRequest{
+		Model:    string(params.Model),
+		Messages: msgs,
+		Stream:   true,
+	}
+
+	if len(toolDefs) > 0 {
+		req.Tools = api.ConvertToolsToLocalAI(toolDefs)
+	}
+
+	log.Printf("[Engine] callModel(LocalAI): calling ChatWithStreaming...")
+	streamCh, err := qe.localaiClient.ChatWithStreaming(ctx, req)
+	if err != nil {
+		log.Printf("[Engine] LocalAI ChatWithStreaming failed: %v", err)
+		return nil, err
+	}
+
+	return qe.bridgeStream(streamCh), nil
+}
+
+func (qe *QueryEngine) callModelOpenAI(ctx context.Context, params query.QueryParams) (<-chan query.QueryOutput, error) {
+	if qe.openaiClient == nil {
+		ch := make(chan query.QueryOutput, 1)
+		ch <- query.QueryOutput{Type: "error", Error: fmt.Errorf("OpenAI 客户端未配置")}
+		close(ch)
+		return ch, nil
+	}
+
+	msgs := api.ConvertMessagesToOpenAI(params.Messages, params.SystemPrompt.Content)
+	log.Printf("[Engine] callModel(OpenAI): model=%s, msgs=%d, tools=%d", params.Model, len(msgs), len(params.Tools))
+
+	toolDefs := make([]api.ToolFunction, 0, len(params.Tools))
+	for _, t := range params.Tools {
+		desc, _ := t.Description(ctx, nil)
+		toolDefs = append(toolDefs, api.ToolFunction{
+			Name:        t.Name(),
+			Description: desc,
+			Parameters:  t.InputSchema(),
+		})
+	}
+
+	req := api.OpenAIChatRequest{
+		Model:    string(params.Model),
+		Messages: msgs,
+		Stream:   true,
+	}
+
+	if len(toolDefs) > 0 {
+		req.Tools = api.ConvertToolsToOpenAI(toolDefs)
+	}
+
+	log.Printf("[Engine] callModel(OpenAI): calling ChatWithStreaming...")
+	streamCh, err := qe.openaiClient.ChatWithStreaming(ctx, req)
+	if err != nil {
+		log.Printf("[Engine] OpenAI ChatWithStreaming failed: %v", err)
+		return nil, err
+	}
+
+	return qe.bridgeStream(streamCh), nil
+}
+
+// bridgeStream 把 api.StreamMessage 桥接到 query.QueryOutput（三种后端共用的桥接逻辑）
+func (qe *QueryEngine) bridgeStream(streamCh <-chan api.StreamMessage) <-chan query.QueryOutput {
 	outputCh := make(chan query.QueryOutput, 256)
 	go func() {
 		defer close(outputCh)
@@ -1052,8 +1267,91 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 		}
 		log.Printf("[Engine] callModel: streamCh closed after %d messages", msgCount)
 	}()
+	return outputCh
+}
 
-	return outputCh, nil
+// callModelSimple 非流式、单轮模型调用。供 sideQuery / summarizeWithLLM 等内部任务使用。
+// 输入是纯文本 system + user，返回纯文本 assistant。
+// 自动根据 currentBackend() 路由到 Ollama / LocalAI / OpenAI。
+func (qe *QueryEngine) callModelSimple(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	backend := qe.currentBackend()
+	callCtx := ctx
+	if callCtx == nil {
+		callCtx = qe.ctx
+	}
+	if callCtx == nil {
+		callCtx = context.Background()
+	}
+
+	switch backend {
+	case backendOpenAI:
+		if qe.openaiClient == nil {
+			return "", fmt.Errorf("OpenAI client not configured")
+		}
+		temp := 0.0
+		model := string(qe.config.UserSpecifiedModel)
+		req := api.OpenAIChatRequest{
+			Model:       model,
+			Messages:    []api.OpenAIMessage{{Role: "system", Content: systemPrompt}, {Role: "user", Content: userPrompt}},
+			Stream:      false,
+			Temperature: &temp,
+		}
+		if req.Model == "" {
+			req.Model = qe.openaiClient.GetConfig().Model
+		}
+		resp, err := qe.openaiClient.ChatWithoutStreaming(callCtx, req)
+		if err != nil {
+			return "", err
+		}
+		if len(resp.Choices) > 0 && resp.Choices[0].Message != nil {
+			return resp.Choices[0].Message.Content, nil
+		}
+		return "", fmt.Errorf("OpenAI empty response")
+
+	case backendLocalAI:
+		if qe.localaiClient == nil {
+			return "", fmt.Errorf("LocalAI client not configured")
+		}
+		model := string(qe.config.UserSpecifiedModel)
+		req := api.LocalAIChatRequest{
+			Model:    model,
+			Messages: []api.LocalAIMessage{{Role: "system", Content: systemPrompt}, {Role: "user", Content: userPrompt}},
+			Stream:   false,
+		}
+		if req.Model == "" {
+			req.Model = qe.localaiClient.GetConfig().Model
+		}
+		resp, err := qe.localaiClient.ChatWithoutStreaming(callCtx, req)
+		if err != nil {
+			return "", err
+		}
+		if len(resp.Choices) > 0 && resp.Choices[0].Message != nil {
+			return resp.Choices[0].Message.Content, nil
+		}
+		return "", fmt.Errorf("LocalAI empty response")
+
+	default: // backendOllama
+		if qe.apiClient == nil {
+			return "", fmt.Errorf("Ollama client not configured")
+		}
+		temp := 0.0
+		numPredict := 4096
+		model := api.NormalizeModelName(string(qe.config.UserSpecifiedModel))
+		req := api.OllamaChatRequest{
+			Model:    model,
+			Messages: []api.OllamaMessage{{Role: "system", Content: systemPrompt}, {Role: "user", Content: userPrompt}},
+			Stream:   false,
+			Options:  &api.ModelOptions{Temperature: &temp, NumPredict: &numPredict},
+		}
+		if req.Model == "" {
+			req.Model = qe.apiClient.GetConfig().Model
+		}
+		resp, err := qe.apiClient.ChatWithoutStreaming(callCtx, req)
+		if err != nil {
+			return "", err
+		}
+		return resp.Content, nil
+	}
 }
 
 func (qe *QueryEngine) processQueryOutput(ctx context.Context, output query.QueryOutput) []SDKMessage {
@@ -1300,40 +1598,7 @@ func (qe *QueryEngine) ensureUserContextMessage(ctx context.Context) {
 }
 
 func (qe *QueryEngine) sideQuery(ctx context.Context, systemPrompt, userPrompt string, outputPath string) (string, error) {
-	if qe.apiClient == nil {
-		return "", fmt.Errorf("api client not configured")
-	}
-
-	ollamaMessages := []api.OllamaMessage{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userPrompt},
-	}
-
-	temp := 0.0
-	numPredict := 2048
-	req := api.OllamaChatRequest{
-		Messages: ollamaMessages,
-		Stream:   false,
-		Options: &api.ModelOptions{
-			Temperature: &temp,
-			NumPredict:  &numPredict,
-		},
-	}
-
-	callCtx := ctx
-	if callCtx == nil {
-		callCtx = qe.ctx
-	}
-	if callCtx == nil {
-		callCtx = context.Background()
-	}
-
-	resp, err := qe.apiClient.ChatWithoutStreaming(callCtx, req)
-	if err != nil {
-		return "", err
-	}
-
-	return resp.Content, nil
+	return qe.callModelSimple(ctx, systemPrompt, userPrompt)
 }
 
 const (
@@ -1691,55 +1956,126 @@ func (qe *QueryEngine) summarizeWithLLM(ctx any, messages []compact.CompactMessa
 		return "", nil
 	}
 
-	// 构建 API 请求消息：先放对话消息，最后放摘要指令
-	ollamaMessages := make([]api.OllamaMessage, 0, len(messages)+1)
-	for _, msg := range messages {
-		role := msg.Role
-		if role == "" {
-			role = "user"
-		}
-		ollamaMessages = append(ollamaMessages, api.OllamaMessage{
-			Role:    role,
-			Content: msg.Content,
-		})
-	}
-	// 摘要指令作为最后一条 user 消息
-	ollamaMessages = append(ollamaMessages, api.OllamaMessage{
-		Role:    "user",
-		Content: prompt,
-	})
-
-	// 摘要任务使用确定性参数：temperature=0，限制输出长度
-	temp := 0.0
-	numPredict := 4096
-	req := api.OllamaChatRequest{
-		Messages: ollamaMessages,
-		Stream:   false,
-		Options: &api.ModelOptions{
-			Temperature: &temp,
-			NumPredict:  &numPredict,
-		},
-	}
-
-	// 使用引擎上下文，确保取消时能级联
 	callCtx := qe.ctx
 	if callCtx == nil {
 		callCtx = context.Background()
 	}
 
-	resp, err := qe.apiClient.ChatWithoutStreaming(callCtx, req)
-	if err != nil {
-		log.Printf("[Compact] LLM 摘要调用失败: %v", err)
-		return "", err
-	}
+	backend := qe.currentBackend()
 
-	if strings.TrimSpace(resp.Content) == "" {
-		log.Printf("[Compact] LLM 返回空内容")
-		return "", fmt.Errorf("LLM 返回空摘要")
-	}
+	switch backend {
+	case backendOpenAI:
+		if qe.openaiClient == nil {
+			return "", fmt.Errorf("OpenAI client not configured")
+		}
+		temp := 0.0
+		msgs := make([]api.OpenAIMessage, 0, len(messages)+1)
+		for _, m := range messages {
+			role := m.Role
+			if role == "" {
+				role = "user"
+			}
+			msgs = append(msgs, api.OpenAIMessage{Role: role, Content: m.Content})
+		}
+		msgs = append(msgs, api.OpenAIMessage{Role: "user", Content: prompt})
+		model := string(qe.config.UserSpecifiedModel)
+		req := api.OpenAIChatRequest{Model: model, Messages: msgs, Stream: false, Temperature: &temp}
+		if req.Model == "" {
+			req.Model = qe.openaiClient.GetConfig().Model
+		}
+		resp, err := qe.openaiClient.ChatWithoutStreaming(callCtx, req)
+		if err != nil {
+			log.Printf("[Compact] LLM 摘要调用失败 (OpenAI): %v", err)
+			return "", err
+		}
+		if len(resp.Choices) > 0 && resp.Choices[0].Message != nil {
+			content := strings.TrimSpace(resp.Choices[0].Message.Content)
+			if content == "" {
+				log.Printf("[Compact] LLM 返回空内容")
+				return "", fmt.Errorf("LLM 返回空摘要")
+			}
+			log.Printf("[Compact] LLM 摘要成功")
+			return content, nil
+		}
+		return "", fmt.Errorf("OpenAI empty response")
 
-	log.Printf("[Compact] LLM 摘要成功")
-	return resp.Content, nil
+	case backendLocalAI:
+		if qe.localaiClient == nil {
+			return "", fmt.Errorf("LocalAI client not configured")
+		}
+		msgs := make([]api.LocalAIMessage, 0, len(messages)+1)
+		for _, m := range messages {
+			role := m.Role
+			if role == "" {
+				role = "user"
+			}
+			msgs = append(msgs, api.LocalAIMessage{Role: role, Content: m.Content})
+		}
+		msgs = append(msgs, api.LocalAIMessage{Role: "user", Content: prompt})
+		model := string(qe.config.UserSpecifiedModel)
+		req := api.LocalAIChatRequest{Model: model, Messages: msgs, Stream: false}
+		if req.Model == "" {
+			req.Model = qe.localaiClient.GetConfig().Model
+		}
+		resp, err := qe.localaiClient.ChatWithoutStreaming(callCtx, req)
+		if err != nil {
+			log.Printf("[Compact] LLM 摘要调用失败 (LocalAI): %v", err)
+			return "", err
+		}
+		if len(resp.Choices) > 0 && resp.Choices[0].Message != nil {
+			content := strings.TrimSpace(resp.Choices[0].Message.Content)
+			if content == "" {
+				log.Printf("[Compact] LLM 返回空内容")
+				return "", fmt.Errorf("LLM 返回空摘要")
+			}
+			log.Printf("[Compact] LLM 摘要成功")
+			return content, nil
+		}
+		return "", fmt.Errorf("LocalAI empty response")
+
+	default: // backendOllama
+		if qe.apiClient == nil {
+			return "", fmt.Errorf("Ollama client not configured")
+		}
+		ollamaMessages := make([]api.OllamaMessage, 0, len(messages)+1)
+		for _, msg := range messages {
+			role := msg.Role
+			if role == "" {
+				role = "user"
+			}
+			ollamaMessages = append(ollamaMessages, api.OllamaMessage{Role: role, Content: msg.Content})
+		}
+		ollamaMessages = append(ollamaMessages, api.OllamaMessage{Role: "user", Content: prompt})
+
+		temp := 0.0
+		numPredict := 4096
+		req := api.OllamaChatRequest{
+			Messages: ollamaMessages,
+			Stream:   false,
+			Options:  &api.ModelOptions{Temperature: &temp, NumPredict: &numPredict},
+		}
+		model := api.NormalizeModelName(string(qe.config.UserSpecifiedModel))
+		if model != "" {
+			req.Model = model
+		}
+		if req.Model == "" {
+			req.Model = qe.apiClient.GetConfig().Model
+		}
+
+		resp, err := qe.apiClient.ChatWithoutStreaming(callCtx, req)
+		if err != nil {
+			log.Printf("[Compact] LLM 摘要调用失败: %v", err)
+			return "", err
+		}
+
+		if strings.TrimSpace(resp.Content) == "" {
+			log.Printf("[Compact] LLM 返回空内容")
+			return "", fmt.Errorf("LLM 返回空摘要")
+		}
+
+		log.Printf("[Compact] LLM 摘要成功")
+		return resp.Content, nil
+	}
 }
 
 func (qe *QueryEngine) autoCompact(messages []types.Message) (*query.CompactionResult, error) {

@@ -14,6 +14,10 @@ export function CheckOllamaHealth() {
   return window['go']['state']['WailsBindings']['CheckOllamaHealth']();
 }
 
+export function CheckOpenAIHealth() {
+  return window['go']['state']['WailsBindings']['CheckOpenAIHealth']();
+}
+
 export function GetAppState() {
   return window['go']['state']['WailsBindings']['GetAppState']();
 }
@@ -42,6 +46,10 @@ export function GetOllamaConfig() {
   return window['go']['state']['WailsBindings']['GetOllamaConfig']();
 }
 
+export function GetOpenAIConfig() {
+  return window['go']['state']['WailsBindings']['GetOpenAIConfig']();
+}
+
 export function GetProjectDirectory() {
   return window['go']['state']['WailsBindings']['GetProjectDirectory']();
 }
@@ -68,6 +76,10 @@ export function ListLocalAIMCPServers(arg1) {
 
 export function ListLocalAIModels() {
   return window['go']['state']['WailsBindings']['ListLocalAIModels']();
+}
+
+export function ListOpenAIModels() {
+  return window['go']['state']['WailsBindings']['ListOpenAIModels']();
 }
 
 export function RefreshContext() {
@@ -104,6 +116,10 @@ export function SetModel(arg1) {
 
 export function SetOllamaConfig(arg1) {
   return window['go']['state']['WailsBindings']['SetOllamaConfig'](arg1);
+}
+
+export function SetOpenAIConfig(arg1) {
+  return window['go']['state']['WailsBindings']['SetOpenAIConfig'](arg1);
 }
 
 export function SetPermissionMode(arg1) {

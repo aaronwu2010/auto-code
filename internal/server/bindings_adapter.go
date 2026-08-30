@@ -29,6 +29,14 @@ type MessageSubmitter interface {
 	GetMessages() []types.Message
 	SetModel(model types.ModelSetting)
 	SetOllamaConfig(baseURL, apiKey, model string)
+	SetLocalAIConfig(baseURL, apiKey, model string)
+	GetLocalAIClient() *api.LocalAIClient
+	UseLocalAI() bool
+	SwitchToLocalAI(enable bool)
+	SetOpenAIConfig(baseURL, apiKey, model string)
+	GetOpenAIClient() *api.OpenAIClient
+	UseOpenAI() bool
+	SwitchToOpenAI(enable bool)
 	GetSessionID() types.SessionID
 	CheckHealth(ctx context.Context) *api.HealthStatus
 	ListModels(ctx context.Context) ([]api.ModelInfo, error)
@@ -368,6 +376,122 @@ func (a *Adapter) CheckOllamaHealth(ctx context.Context) OllamaHealthResponse {
 		Model:           config.Model,
 		AvailableModels: status.AvailableModels,
 	}
+}
+
+// ========== OpenAI 配置 ==========
+
+// OpenAIConfigRequest 表示 OpenAI（或任何 OpenAI 兼容端点）配置请求
+type OpenAIConfigRequest struct {
+	BaseURL string `json:"base_url"` // 默认 https://api.openai.com/v1
+	APIKey  string `json:"api_key"`
+	Model   string `json:"model"`
+}
+
+// SetOpenAIConfig 设置 OpenAI 配置
+func (a *Adapter) SetOpenAIConfig(req OpenAIConfigRequest) error {
+	a.appState.SetSetting("openai_base_url", req.BaseURL)
+	a.appState.SetSetting("openai_api_key", req.APIKey)
+	a.appState.SetSetting("openai_model", req.Model)
+
+	if req.Model != "" {
+		a.appState.SetMainLoopModel(types.ModelSetting(req.Model))
+	}
+
+	eng, _ := a.engineOrError()
+	if eng != nil {
+		eng.SetOpenAIConfig(req.BaseURL, req.APIKey, req.Model)
+	}
+	return nil
+}
+
+// GetOpenAIConfig 获取 OpenAI 配置
+func (a *Adapter) GetOpenAIConfig() OpenAIConfigRequest {
+	baseURL, _ := a.appState.GetSetting("openai_base_url")
+	apiKey, _ := a.appState.GetSetting("openai_api_key")
+	model := string(a.appState.GetMainLoopModel())
+
+	return OpenAIConfigRequest{
+		BaseURL: toString(baseURL, api.DefaultOpenAIConfig().BaseURL),
+		APIKey:  toString(apiKey, ""),
+		Model:   model,
+	}
+}
+
+// OpenAIHealthResponse 表示 OpenAI 健康检查响应
+type OpenAIHealthResponse struct {
+	Connected       bool   `json:"connected"`
+	Error           string `json:"error,omitempty"`
+	BaseURL         string `json:"base_url"`
+	Model           string `json:"model"`
+	AvailableModels int    `json:"available_models"`
+}
+
+// CheckOpenAIHealth 检查 OpenAI API 健康状态
+func (a *Adapter) CheckOpenAIHealth(ctx context.Context) OpenAIHealthResponse {
+	eng, errResp := a.engineOrError()
+	if errResp != nil {
+		return OpenAIHealthResponse{Error: errResp.Message}
+	}
+
+	// 通过 engine 的 client 直接检查
+	if eng.GetOpenAIClient() == nil {
+		// 先构造一个临时 client 来检查，不依赖 engine 是否已 SetOpenAIConfig
+		cfg := a.GetOpenAIConfig()
+		client := api.NewOpenAIClient(api.OpenAIConfig{
+			BaseURL: cfg.BaseURL,
+			APIKey:  cfg.APIKey,
+			Model:   cfg.Model,
+		})
+		status := client.CheckHealth(ctx)
+		return OpenAIHealthResponse{
+			Connected:       status.Connected,
+			Error:           status.Error,
+			BaseURL:         cfg.BaseURL,
+			Model:           cfg.Model,
+			AvailableModels: status.AvailableModels,
+		}
+	}
+
+	cfg := a.GetOpenAIConfig()
+	status := eng.GetOpenAIClient().CheckHealth(ctx)
+	return OpenAIHealthResponse{
+		Connected:       status.Connected,
+		Error:           status.Error,
+		BaseURL:         cfg.BaseURL,
+		Model:           cfg.Model,
+		AvailableModels: status.AvailableModels,
+	}
+}
+
+// ListOpenAIModelsResponse 表示 OpenAI 模型列表响应
+type ListOpenAIModelsResponse struct {
+	Models []ModelInfoUI `json:"models"`
+	Error  string        `json:"error,omitempty"`
+}
+
+// ListOpenAIModels 获取 OpenAI 可用模型列表
+func (a *Adapter) ListOpenAIModels(ctx context.Context) ListOpenAIModelsResponse {
+	cfg := a.GetOpenAIConfig()
+	client := api.NewOpenAIClient(api.OpenAIConfig{
+		BaseURL: cfg.BaseURL,
+		APIKey:  cfg.APIKey,
+		Model:   cfg.Model,
+	})
+
+	models, err := client.ListModels(ctx)
+	if err != nil {
+		return ListOpenAIModelsResponse{Error: err.Error()}
+	}
+
+	result := make([]ModelInfoUI, 0, len(models))
+	for _, m := range models {
+		ctxLen, _ := client.ShowModel(ctx, m.Name)
+		result = append(result, ModelInfoUI{
+			Name:          m.Name,
+			ContextLength: ctxLen,
+		})
+	}
+	return ListOpenAIModelsResponse{Models: result}
 }
 
 // ToolInfo 表示工具信息。

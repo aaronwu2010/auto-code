@@ -13,6 +13,10 @@ import {
   ListLocalAIModels,
   ListLocalAIMCPServers,
   CheckLocalAIHealth,
+  SetOpenAIConfig,
+  GetOpenAIConfig,
+  ListOpenAIModels,
+  CheckOpenAIHealth,
   SelectProjectDirectory,
   SetProjectDirectory,
   GetProjectDirectory,
@@ -30,6 +34,8 @@ type OllamaConfig = state.OllamaConfigRequest;
 type OllamaHealth = state.OllamaHealthResponse;
 type LocalAIConfig = state.LocalAIConfigRequest;
 type LocalAIHealth = state.LocalAIHealthResponse;
+type OpenAIConfig = state.OpenAIConfigRequest;
+type OpenAIHealth = state.OpenAIHealthResponse;
 type MCPServer = state.MCPServerUI;
 type ModelInfo = state.ModelInfoUI;
 type ContextUsage = types.ContextUsage;
@@ -83,7 +89,17 @@ function App() {
   const [localaiMCPServers, setLocalaiMCPServers] = useState<MCPServer[]>([]);
   const [loadingLocalaiModels, setLoadingLocalaiModels] = useState(false);
   const [loadingLocalaiMCPServers, setLoadingLocalaiMCPServers] = useState(false);
-  const [activeConfigTab, setActiveConfigTab] = useState<"ollama" | "localai">("ollama");
+  const [openaiConfig, setOpenaiConfig] = useState<OpenAIConfig>({
+    base_url: "https://api.openai.com/v1",
+    api_key: "",
+    has_api_key: false,
+    model: "",
+    enabled: false,
+  });
+  const [openaiHealth, setOpenaiHealth] = useState<OpenAIHealth | null>(null);
+  const [openaiModels, setOpenaiModels] = useState<ModelInfo[]>([]);
+  const [loadingOpenaiModels, setLoadingOpenaiModels] = useState(false);
+  const [activeConfigTab, setActiveConfigTab] = useState<"ollama" | "localai" | "openai">("ollama");
 
   const [projectDir, setProjectDir] = useState<string>("");
   const [files, setFiles] = useState<FileInfo[]>([]);
@@ -312,6 +328,60 @@ function App() {
     }
   };
 
+  const loadOpenAIConfig = async () => {
+    try {
+      const config = await GetOpenAIConfig();
+      if (config) {
+        setOpenaiConfig(config);
+      }
+    } catch {}
+  };
+
+  const loadOpenAIModels = async () => {
+    setLoadingOpenaiModels(true);
+    try {
+      const result = await ListOpenAIModels();
+      if (result) {
+        setOpenaiModels(result.models || []);
+      }
+    } catch (err) {
+      console.error("加载 OpenAI 模型失败:", err);
+      setOpenaiModels([]);
+    }
+    setLoadingOpenaiModels(false);
+  };
+
+  const checkOpenAIHealth = async () => {
+    try {
+      const health = await CheckOpenAIHealth();
+      if (health) {
+        setOpenaiHealth(health);
+        return health.connected;
+      }
+    } catch (err) {
+      console.error("检查 OpenAI 健康状态失败:", err);
+      setOpenaiHealth({
+        connected: false,
+        error: String(err),
+        base_url: openaiConfig.base_url,
+        model: openaiConfig.model,
+        enabled: openaiConfig.enabled,
+        available_models: 0,
+      });
+    }
+    return false;
+  };
+
+  const saveOpenAIConfig = async () => {
+    try {
+      await SetOpenAIConfig(openaiConfig);
+      await checkOpenAIHealth();
+      await loadOpenAIModels();
+    } catch (err) {
+      console.error("保存 OpenAI 配置失败:", err);
+    }
+  };
+
   const handleSelectDirectory = async () => {
     try {
       const dir = await SelectProjectDirectory();
@@ -464,6 +534,8 @@ function App() {
       await loadModels();
       await loadLocalAIConfig();
       await loadLocalAIModels();
+      await loadOpenAIConfig();
+      await loadOpenAIModels();
       await loadProjectDir();
       GetContextUsage().then(setContextUsage).catch(() => {});
     } catch {}
@@ -689,17 +761,29 @@ function App() {
               })()}
             </span>
           )}
-          {ollamaHealth && (
-            <span className={`text-xs px-3 py-1 rounded-full border flex items-center gap-1.5 ${
-              ollamaHealth.connected
-                ? "bg-emerald-900/30 text-emerald-400 border-emerald-800/40"
-                : "bg-red-900/30 text-red-400 border-red-800/40"
-            }`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${ollamaHealth.connected ? "bg-emerald-400 animate-pulse" : "bg-red-400"}`}></span>
-              {ollamaHealth.connected ? "已连接" : "未连接"}
-              {ollamaHealth.is_local ? " · 本地" : " · 云端"}
-            </span>
-          )}
+          {(() => {
+            // 根据启用状态选当前后端的健康信息：OpenAI > LocalAI > Ollama
+            let currentHealth: null | { connected: boolean; error?: string; base_url?: string; available_models?: number; tag: string } = null;
+            if (openaiConfig.enabled && openaiHealth) {
+              currentHealth = { ...openaiHealth, tag: "OpenAI" };
+            } else if (localaiConfig.enabled && localaiHealth) {
+              currentHealth = { ...localaiHealth, tag: "LocalAI" };
+            } else if (ollamaHealth) {
+              currentHealth = { connected: ollamaHealth.connected, error: ollamaHealth.error, base_url: ollamaHealth.base_url, available_models: ollamaHealth.available_models, tag: ollamaHealth.is_local ? "本地 Ollama" : "云端 Ollama" };
+            }
+            if (!currentHealth) return null;
+            return (
+              <span className={`text-xs px-3 py-1 rounded-full border flex items-center gap-1.5 ${
+                currentHealth.connected
+                  ? "bg-emerald-900/30 text-emerald-400 border-emerald-800/40"
+                  : "bg-red-900/30 text-red-400 border-red-800/40"
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${currentHealth.connected ? "bg-emerald-400 animate-pulse" : "bg-red-400"}`}></span>
+                {currentHealth.connected ? "已连接" : "未连接"}
+                {` · ${currentHealth.tag}`}
+              </span>
+            );
+          })()}
           {appState?.thinkingEnabled && (
             <span className="text-xs text-violet-400 bg-violet-900/30 px-3 py-1 rounded-full border border-violet-800/40">
               🧠 Thinking
@@ -787,6 +871,16 @@ function App() {
                 }`}
               >
                 🤖 LocalAI (MCP)
+              </button>
+              <button
+                onClick={() => setActiveConfigTab("openai")}
+                className={`px-4 py-2 text-sm font-medium transition-all duration-200 ${
+                  activeConfigTab === "openai"
+                    ? "text-emerald-400 border-b-2 border-emerald-400"
+                    : "text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                ☁️ OpenAI / 兼容端点
               </button>
             </div>
 
@@ -1075,6 +1169,138 @@ function App() {
                     onClick={(e) => {
                       e.preventDefault();
                       checkLocalAIHealth();
+                    }}
+                    className="bg-slate-800/80 text-slate-300 px-6 py-2.5 rounded-xl hover:bg-slate-700/80 text-sm font-medium border border-slate-700/50 transition-all duration-200 flex items-center gap-2"
+                  >
+                    🔌 测试连接
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* OpenAI 配置 */}
+            {activeConfigTab === "openai" && (
+              <div>
+                <h2 className="text-lg font-semibold bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent mb-5 flex items-center gap-2">
+                  <span className="text-xl">☁️</span> OpenAI / 兼容端点配置
+                </h2>
+
+                {/* 启用开关 */}
+                <div className="mb-5 p-4 bg-slate-800/30 rounded-xl border border-slate-700/50">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-sm font-medium text-slate-200">启用 OpenAI</label>
+                      <p className="text-xs text-slate-500 mt-1">使用 OpenAI API 或任何 OpenAI 兼容端点（OneAPI、DeepSeek、Groq 等），启用后将覆盖 Ollama / LocalAI 配置</p>
+                    </div>
+                    <button
+                      onClick={() => setOpenaiConfig({ ...openaiConfig, enabled: !openaiConfig.enabled })}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        openaiConfig.enabled ? "bg-emerald-600" : "bg-slate-700"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          openaiConfig.enabled ? "translate-x-6" : "translate-x-1"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {openaiHealth && (
+                  <div className={`text-sm p-3 rounded-xl border mb-5 flex items-center gap-2 ${
+                    openaiHealth.connected
+                      ? "bg-emerald-900/20 text-emerald-400 border-emerald-800/30"
+                      : "bg-red-900/20 text-red-400 border-red-800/30"
+                  }`}>
+                    <span className="text-lg">{openaiHealth.connected ? "✅" : "❌"}</span>
+                    {openaiHealth.connected
+                      ? `已连接到 ${openaiHealth.base_url}，发现 ${openaiHealth.available_models || 0} 个模型`
+                      : `连接失败: ${openaiHealth.error || "未知错误"}`}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-2 font-medium">API Base URL</label>
+                    <input
+                      type="text"
+                      value={openaiConfig.base_url}
+                      onChange={(e) => setOpenaiConfig({ ...openaiConfig, base_url: e.target.value })}
+                      placeholder="https://api.openai.com/v1"
+                      className="w-full bg-slate-800/50 text-slate-200 border border-slate-700/50 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-emerald-600/50 focus:ring-2 focus:ring-emerald-500/20 transition-all duration-200 placeholder-slate-600"
+                    />
+                    <p className="text-xs text-slate-600 mt-1">
+                      官方 OpenAI 留空即可。兼容端点如 OneAPI: <code className="text-slate-400">https://your-oneapi.com/v1</code>
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-2 font-medium">API Key</label>
+                    <input
+                      type="password"
+                      value={openaiConfig.api_key}
+                      onChange={(e) => setOpenaiConfig({ ...openaiConfig, api_key: e.target.value })}
+                      placeholder="sk-..."
+                      className="w-full bg-slate-800/50 text-slate-200 border border-slate-700/50 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-emerald-600/50 focus:ring-2 focus:ring-emerald-500/20 transition-all duration-200 placeholder-slate-600"
+                    />
+                  </div>
+                </div>
+
+                <div className="mb-5">
+                  <label className="text-xs text-slate-400 block mb-2 font-medium">选择模型</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={openaiConfig.model}
+                      onChange={(e) => setOpenaiConfig({ ...openaiConfig, model: e.target.value })}
+                      className="flex-1 bg-slate-800/50 text-slate-200 border border-slate-700/50 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-emerald-600/50 focus:ring-2 focus:ring-emerald-500/20 transition-all duration-200 cursor-pointer"
+                    >
+                      <option value="">选择模型...</option>
+                      {openaiModels.map((m) => (
+                        <option key={m.name} value={m.name}>
+                          {m.name} {m.context_length ? `- ${(m.context_length / 1024).toFixed(0)}K ctx` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        loadOpenAIModels();
+                      }}
+                      disabled={loadingOpenaiModels}
+                      className="bg-slate-800/80 text-slate-300 px-5 py-2.5 rounded-xl hover:bg-slate-700/80 disabled:opacity-50 text-sm cursor-pointer border border-slate-700/50 transition-all duration-200 flex items-center gap-1.5"
+                    >
+                      {loadingOpenaiModels ? "⟳" : "🔄"} {loadingOpenaiModels ? "加载中" : "刷新"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mb-5">
+                  <label className="text-xs text-slate-400 block mb-2 font-medium">或手动输入模型名称</label>
+                  <input
+                    type="text"
+                    value={openaiConfig.model}
+                    onChange={(e) => setOpenaiConfig({ ...openaiConfig, model: e.target.value })}
+                    placeholder="例如: gpt-4o, o3-mini, deepseek-chat"
+                    className="w-full bg-slate-800/50 text-slate-200 border border-slate-700/50 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-emerald-600/50 focus:ring-2 focus:ring-emerald-500/20 transition-all duration-200 placeholder-slate-600"
+                  />
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={saveOpenAIConfig}
+                    className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white px-6 py-2.5 rounded-xl hover:from-emerald-500 hover:to-teal-500 text-sm font-medium transition-all duration-200 shadow-lg shadow-emerald-900/30 hover:shadow-emerald-800/40 flex items-center gap-2"
+                  >
+                    💾 保存配置
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      checkOpenAIHealth();
                     }}
                     className="bg-slate-800/80 text-slate-300 px-6 py-2.5 rounded-xl hover:bg-slate-700/80 text-sm font-medium border border-slate-700/50 transition-all duration-200 flex items-center gap-2"
                   >
