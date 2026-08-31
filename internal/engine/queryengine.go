@@ -81,6 +81,12 @@ type QueryEngine struct {
 	longTermMem         *memory.BaseLongTermMemory
 	reflector           *reflection.BaseReflector
 	taskDecomposer      *planning.BaseTaskDecomposer
+
+	// 智能增强：从上一轮 reflection 拿到的经验，在后续 SubmitMessage 开始时注入 messages
+	pendingLessons []*reflection.Experience
+	// 智能增强开关（可后续暴露到 UI，默认 true）
+	planningEnabled  bool
+	reflectionEnabled bool
 }
 
 type QueryEngineConfig struct {
@@ -203,6 +209,10 @@ func (qe *QueryEngine) Startup(ctx context.Context) {
 	}
 
 	qe.taskDecomposer = planning.NewBaseTaskDecomposer(planning.DefaultPlannerConfig())
+
+	// 智能增强开关默认开启——让 agent 变聪明的核心接入点
+	qe.planningEnabled = qe.taskDecomposer != nil
+	qe.reflectionEnabled = qe.reflector != nil
 
 	compact.SetSummarizeFunc(qe.summarizeWithLLM)
 	memdir.RegisterSideQueryFn(qe.sideQuery)
@@ -492,12 +502,155 @@ func (qe *QueryEngine) reflectOnTurn(ctx context.Context, msgs []types.Message) 
 			if analysis, err := qe.reflector.AnalyzeError(ctx, &rc.Errors[0]); err == nil && analysis != nil {
 				log.Printf("[Engine] error analyzed: rootCause=%s", analysis.RootCause)
 			}
+			// 即使出错，也要存经验供下一轮学习
+			qe.storeLessonsFromReflection(ctx, rc)
 			return
 		}
 	}
 	if _, err := qe.reflector.Reflect(ctx, rc); err != nil {
 		log.Printf("[Engine] reflection failed: %v", err)
 	}
+	// 成功路径也存经验
+	qe.storeLessonsFromReflection(ctx, rc)
+}
+
+// storeLessonsFromReflection 把 reflection 相关的历史经验取出来，存到 pendingLessons 里
+// 供下一次 SubmitMessage 时注入到 messages。这是"反思反哺下一轮"的核心通路。
+func (qe *QueryEngine) storeLessonsFromReflection(ctx context.Context, rc *reflection.ReflectionContext) {
+	if !qe.reflectionEnabled || qe.reflector == nil {
+		return
+	}
+	lessons, err := qe.reflector.ApplyExperience(ctx, rc)
+	if err != nil || len(lessons) == 0 {
+		return
+	}
+	// 只保留前 3 条，避免塞爆 context
+	if len(lessons) > 3 {
+		lessons = lessons[:3]
+	}
+	qe.mu.Lock()
+	qe.pendingLessons = lessons
+	qe.mu.Unlock()
+	log.Printf("[Engine] reflection fed back %d lessons for next turn", len(lessons))
+}
+
+// injectPendingLessons 把 pendingLessons 注入到 messages，然后清空 pendingLessons。
+// 这条消息标记 IsMeta=true，用 system-reminder 包裹——模型会注意到但不会当作用户原话。
+func (qe *QueryEngine) injectPendingLessons() {
+	if !qe.reflectionEnabled {
+		return
+	}
+
+	qe.mu.Lock()
+	lessons := qe.pendingLessons
+	qe.pendingLessons = nil
+	qe.mu.Unlock()
+
+	if len(lessons) == 0 {
+		return
+	}
+
+	var parts []string
+	for _, exp := range lessons {
+		if exp == nil {
+			continue
+		}
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("- 场景：%s\n", safeOrDefault(exp.Goal, exp.Context, "(未说明)")))
+		if exp.Action != "" {
+			b.WriteString(fmt.Sprintf("  之前的做法：%s\n", exp.Action))
+		}
+		if exp.Result != "" {
+			b.WriteString(fmt.Sprintf("  结果：%s\n", exp.Result))
+		}
+		if exp.LessonsLearned != "" {
+			b.WriteString(fmt.Sprintf("  教训：%s\n", exp.LessonsLearned))
+		}
+		if len(exp.FailureReasons) > 0 {
+			b.WriteString(fmt.Sprintf("  失败原因：%s\n", strings.Join(exp.FailureReasons, "; ")))
+		}
+		parts = append(parts, b.String())
+	}
+
+	if len(parts) == 0 {
+		return
+	}
+
+	content := "<system-reminder>你之前处理类似问题时积累了一些经验，仅供参考，不必严格遵循：\n\n" +
+		strings.Join(parts, "\n") +
+		"\n</system-reminder>"
+
+	lessonMsg := types.Message{
+		ID:        generateMessageID(),
+		Role:      types.RoleUser,
+		Content:   content,
+		Timestamp: time.Now().Unix(),
+		IsMeta:    true,
+		UUID:      "reflection-lessons",
+	}
+
+	qe.mu.Lock()
+	qe.messages = append(qe.messages, lessonMsg)
+	qe.mu.Unlock()
+
+	log.Printf("[Engine] injected %d reflection lessons into context", len(lessons))
+}
+
+// injectDecomposedPlan 对复杂任务做拆解，把步骤列表以 IsMeta 消息形式注入 messages。
+// 不接管模型执行流——模型自己读 plan，自己决定按步骤调用哪些工具。
+func (qe *QueryEngine) injectDecomposedPlan(ctx context.Context, prompt string) {
+	if !qe.planningEnabled || qe.taskDecomposer == nil {
+		return
+	}
+
+	// 构造一个 planning.Task，让 Decomposer 判断是否值得拆解
+	task := planning.NewTask(
+		fmt.Sprintf("task-%d", time.Now().UnixNano()),
+		"user_request",
+		prompt,
+	)
+	if !qe.taskDecomposer.CanDecompose(task) {
+		return
+	}
+
+	decomp, err := qe.taskDecomposer.Decompose(ctx, task, nil)
+	if err != nil || decomp == nil || len(decomp.SubTasks) < 2 {
+		return // 1 步不需要 plan
+	}
+
+	var steps []string
+	for i, sub := range decomp.SubTasks {
+		steps = append(steps, fmt.Sprintf("  %d. %s", i+1, sub.Action))
+	}
+
+	planText := "<system-reminder>这个任务可以拆解为以下步骤，请按顺序执行。每完成一步再进行下一步；遇到困难及时停下来调整或向用户确认。\n" +
+		strings.Join(steps, "\n") +
+		"\n</system-reminder>"
+
+	planMsg := types.Message{
+		ID:        generateMessageID(),
+		Role:      types.RoleUser,
+		Content:   planText,
+		Timestamp: time.Now().Unix(),
+		IsMeta:    true,
+		UUID:      "decomposed-plan",
+	}
+
+	qe.mu.Lock()
+	qe.messages = append(qe.messages, planMsg)
+	qe.mu.Unlock()
+
+	log.Printf("[Engine] injected decomposed plan with %d steps for this turn", len(steps))
+}
+
+// safeOrDefault 返回第一个非空字符串；全部为空返回 fallback。
+func safeOrDefault(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return "(未说明)"
 }
 
 func (qe *QueryEngine) initRemoteServices(ctx context.Context) {
@@ -588,6 +741,14 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 
 		log.Printf("[Engine] SubmitMessage: building system prompt...")
 		qe.ensureUserContextMessage(submitCtx)
+
+		// === 智能增强：Reflection 反哺 ===
+		// 从上一轮 reflectOnTurn 拿到的经验，注入到 messages 让模型参考
+		qe.injectPendingLessons()
+
+		// === 智能增强：Planning 引擎级入口 ===
+		// 复杂任务先让 taskDecomposer 拆解成步骤，注入 plan 提示
+		qe.injectDecomposedPlan(submitCtx, prompt)
 
 		if recall := qe.performActiveRecall(submitCtx, prompt); recall != "" {
 			recallMsg := types.Message{
