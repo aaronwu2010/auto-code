@@ -45,12 +45,38 @@ func NewOpenAIClient(config OpenAIConfig) *OpenAIClient {
 	if config.BaseURL == "" {
 		config.BaseURL = DefaultOpenAIConfig().BaseURL
 	}
+	// normalize：去掉尾部 /，如果不以 /vN 结尾则自动补 /v1
+	config.BaseURL = normalizeOpenAIBaseURL(config.BaseURL)
 	return &OpenAIClient{
 		config: config,
 		httpClient: &http.Client{
 			Timeout: config.Timeout,
 		},
 	}
+}
+
+// normalizeOpenAIBaseURL 处理 OpenAI 兼容端点的 BaseURL：
+//   - 去掉尾部的斜杠
+//   - 如果不以 /v1 /v2 等版本号结尾，自动追加 /v1
+// 这样用户无论填 "https://api.openai.com" 还是 "https://api.openai.com/v1"
+// 都能正确拼成 /v1/chat/completions。
+func normalizeOpenAIBaseURL(base string) string {
+	base = strings.TrimRight(base, "/")
+	// 已带版本号，直接返回
+	if strings.HasSuffix(base, "/v1") ||
+		strings.HasSuffix(base, "/v2") ||
+		strings.HasSuffix(base, "/v3") {
+		return base
+	}
+	// 兼容端点可能自带路径如 /api，先判断最后一段是不是纯版本号
+	idx := strings.LastIndex(base, "/")
+	if idx >= 0 {
+		tail := base[idx+1:]
+		if len(tail) >= 2 && tail[0] == 'v' && tail[1] >= '0' && tail[1] <= '9' {
+			return base
+		}
+	}
+	return base + "/v1"
 }
 
 func (c *OpenAIClient) GetConfig() OpenAIConfig {

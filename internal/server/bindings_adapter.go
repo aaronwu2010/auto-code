@@ -259,9 +259,10 @@ func (a *Adapter) GetSessionID() string {
 
 // OllamaConfigRequest 与 state.OllamaConfigRequest 等价。
 type OllamaConfigRequest struct {
-	BaseURL string `json:"base_url"`
-	APIKey  string `json:"api_key"`
-	Model   string `json:"model"`
+	BaseURL   string `json:"base_url"`
+	APIKey    string `json:"api_key"`
+	HasAPIKey bool   `json:"has_api_key"`
+	Model     string `json:"model"`
 }
 
 // SetOllamaConfig 同时持久化到 AppState 并热更新 QueryEngine。
@@ -288,9 +289,10 @@ func (a *Adapter) GetOllamaConfig() OllamaConfigRequest {
 	model := string(a.appState.GetMainLoopModel())
 
 	return OllamaConfigRequest{
-		BaseURL: toString(baseURL, "http://localhost:11434/api"),
-		APIKey:  toString(apiKey, ""),
-		Model:   model,
+		BaseURL:   toString(baseURL, "http://localhost:11434/api"),
+		APIKey:    toString(apiKey, ""),
+		HasAPIKey: apiKey != "",
+		Model:     model,
 	}
 }
 
@@ -382,9 +384,11 @@ func (a *Adapter) CheckOllamaHealth(ctx context.Context) OllamaHealthResponse {
 
 // OpenAIConfigRequest 表示 OpenAI（或任何 OpenAI 兼容端点）配置请求
 type OpenAIConfigRequest struct {
-	BaseURL string `json:"base_url"` // 默认 https://api.openai.com/v1
-	APIKey  string `json:"api_key"`
-	Model   string `json:"model"`
+	BaseURL   string `json:"base_url"` // 默认 https://api.openai.com/v1
+	APIKey    string `json:"api_key"`
+	HasAPIKey bool   `json:"has_api_key"`
+	Model     string `json:"model"`
+	Enabled   bool   `json:"enabled"`
 }
 
 // SetOpenAIConfig 设置 OpenAI 配置
@@ -392,6 +396,7 @@ func (a *Adapter) SetOpenAIConfig(req OpenAIConfigRequest) error {
 	a.appState.SetSetting("openai_base_url", req.BaseURL)
 	a.appState.SetSetting("openai_api_key", req.APIKey)
 	a.appState.SetSetting("openai_model", req.Model)
+	a.appState.SetSetting("openai_enabled", req.Enabled)
 
 	if req.Model != "" {
 		a.appState.SetMainLoopModel(types.ModelSetting(req.Model))
@@ -400,6 +405,7 @@ func (a *Adapter) SetOpenAIConfig(req OpenAIConfigRequest) error {
 	eng, _ := a.engineOrError()
 	if eng != nil {
 		eng.SetOpenAIConfig(req.BaseURL, req.APIKey, req.Model)
+		eng.SwitchToOpenAI(req.Enabled)
 	}
 	return nil
 }
@@ -409,11 +415,29 @@ func (a *Adapter) GetOpenAIConfig() OpenAIConfigRequest {
 	baseURL, _ := a.appState.GetSetting("openai_base_url")
 	apiKey, _ := a.appState.GetSetting("openai_api_key")
 	model := string(a.appState.GetMainLoopModel())
+	enabledRaw, _ := a.appState.GetSetting("openai_enabled")
+
+	if model == "" {
+		if savedModel, ok := a.appState.GetSetting("openai_model"); ok {
+			if s, ok := savedModel.(string); ok {
+				model = s
+			}
+		}
+	}
+
+	isEnabled := false
+	if enabledRaw != nil {
+		if bb, ok := enabledRaw.(bool); ok {
+			isEnabled = bb
+		}
+	}
 
 	return OpenAIConfigRequest{
-		BaseURL: toString(baseURL, api.DefaultOpenAIConfig().BaseURL),
-		APIKey:  toString(apiKey, ""),
-		Model:   model,
+		BaseURL:   toString(baseURL, api.DefaultOpenAIConfig().BaseURL),
+		APIKey:    toString(apiKey, ""),
+		HasAPIKey: apiKey != "" && toString(apiKey, "") != "",
+		Model:     model,
+		Enabled:   isEnabled,
 	}
 }
 
