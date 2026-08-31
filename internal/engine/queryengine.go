@@ -819,6 +819,8 @@ func (qe *QueryEngine) GetMessages() []types.Message {
 }
 
 func (qe *QueryEngine) SetModel(model types.ModelSetting) {
+	qe.mu.Lock()
+	defer qe.mu.Unlock()
 	qe.appState.SetMainLoopModel(model)
 	qe.config.UserSpecifiedModel = model
 	if qe.apiClient != nil {
@@ -845,15 +847,21 @@ func (qe *QueryEngine) SetOllamaConfig(baseURL, apiKey, model string) {
 		Timeout:   api.DefaultOllamaConfig().Timeout,
 		KeepAlive: api.DefaultOllamaConfig().KeepAlive,
 	}
+
+	qe.mu.Lock()
 	qe.apiClient = api.NewClient(cfg)
 	qe.useOpenAI = false
 	qe.useLocalAI = false
 
 	if model != "" {
 		qe.config.UserSpecifiedModel = types.ModelSetting(model)
-		qe.appState.SetMainLoopModel(types.ModelSetting(model))
 	}
 	qe.config.OllamaConfig = cfg
+	qe.mu.Unlock()
+
+	if model != "" {
+		qe.appState.SetMainLoopModel(types.ModelSetting(model))
+	}
 }
 
 func (qe *QueryEngine) SetLocalAIConfig(baseURL, apiKey, model string) {
@@ -868,26 +876,38 @@ func (qe *QueryEngine) SetLocalAIConfig(baseURL, apiKey, model string) {
 		Timeout:   api.DefaultLocalAIConfig().Timeout,
 		KeepAlive: api.DefaultLocalAIConfig().KeepAlive,
 	}
+
+	qe.mu.Lock()
 	qe.localaiClient = api.NewLocalAIClient(cfg)
 	qe.useLocalAI = true
 	qe.useOpenAI = false
 
 	if model != "" {
 		qe.config.UserSpecifiedModel = types.ModelSetting(model)
-		qe.appState.SetMainLoopModel(types.ModelSetting(model))
 	}
 	qe.config.LocalAIConfig = &cfg
+	qe.mu.Unlock()
+
+	if model != "" {
+		qe.appState.SetMainLoopModel(types.ModelSetting(model))
+	}
 }
 
 func (qe *QueryEngine) GetLocalAIClient() *api.LocalAIClient {
+	qe.mu.RLock()
+	defer qe.mu.RUnlock()
 	return qe.localaiClient
 }
 
 func (qe *QueryEngine) UseLocalAI() bool {
+	qe.mu.RLock()
+	defer qe.mu.RUnlock()
 	return qe.useLocalAI
 }
 
 func (qe *QueryEngine) SwitchToLocalAI(enable bool) {
+	qe.mu.Lock()
+	defer qe.mu.Unlock()
 	qe.useLocalAI = enable
 	if enable {
 		qe.useOpenAI = false
@@ -902,25 +922,37 @@ func (qe *QueryEngine) SetOpenAIConfig(baseURL, apiKey, model string) {
 	}
 	cfg.APIKey = apiKey
 	cfg.Model = model
+
+	qe.mu.Lock()
 	qe.openaiClient = api.NewOpenAIClient(cfg)
 	qe.useOpenAI = true
 
 	if model != "" {
 		qe.config.UserSpecifiedModel = types.ModelSetting(model)
-		qe.appState.SetMainLoopModel(types.ModelSetting(model))
 	}
 	qe.config.OpenAIConfig = &cfg
+	qe.mu.Unlock()
+
+	if model != "" {
+		qe.appState.SetMainLoopModel(types.ModelSetting(model))
+	}
 }
 
 func (qe *QueryEngine) GetOpenAIClient() *api.OpenAIClient {
+	qe.mu.RLock()
+	defer qe.mu.RUnlock()
 	return qe.openaiClient
 }
 
 func (qe *QueryEngine) UseOpenAI() bool {
+	qe.mu.RLock()
+	defer qe.mu.RUnlock()
 	return qe.useOpenAI
 }
 
 func (qe *QueryEngine) SwitchToOpenAI(enable bool) {
+	qe.mu.Lock()
+	defer qe.mu.Unlock()
 	qe.useOpenAI = enable
 	if enable {
 		qe.useLocalAI = false
@@ -1064,6 +1096,8 @@ const (
 )
 
 func (qe *QueryEngine) currentBackend() backendType {
+	qe.mu.RLock()
+	defer qe.mu.RUnlock()
 	if qe.useOpenAI && qe.openaiClient != nil {
 		return backendOpenAI
 	}

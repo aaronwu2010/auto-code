@@ -45,30 +45,6 @@ func (r *MigrationRunner) RegisterDefaults() {
 		Execute:     migrateAutoUpdatesToSettings,
 	})
 	r.Register(Migration{
-		Name:        "migrate_sonnet_1m_to_sonnet_45",
-		Description: "Migrate Sonnet 1m model to Sonnet 4.5",
-		Version:     "2.1.50",
-		Execute:     migrateSonnet1mToSonnet45,
-	})
-	r.Register(Migration{
-		Name:        "migrate_sonnet_45_to_sonnet_46",
-		Description: "Migrate Sonnet 4.5 model to Sonnet 4.6",
-		Version:     "2.1.80",
-		Execute:     migrateSonnet45ToSonnet46,
-	})
-	r.Register(Migration{
-		Name:        "migrate_fennec_to_opus",
-		Description: "Migrate Fennec model to Opus",
-		Version:     "2.1.60",
-		Execute:     migrateFennecToOpus,
-	})
-	r.Register(Migration{
-		Name:        "migrate_opus_to_opus_1m",
-		Description: "Migrate Opus model to Opus 1m",
-		Version:     "2.1.70",
-		Execute:     migrateOpusToOpus1m,
-	})
-	r.Register(Migration{
 		Name:        "migrate_enable_all_project_mcp_servers",
 		Description: "Migrate enableAllProjectMCPServers to settings",
 		Version:     "2.1.85",
@@ -170,43 +146,6 @@ func migrateAutoUpdatesToSettings(configDir string) error {
 	return nil
 }
 
-func migrateSonnet1mToSonnet45(configDir string) error {
-	return updateModelInSettings(configDir, "claude-sonnet-4-1m", "claude-sonnet-4-5")
-}
-
-func migrateSonnet45ToSonnet46(configDir string) error {
-	return updateModelInSettings(configDir, "claude-sonnet-4-5", "claude-sonnet-4-6")
-}
-
-func migrateFennecToOpus(configDir string) error {
-	return updateModelInSettings(configDir, "claude-fennec", "claude-opus-4")
-}
-
-func migrateOpusToOpus1m(configDir string) error {
-	return updateModelInSettings(configDir, "claude-opus-4", "claude-opus-4-1m")
-}
-
 func migrateEnableAllProjectMCPServers(configDir string) error {
-	return nil
-}
-
-func updateModelInSettings(configDir, oldModel, newModel string) error {
-	settingsPath := filepath.Join(configDir, "settings.json")
-	data, err := os.ReadFile(settingsPath)
-	if err != nil {
-		return nil
-	}
-
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return nil
-	}
-
-	if model, ok := settings["model"].(string); ok && model == oldModel {
-		settings["model"] = newModel
-		updated, _ := json.MarshalIndent(settings, "", "  ")
-		return os.WriteFile(settingsPath, updated, 0o644)
-	}
-
 	return nil
 }
