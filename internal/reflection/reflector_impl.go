@@ -33,6 +33,12 @@ func NewBaseReflector(config *ReflectionConfig) (*BaseReflector, error) {
 	}, nil
 }
 
+// Store 返回底层 ExperienceStore。
+// 用于外部组件（如 SessionCloser）写入经验。
+func (r *BaseReflector) Store() ExperienceStore {
+	return r.store
+}
+
 func (r *BaseReflector) Reflect(ctx context.Context, rc *ReflectionContext) (*EvaluationResult, error) {
 	return r.evaluator.Evaluate(ctx, rc)
 }

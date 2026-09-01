@@ -80,6 +80,7 @@ type QueryEngine struct {
 	perceptionMgr       *perception.PerceptionManagerImpl
 	longTermMem         *memory.BaseLongTermMemory
 	reflector           *reflection.BaseReflector
+	memoryOrchestrator  *MemoryOrchestrator
 	taskDecomposer      *planning.BaseTaskDecomposer
 
 	// 智能增强：从上一轮 reflection 拿到的经验，在后续 SubmitMessage 开始时注入 messages
@@ -205,8 +206,11 @@ func (qe *QueryEngine) Startup(ctx context.Context) {
 		reflCfg.StoragePath = filepath.Join(qe.config.CWD, ".auto", "reflections")
 	}
 	if refl, err := reflection.NewBaseReflector(reflCfg); err == nil {
-		qe.reflector = refl
-	}
+			qe.reflector = refl
+		}
+
+		// L3 记忆统一调度 orchestrator
+		qe.memoryOrchestrator = NewMemoryOrchestrator(qe.longTermMem, qe.reflector)
 
 	qe.taskDecomposer = planning.NewBaseTaskDecomposer(planning.DefaultPlannerConfig())
 
@@ -743,14 +747,35 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		qe.ensureUserContextMessage(submitCtx)
 
 		// === 智能增强：Reflection 反哺 ===
-		// 从上一轮 reflectOnTurn 拿到的经验，注入到 messages 让模型参考
-		qe.injectPendingLessons()
+			// 从上一轮 reflectOnTurn 拿到的经验，注入到 messages 让模型参考
+			qe.injectPendingLessons()
 
-		// === 智能增强：Planning 引擎级入口 ===
-		// 复杂任务先让 taskDecomposer 拆解成步骤，注入 plan 提示
-		qe.injectDecomposedPlan(submitCtx, prompt)
+			// === L3 统一记忆调度 ===
+			// orchestrator 统一 longTermMem + reflector.ApplyExperience（ExperienceStore 跨 session 经验）
+			// pendingLessons 已由 injectPendingLessons 处理过，这里不再重复
+			if qe.memoryOrchestrator != nil {
+				if recall := qe.memoryOrchestrator.Recall(submitCtx, prompt, nil); recall != "" {
+					log.Printf("[Engine] memory orchestrator recalled experiences for prompt: %s...", func() string { if len(prompt) > 60 { return prompt[:60] }; return prompt }())
+					recallMsg := types.Message{
+						ID:        generateMessageID(),
+						Role:      types.RoleUser,
+						Content:   recall,
+						Timestamp: time.Now().Unix(),
+						IsMeta:    true,
+						UUID:      "orchestrator-recall",
+					}
+					qe.mu.Lock()
+					qe.messages = append(qe.messages, recallMsg)
+					qe.mu.Unlock()
+				}
+			}
 
-		if recall := qe.performActiveRecall(submitCtx, prompt); recall != "" {
+			// === 智能增强：Planning 引擎级入口 ===
+			// 复杂任务先让 taskDecomposer 拆解成步骤，注入 plan 提示
+			qe.injectDecomposedPlan(submitCtx, prompt)
+
+			// Session 自动记忆（memdir 文件搜索）保持原样——有独立的文件 freshness 逻辑
+			if recall := qe.performActiveRecall(submitCtx, prompt); recall != "" {
 			recallMsg := types.Message{
 				ID:        generateMessageID(),
 				Role:      types.RoleUser,
@@ -927,6 +952,20 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 				}()
 			},
 			HookExecutor: qe.hookExecutor,
+
+			// === 阶段 5: SessionCloser — session 结束时从 ReActBridge 提取经验 → ExperienceStore ===
+			OnSessionEnd: func(bridge *query.ReActBridge) {
+				if bridge == nil {
+					return
+				}
+				store := qe.getExperienceStore()
+				if store == nil {
+					log.Printf("[Engine] OnSessionEnd: no experience store, skip")
+					return
+				}
+				gt := bridge.GetGoalTracker()
+				go query.CloseSession(submitCtx, bridge, gt, store)
+			},
 		}
 
 		log.Printf("[Engine] SubmitMessage: starting query.Query...")
@@ -2014,6 +2053,15 @@ func (qe *QueryEngine) getProjectDirectory() string {
 	}
 	// 然后使用配置中的 CWD
 	return qe.config.CWD
+}
+
+// getExperienceStore 从 MemoryOrchestrator 拿底层 ExperienceStore。
+// 用于 SessionCloser 写入经验（阶段 5 跨 session 学习闭环）。
+func (qe *QueryEngine) getExperienceStore() reflection.ExperienceStore {
+	if qe.memoryOrchestrator == nil {
+		return nil
+	}
+	return qe.memoryOrchestrator.Store()
 }
 
 func (qe *QueryEngine) getMessagesAfterCompactBoundary() []types.Message {

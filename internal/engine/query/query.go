@@ -1,4 +1,4 @@
-﻿package query
+package query
 
 import (
 	"context"
@@ -54,6 +54,10 @@ type QueryDeps struct {
 	OnPhaseChange  func(phase string, toolName string, toolInput any)
 	OnTurnComplete func(ctx context.Context, messages []types.Message)
 	HookExecutor   *hooks.HookExecutor
+
+	// OnSessionEnd 当整个 queryLoop 结束时调用（无论成功/失败）。
+	// 用于 SessionCloser 从 bridge trace 提取经验并保存。
+	OnSessionEnd func(bridge *ReActBridge)
 }
 
 type CompactionResult struct {
@@ -97,6 +101,10 @@ type State struct {
 	TurnCount                    int
 	Transition                   *Continue
 	HistorySnipTracking          *HistorySnipTrackingState
+
+	// L2 ReAct Bridge：渐进式 Thought→Action→Observation 追踪 + 防重犯注入
+	// nil 时完全跳过，降级为裸 tool_calls 循环
+	ReActBridge *ReActBridge
 }
 
 type HistorySnipTrackingState struct {
@@ -335,6 +343,10 @@ func Query(ctx context.Context, params QueryParams, deps QueryDeps) <-chan Query
 			},
 		}
 
+		// L2 ReAct Bridge：自动启用（nil-safe，不想要 ReAct 设成 nil 即可）
+		// goal 取第一条 user 消息的 content（即用户的原始 prompt）
+		state.ReActBridge = NewReActBridge(extractGoalFromMessages(params.Messages))
+
 		if params.MaxTurns <= 0 {
 			params.MaxTurns = DefaultMaxTurns
 		}
@@ -349,6 +361,13 @@ func Query(ctx context.Context, params QueryParams, deps QueryDeps) <-chan Query
 func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialState State, ch chan<- QueryOutput) {
 	state := initialState
 	log.Printf("[Query] queryLoop started, turn=%d", state.TurnCount)
+
+	// L5/L6 终结钩子：无论什么退出路径都调 OnSessionEnd
+	defer func() {
+		if deps.OnSessionEnd != nil {
+			deps.OnSessionEnd(state.ReActBridge)
+		}
+	}()
 
 	for {
 		select {
@@ -457,9 +476,27 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		}
 
 		if deps.OnPhaseChange != nil {
-			deps.OnPhaseChange("call_model", "", nil)
-		}
-		log.Printf("[Query] calling CallModel...")
+				deps.OnPhaseChange("call_model", "", nil)
+			}
+
+			// === L2 ReAct Bridge Hook 1: CallModel 前注入防重犯/进度上下文 ===
+			if state.ReActBridge != nil {
+				if reactCtx := state.ReActBridge.BuildPreCallContext(); reactCtx != "" {
+					log.Printf("[ReAct-Bridge] injecting pre-call context (%d chars)", len(reactCtx))
+					reactMsg := types.Message{
+						Role:       types.RoleUser,
+						Content:    reactCtx,
+						Timestamp:  time.Now().Unix(),
+						IsMeta:     true,
+						UUID:       "react-pre-call",
+					}
+					messages = append(messages, reactMsg)
+					// 也同步到 state.Messages（下一轮迭代会从 state.Messages 取）
+					state.Messages = append(state.Messages, reactMsg)
+				}
+			}
+
+			log.Printf("[Query] calling CallModel...")
 		streamCh, err := deps.CallModel(ctx, QueryParams{
 			Messages:     messages,
 			SystemPrompt: params.SystemPrompt,
@@ -521,14 +558,23 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 							if tool != nil {
 								var input any
 								var parseErr error
-								if tc.Function.Arguments != "" {
-									parseErr = json.Unmarshal([]byte(tc.Function.Arguments), &input)
+								argsStr := tc.Function.Arguments
+								if argsStr != "" {
+									parseErr = json.Unmarshal([]byte(argsStr), &input)
+									if parseErr != nil {
+										// L4 自动修复：尝试从干扰文本中提取 JSON
+										if extracted, ok := tryExtractJSON(argsStr); ok && extracted != argsStr {
+											log.Printf("[L4-fix] extracted JSON from args for %s", tc.Function.Name)
+											parseErr = json.Unmarshal([]byte(extracted), &input)
+										}
+									}
 								}
 								if parseErr != nil {
-									log.Printf("[Query] failed to parse args for %s: %v", tc.Function.Name, parseErr)
+									ce := classifyError(parseErr, tc.Function.Name)
+									logErrorFix(ce.category, tc.Function.Name, "args_parse_failed")
 									state.Messages = append(state.Messages, types.Message{
 										Role:       types.RoleTool,
-										Content:    fmt.Sprintf("failed to parse arguments for tool %s: %v", tc.Function.Name, parseErr),
+										Content:    renderStructuredError(tc.Function.Name, parseErr, ce, ""),
 										ToolCallID: toolUseID,
 										Timestamp:  time.Now().Unix(),
 									})
@@ -581,6 +627,11 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			state.Messages = append(state.Messages, *assistantBuffer)
 			assistantHasAppended = true
 
+			// === L2 ReAct Bridge Hook 2: 记录 Thought + Action ===
+			if state.ReActBridge != nil {
+				state.ReActBridge.RecordThoughtAction(assistantBuffer.Content, assistantBuffer.ToolCalls)
+			}
+
 			if state.HistorySnipTracking != nil && state.HistorySnipTracking.Enabled {
 				compact.DetectToolReferences(
 					assistantBuffer.Content,
@@ -591,11 +642,18 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		}
 
 		if stopReason == "max_output_tokens" && (assistantBuffer == nil || assistantBuffer.Content == "") {
+			if state.ReActBridge != nil {
+				state.ReActBridge.MarkFailed("max_output_tokens_empty")
+			}
 			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "max_output_tokens"}}
 			return
 		}
 
 		if !needsFollowUp {
+			// === L2 ReAct Bridge Hook 4: 最终回答，trace 标记完成 ===
+			if state.ReActBridge != nil && assistantBuffer != nil {
+				state.ReActBridge.MarkFinalAnswer(assistantBuffer.Content)
+			}
 			if stopReason != "" {
 				ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: stopReason}}
 			} else {
@@ -605,11 +663,17 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		}
 		toolCalls := getLastToolCalls(state.Messages)
 		if len(toolCalls) == 0 {
+			if state.ReActBridge != nil && assistantBuffer != nil {
+				state.ReActBridge.MarkFinalAnswer(assistantBuffer.Content)
+			}
 			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "completed"}}
 			return
 		}
 
 		streamingResults := streamingExecutor.WaitForAllResults(0)
+
+		// 收集所有 tool 执行结果给 ReAct Bridge Hook 3 用
+		allResults := make(map[int]*toolExecutionResult)
 
 		for i, tc := range toolCalls {
 			toolUseID := tc.ID
@@ -618,6 +682,12 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			}
 
 			if result, ok := streamingResults[i]; ok {
+				// L4 错误增强：streaming tool 结果里也做错误分类 + 结构化渲染
+				if result.Err != nil && result.Message != nil {
+					ce := classifyError(result.Err, tc.Function.Name)
+					logErrorFix(ce.category, tc.Function.Name, "streaming_error_enhance")
+					result.Message.Content = renderStructuredError(tc.Function.Name, result.Err, ce, "")
+				}
 				if result.Message != nil {
 					// 确保tool消息有正确的ToolCallID
 					result.Message.ToolCallID = toolUseID
@@ -639,6 +709,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 				if result.Result != nil && deps.OnToolResult != nil {
 					deps.OnToolResult(result.Result, state.ToolUseContext)
 				}
+				allResults[i] = result
 				continue
 			}
 
@@ -656,12 +727,23 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			}
 
 			var input any
-			if tc.Function.Arguments != "" {
-				if unmarshalErr := json.Unmarshal([]byte(tc.Function.Arguments), &input); unmarshalErr != nil {
-					log.Printf("[Query] failed to unmarshal args for %s: %v", tc.Function.Name, unmarshalErr)
+			argsStr := tc.Function.Arguments
+			if argsStr != "" {
+				var unmarshalErr error
+				unmarshalErr = json.Unmarshal([]byte(argsStr), &input)
+				if unmarshalErr != nil {
+					// L4 自动修复：尝试从干扰文本中提取 JSON
+					if extracted, ok := tryExtractJSON(argsStr); ok && extracted != argsStr {
+						log.Printf("[L4-fix] extracted JSON from args for %s", tc.Function.Name)
+						unmarshalErr = json.Unmarshal([]byte(extracted), &input)
+					}
+				}
+				if unmarshalErr != nil {
+					ce := classifyError(unmarshalErr, tc.Function.Name)
+					logErrorFix(ce.category, tc.Function.Name, "args_parse_failed")
 					state.Messages = append(state.Messages, types.Message{
 						Role:       types.RoleTool,
-						Content:    fmt.Sprintf("failed to parse arguments for tool %s: %v", tc.Function.Name, unmarshalErr),
+						Content:    renderStructuredError(tc.Function.Name, unmarshalErr, ce, ""),
 						ToolCallID: toolUseID,
 						Timestamp:  time.Now().Unix(),
 					})
@@ -675,6 +757,41 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			}
 
 			result := executeToolCall(ctx, tool, input, toolUseID, params.CanUseTool, state.ToolUseContext, deps.HookExecutor)
+
+			// L4 自动修复：tool.Call 报错时分类 + 自动重试
+			if result.Err != nil {
+				ce := classifyError(result.Err, tool.Name())
+				if shouldAutoRetry(ce, 0) {
+					log.Printf("[L4-fix] tool %s failed (cat=%s), retrying once...", tool.Name(), ce.category)
+					logErrorFix(ce.category, tool.Name(), "auto_retry")
+					time.Sleep(defaultAutoRetryConfig.baseDelay)
+					retryResult := executeToolCall(ctx, tool, input, toolUseID, params.CanUseTool, state.ToolUseContext, deps.HookExecutor)
+					if retryResult.Err == nil {
+						log.Printf("[L4-fix] tool %s retry succeeded!", tool.Name())
+						result = retryResult
+					} else {
+						// 重试也失败 → 渲染结构化错误
+						log.Printf("[L4-fix] tool %s retry also failed: %v", tool.Name(), retryResult.Err)
+						result.Err = retryResult.Err
+						if result.Message != nil {
+							result.Message.Content = renderStructuredError(tool.Name(), retryResult.Err, classifyError(retryResult.Err, tool.Name()), "retry failed")
+						} else {
+							result.Message = &types.Message{
+								Role:       types.RoleTool,
+								Content:    renderStructuredError(tool.Name(), retryResult.Err, classifyError(retryResult.Err, tool.Name()), "retry failed"),
+								ToolCallID: toolUseID,
+								Timestamp:  time.Now().Unix(),
+							}
+						}
+					}
+				} else {
+					// 不可重试 → 渲染结构化错误（给模型明确提示）
+					logErrorFix(ce.category, tool.Name(), "enhance_error_msg")
+					if result.Message != nil {
+						result.Message.Content = renderStructuredError(tool.Name(), result.Err, ce, "")
+					}
+				}
+			}
 
 			if deps.OnPhaseChange != nil {
 				status := "done"
@@ -701,25 +818,37 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 				}
 			}
 			if result.Result != nil && deps.OnToolResult != nil {
-				deps.OnToolResult(result.Result, state.ToolUseContext)
+					deps.OnToolResult(result.Result, state.ToolUseContext)
+				}
+				allResults[i] = result
 			}
-		}
 
-		state.TurnCount++
+			// === L2 ReAct Bridge Hook 3: 所有 tool 执行完毕，记录 Observation ===
+			if state.ReActBridge != nil {
+				state.ReActBridge.RecordObservation(allResults)
+			}
 
-		if deps.OnTurnComplete != nil {
-			deps.OnTurnComplete(ctx, state.Messages)
-		}
+			state.TurnCount++
 
-		if params.MaxBudgetUsd > 0 && deps.GetCostUSD != nil && deps.GetCostUSD() >= params.MaxBudgetUsd {
-			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "max_budget_usd"}}
-			return
-		}
+			if deps.OnTurnComplete != nil {
+				deps.OnTurnComplete(ctx, state.Messages)
+			}
 
-		if state.TurnCount >= params.MaxTurns {
-			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "max_turns_reached"}}
-			return
-		}
+			if params.MaxBudgetUsd > 0 && deps.GetCostUSD != nil && deps.GetCostUSD() >= params.MaxBudgetUsd {
+				if state.ReActBridge != nil {
+					state.ReActBridge.MarkFailed("max_budget_usd")
+				}
+				ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "max_budget_usd"}}
+				return
+			}
+
+			if state.TurnCount >= params.MaxTurns {
+				if state.ReActBridge != nil {
+					state.ReActBridge.MarkFailed("max_turns_reached")
+				}
+				ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "max_turns_reached"}}
+				return
+			}
 
 		state.Transition = &Continue{Reason: ContinueNextTurn}
 	}
