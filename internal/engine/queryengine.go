@@ -86,7 +86,7 @@ type QueryEngine struct {
 	// 智能增强：从上一轮 reflection 拿到的经验，在后续 SubmitMessage 开始时注入 messages
 	pendingLessons []*reflection.Experience
 	// 智能增强开关（可后续暴露到 UI，默认 true）
-	planningEnabled  bool
+	planningEnabled   bool
 	reflectionEnabled bool
 }
 
@@ -206,11 +206,11 @@ func (qe *QueryEngine) Startup(ctx context.Context) {
 		reflCfg.StoragePath = filepath.Join(qe.config.CWD, ".auto", "reflections")
 	}
 	if refl, err := reflection.NewBaseReflector(reflCfg); err == nil {
-			qe.reflector = refl
-		}
+		qe.reflector = refl
+	}
 
-		// L3 记忆统一调度 orchestrator
-		qe.memoryOrchestrator = NewMemoryOrchestrator(qe.longTermMem, qe.reflector)
+	// L3 记忆统一调度 orchestrator
+	qe.memoryOrchestrator = NewMemoryOrchestrator(qe.longTermMem, qe.reflector)
 
 	qe.taskDecomposer = planning.NewBaseTaskDecomposer(planning.DefaultPlannerConfig())
 
@@ -346,6 +346,7 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 		MaxTurns:     maxTurns,
 		MaxBudgetUsd: qe.getConfig().MaxBudgetUsd,
 		Model:        qe.config.UserSpecifiedModel,
+		ProjectDir:   qe.getProjectDirectory(),
 	}
 
 	var mu sync.Mutex
@@ -746,36 +747,61 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		log.Printf("[Engine] SubmitMessage: building system prompt...")
 		qe.ensureUserContextMessage(submitCtx)
 
-		// === 智能增强：Reflection 反哺 ===
-			// 从上一轮 reflectOnTurn 拿到的经验，注入到 messages 让模型参考
-			qe.injectPendingLessons()
-
-			// === L3 统一记忆调度 ===
-			// orchestrator 统一 longTermMem + reflector.ApplyExperience（ExperienceStore 跨 session 经验）
-			// pendingLessons 已由 injectPendingLessons 处理过，这里不再重复
-			if qe.memoryOrchestrator != nil {
-				if recall := qe.memoryOrchestrator.Recall(submitCtx, prompt, nil); recall != "" {
-					log.Printf("[Engine] memory orchestrator recalled experiences for prompt: %s...", func() string { if len(prompt) > 60 { return prompt[:60] }; return prompt }())
-					recallMsg := types.Message{
-						ID:        generateMessageID(),
-						Role:      types.RoleUser,
-						Content:   recall,
-						Timestamp: time.Now().Unix(),
-						IsMeta:    true,
-						UUID:      "orchestrator-recall",
-					}
-					qe.mu.Lock()
-					qe.messages = append(qe.messages, recallMsg)
-					qe.mu.Unlock()
+		// === 方案 P0: Pre-Execution Landscaping ===
+		// 前置环境扫描：扫项目结构 + 提取关键词 + grep + 自动读关键文件
+		// 全部并发执行 + 硬超时 2s + 零 LLM 开销 + 失败即跳过
+		if qe.getProjectDirectory() != "" {
+			landscape := query.NewLandscaper(query.DefaultLandscaperConfig()).Run(submitCtx, qe.getProjectDirectory(), prompt)
+			if landscape != "" {
+				landscapeMsg := types.Message{
+					ID:        generateMessageID(),
+					Role:      types.RoleUser,
+					Content:   landscape,
+					Timestamp: time.Now().Unix(),
+					IsMeta:    true,
+					UUID:      "landscaping",
 				}
+				qe.mu.Lock()
+				qe.messages = append(qe.messages, landscapeMsg)
+				qe.mu.Unlock()
 			}
+		}
 
-			// === 智能增强：Planning 引擎级入口 ===
-			// 复杂任务先让 taskDecomposer 拆解成步骤，注入 plan 提示
-			qe.injectDecomposedPlan(submitCtx, prompt)
+		// === 智能增强：Reflection 反哺 ===
+		// 从上一轮 reflectOnTurn 拿到的经验，注入到 messages 让模型参考
+		qe.injectPendingLessons()
 
-			// Session 自动记忆（memdir 文件搜索）保持原样——有独立的文件 freshness 逻辑
-			if recall := qe.performActiveRecall(submitCtx, prompt); recall != "" {
+		// === L3 统一记忆调度 ===
+		// orchestrator 统一 longTermMem + reflector.ApplyExperience（ExperienceStore 跨 session 经验）
+		// pendingLessons 已由 injectPendingLessons 处理过，这里不再重复
+		if qe.memoryOrchestrator != nil {
+			if recall := qe.memoryOrchestrator.Recall(submitCtx, prompt, nil); recall != "" {
+				log.Printf("[Engine] memory orchestrator recalled experiences for prompt: %s...", func() string {
+					if len(prompt) > 60 {
+						return prompt[:60]
+					}
+					return prompt
+				}())
+				recallMsg := types.Message{
+					ID:        generateMessageID(),
+					Role:      types.RoleUser,
+					Content:   recall,
+					Timestamp: time.Now().Unix(),
+					IsMeta:    true,
+					UUID:      "orchestrator-recall",
+				}
+				qe.mu.Lock()
+				qe.messages = append(qe.messages, recallMsg)
+				qe.mu.Unlock()
+			}
+		}
+
+		// === 智能增强：Planning 引擎级入口 ===
+		// 复杂任务先让 taskDecomposer 拆解成步骤，注入 plan 提示
+		qe.injectDecomposedPlan(submitCtx, prompt)
+
+		// Session 自动记忆（memdir 文件搜索）保持原样——有独立的文件 freshness 逻辑
+		if recall := qe.performActiveRecall(submitCtx, prompt); recall != "" {
 			recallMsg := types.Message{
 				ID:        generateMessageID(),
 				Role:      types.RoleUser,
@@ -878,6 +904,7 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 			MaxTurns:     qe.getConfig().MaxTurns,
 			MaxBudgetUsd: qe.getConfig().MaxBudgetUsd,
 			Model:        qe.config.UserSpecifiedModel,
+			ProjectDir:   qe.getProjectDirectory(),
 		}
 
 		phaseTurnCount := 0
@@ -1290,7 +1317,7 @@ func (qe *QueryEngine) GetContextUsage(ctx context.Context) (*types.ContextUsage
 type backendType int
 
 const (
-	backendOllama  backendType = iota // 默认
+	backendOllama backendType = iota // 默认
 	backendLocalAI
 	backendOpenAI
 )

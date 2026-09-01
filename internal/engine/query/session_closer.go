@@ -1,4 +1,4 @@
-// Package query 的 SessionCloser：阶段 5 跨 session 经验闭环。
+﻿// Package query 的 SessionCloser：阶段 5 跨 session 经验闭环。
 //
 // 当一个 SubmitMessage 会话结束时（defer 里调一次），从 ReActBridge 的 trace + failures + goalTracker
 // 里自动提取有价值的经验 → 写入 ExperienceStore → 下次 session 启动时自动 Recall。
@@ -277,22 +277,4 @@ func goalTrackerGoal(gt *GoalTracker) string {
 		return ""
 	}
 	return gt.goal
-}
-
-func extractKeywords(s string) []string {
-	if s == "" {
-		return nil
-	}
-	words := strings.Fields(strings.ToLower(s))
-	var kws []string
-	for _, w := range words {
-		w = strings.Trim(w, ".,;:!?，。；：！？()（）[]【】\"'`<>")
-		if len(w) >= 2 && len(w) <= 30 {
-			kws = append(kws, w)
-		}
-		if len(kws) >= 5 {
-			break
-		}
-	}
-	return kws
 }

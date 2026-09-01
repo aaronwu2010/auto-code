@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -40,6 +41,11 @@ type GoalSubtask struct {
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 	// 执行这个子任务的 ReAct step 索引（trace step index）
 	TraceStepRefs []int `json:"trace_step_refs,omitempty"`
+	// P1 依赖感知：该子任务依赖哪些子任务（ID 列表）
+	// 为空表示没有前置依赖，可以随时执行
+	DependsOn []string `json:"depends_on,omitempty"`
+	// P1 DAG 拓扑排序后的执行顺序（0 = 最先执行），-1 表示未排序
+	Order int `json:"order,omitempty"`
 }
 
 // GoalTracker 是 L6 大目标状态追踪器。
@@ -273,4 +279,254 @@ func (gt *GoalTracker) Summary() string {
 		}
 	}
 	return fmt.Sprintf("%d/%d subtasks done", done, len(gt.subtasks))
+}
+
+// InferDependencies 根据子任务描述自动推断依赖关系（零 LLM 开销）。
+// 启发式规则：
+//   - 子任务按数字编号且出现 "先/然后/接着/之后" → 前一个依赖后一个? 不，后一个依赖前一个
+//   - 关键词包含 "先修改类型定义" + "再修改实现" → 实现依赖类型
+//   - "先写测试" + "再写实现" → 实现依赖测试（TDD 例外，默认反过来）
+func (gt *GoalTracker) InferDependencies() {
+	gt.mu.Lock()
+	defer gt.mu.Unlock()
+
+	if len(gt.subtasks) < 2 {
+		return
+	}
+
+	// 清空现有依赖
+	for _, st := range gt.subtasks {
+		st.DependsOn = nil
+		st.Order = -1
+	}
+
+	// 规则 1：编号子任务，默认后一个依赖前一个（顺序执行）
+	hasExplicitOrder := false
+	for i := range gt.subtasks {
+		if i == 0 {
+			continue
+		}
+		prev := gt.subtasks[i-1]
+		// 如果前面有明显的 "先" 标记
+		if strings.Contains(prev.Description, "先") ||
+			strings.Contains(prev.Description, "首先") ||
+			strings.Contains(prev.Description, "first") {
+			gt.subtasks[i].DependsOn = append(gt.subtasks[i].DependsOn, prev.ID)
+			hasExplicitOrder = true
+		}
+	}
+
+	// 规则 2：关键词依赖链（启发式）
+	type depRule struct {
+		keyword string // 如果某个子任务描述里有这个...
+		depends string // ...就依赖有这个关键词的子任务
+	}
+	depRules := []depRule{
+		{"实现", "定义"}, {"实现", "类型"}, {"实现", "接口"}, {"实现", "struct"},
+		{"修改", "定义"}, {"修改", "接口"},
+		{"调用", "实现"},
+		{"测试", "实现"}, {"测试", "功能"},
+		{"部署", "构建"}, {"部署", "编译"},
+		{"文档", "实现"},
+	}
+
+	for i, st := range gt.subtasks {
+		if len(st.DependsOn) > 0 {
+			continue // 已经有显式依赖了
+		}
+		for _, rule := range depRules {
+			if strings.Contains(st.Description, rule.keyword) {
+				for j, other := range gt.subtasks {
+					if i == j {
+						continue
+					}
+					if strings.Contains(other.Description, rule.depends) {
+						gt.subtasks[i].DependsOn = append(gt.subtasks[i].DependsOn, other.ID)
+					}
+				}
+			}
+		}
+	}
+
+	// 规则 3：没有任何依赖被推断出来，但有 >= 2 个子任务 → 按编号顺序依赖
+	if !hasExplicitOrder {
+		anyDep := false
+		for _, st := range gt.subtasks {
+			if len(st.DependsOn) > 0 {
+				anyDep = true
+				break
+			}
+		}
+		if !anyDep {
+			for i := 1; i < len(gt.subtasks); i++ {
+				gt.subtasks[i].DependsOn = append(gt.subtasks[i].DependsOn, gt.subtasks[i-1].ID)
+			}
+		}
+	}
+
+	// 跑一次拓扑排序验证
+	if _, err := gt.topologicalSortInternal(); err != nil {
+		log.Printf("[GoalTracker] dependency inference resulted in cycle, clearing all deps: %v", err)
+		for _, st := range gt.subtasks {
+			st.DependsOn = nil
+		}
+	}
+}
+
+// TopologicalSort 对外暴露的 Kahn 算法拓扑排序。
+// 返回排序后的子任务列表，以及可能的循环依赖错误。
+// 排序结果会写回每个子任务的 Order 字段。
+func (gt *GoalTracker) TopologicalSort() ([]*GoalSubtask, error) {
+	gt.mu.Lock()
+	defer gt.mu.Unlock()
+	return gt.topologicalSortInternal()
+}
+
+// topologicalSortInternal 内部版本（调用方需持锁）
+func (gt *GoalTracker) topologicalSortInternal() ([]*GoalSubtask, error) {
+	n := len(gt.subtasks)
+	if n == 0 {
+		return nil, nil
+	}
+
+	// 构建图：adjacency list + in-degree
+	idToIdx := make(map[string]int, n)
+	for i, st := range gt.subtasks {
+		idToIdx[st.ID] = i
+	}
+
+	inDegree := make([]int, n)
+	adj := make([][]int, n)
+	for i, st := range gt.subtasks {
+		for _, depID := range st.DependsOn {
+			j, ok := idToIdx[depID]
+			if !ok {
+				continue // 依赖不存在，跳过
+			}
+			// 依赖关系：st 依赖 depID → 边 depID → st
+			adj[j] = append(adj[j], i)
+			inDegree[i]++
+		}
+	}
+
+	// Kahn 算法队列
+	queue := make([]int, 0, n)
+	for i := 0; i < n; i++ {
+		if inDegree[i] == 0 {
+			queue = append(queue, i)
+		}
+	}
+
+	// 稳定排序：同级按原始位置排序
+	// 这里简单处理，不做复杂稳定化
+	sorted := make([]*GoalSubtask, 0, n)
+	order := 0
+	for len(queue) > 0 {
+		// 取第一个
+		u := queue[0]
+		queue = queue[1:]
+		gt.subtasks[u].Order = order
+		sorted = append(sorted, gt.subtasks[u])
+		order++
+		for _, v := range adj[u] {
+			inDegree[v]--
+			if inDegree[v] == 0 {
+				queue = append(queue, v)
+			}
+		}
+	}
+
+	if len(sorted) != n {
+		// 有循环依赖
+		return sorted, fmt.Errorf("cycle detected in subtask dependencies (%d/%d sorted)", len(sorted), n)
+	}
+
+	// 对没有显式依赖的子任务也设一个合理的 Order
+	for _, st := range gt.subtasks {
+		if st.Order < 0 {
+			st.Order = order
+			order++
+		}
+	}
+
+	return sorted, nil
+}
+
+// SetDependsOn 手动设置某个子任务的依赖
+func (gt *GoalTracker) SetDependsOn(subtaskID string, dependsOn []string) {
+	gt.mu.Lock()
+	defer gt.mu.Unlock()
+	for _, st := range gt.subtasks {
+		if st.ID == subtaskID {
+			st.DependsOn = dependsOn
+			break
+		}
+	}
+	_, _ = gt.topologicalSortInternal() // 更新 Order
+}
+
+// GetReadySubtasks 返回当前可以执行的子任务（所有依赖都已 Done）
+func (gt *GoalTracker) GetReadySubtasks() []*GoalSubtask {
+	gt.mu.RLock()
+	defer gt.mu.RUnlock()
+
+	var ready []*GoalSubtask
+	for _, st := range gt.subtasks {
+		if st.Status != TaskStatusPending {
+			continue
+		}
+		allDepsDone := true
+		for _, depID := range st.DependsOn {
+			found := false
+			for _, other := range gt.subtasks {
+				if other.ID == depID {
+					if other.Status != TaskStatusDone {
+						allDepsDone = false
+					}
+					found = true
+					break
+				}
+			}
+			if !found {
+				allDepsDone = false // 依赖不存在，标记为不可执行
+				break
+			}
+		}
+		if allDepsDone {
+			ready = append(ready, st)
+		}
+	}
+
+	// 按 Order 排序
+	sort.Slice(ready, func(i, j int) bool { return ready[i].Order < ready[j].Order })
+	return ready
+}
+
+// BlockUnreadySubtasks 根据依赖关系自动把依赖未完成的子任务标记为 Blocked
+func (gt *GoalTracker) BlockUnreadySubtasks() {
+	gt.mu.Lock()
+	defer gt.mu.Unlock()
+
+	for _, st := range gt.subtasks {
+		if st.Status != TaskStatusPending {
+			continue
+		}
+		allDepsDone := true
+		for _, depID := range st.DependsOn {
+			for _, other := range gt.subtasks {
+				if other.ID == depID && other.Status != TaskStatusDone {
+					allDepsDone = false
+					break
+				}
+			}
+			if !allDepsDone {
+				break
+			}
+		}
+		if !allDepsDone && len(st.DependsOn) > 0 {
+			st.Status = TaskStatusBlocked
+		} else if allDepsDone && st.Status == TaskStatusBlocked {
+			st.Status = TaskStatusPending
+		}
+	}
 }

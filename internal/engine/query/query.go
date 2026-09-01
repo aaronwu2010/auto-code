@@ -41,6 +41,9 @@ type QueryParams struct {
 	MaxBudgetUsd  float64
 	Model         types.ModelSetting
 	Thinking      types.ThinkingConfig
+	// P0/P1: 项目目录（用于 Landscaper 环境扫描 + VerificationGate 构建验证）
+	// 为空则跳过相关功能（nil-safe 降级）
+	ProjectDir string
 }
 
 type QueryDeps struct {
@@ -347,6 +350,17 @@ func Query(ctx context.Context, params QueryParams, deps QueryDeps) <-chan Query
 		// goal 取第一条 user 消息的 content（即用户的原始 prompt）
 		state.ReActBridge = NewReActBridge(extractGoalFromMessages(params.Messages))
 
+		// P1 增强：初始化 GoalTracker 依赖推断 + 注入验证门
+		if state.ReActBridge != nil {
+			if gt := state.ReActBridge.GetGoalTracker(); gt != nil {
+				gt.InferDependencies()
+			}
+			if params.ProjectDir != "" {
+				gate := NewVerificationGate(true)
+				state.ReActBridge.SetVerificationGate(gate, params.ProjectDir)
+			}
+		}
+
 		if params.MaxTurns <= 0 {
 			params.MaxTurns = DefaultMaxTurns
 		}
@@ -476,27 +490,27 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		}
 
 		if deps.OnPhaseChange != nil {
-				deps.OnPhaseChange("call_model", "", nil)
-			}
+			deps.OnPhaseChange("call_model", "", nil)
+		}
 
-			// === L2 ReAct Bridge Hook 1: CallModel 前注入防重犯/进度上下文 ===
-			if state.ReActBridge != nil {
-				if reactCtx := state.ReActBridge.BuildPreCallContext(); reactCtx != "" {
-					log.Printf("[ReAct-Bridge] injecting pre-call context (%d chars)", len(reactCtx))
-					reactMsg := types.Message{
-						Role:       types.RoleUser,
-						Content:    reactCtx,
-						Timestamp:  time.Now().Unix(),
-						IsMeta:     true,
-						UUID:       "react-pre-call",
-					}
-					messages = append(messages, reactMsg)
-					// 也同步到 state.Messages（下一轮迭代会从 state.Messages 取）
-					state.Messages = append(state.Messages, reactMsg)
+		// === L2 ReAct Bridge Hook 1: CallModel 前注入防重犯/进度上下文 ===
+		if state.ReActBridge != nil {
+			if reactCtx := state.ReActBridge.BuildPreCallContext(); reactCtx != "" {
+				log.Printf("[ReAct-Bridge] injecting pre-call context (%d chars)", len(reactCtx))
+				reactMsg := types.Message{
+					Role:      types.RoleUser,
+					Content:   reactCtx,
+					Timestamp: time.Now().Unix(),
+					IsMeta:    true,
+					UUID:      "react-pre-call",
 				}
+				messages = append(messages, reactMsg)
+				// 也同步到 state.Messages（下一轮迭代会从 state.Messages 取）
+				state.Messages = append(state.Messages, reactMsg)
 			}
+		}
 
-			log.Printf("[Query] calling CallModel...")
+		log.Printf("[Query] calling CallModel...")
 		streamCh, err := deps.CallModel(ctx, QueryParams{
 			Messages:     messages,
 			SystemPrompt: params.SystemPrompt,
@@ -818,37 +832,37 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 				}
 			}
 			if result.Result != nil && deps.OnToolResult != nil {
-					deps.OnToolResult(result.Result, state.ToolUseContext)
-				}
-				allResults[i] = result
+				deps.OnToolResult(result.Result, state.ToolUseContext)
 			}
+			allResults[i] = result
+		}
 
-			// === L2 ReAct Bridge Hook 3: 所有 tool 执行完毕，记录 Observation ===
+		// === L2 ReAct Bridge Hook 3: 所有 tool 执行完毕，记录 Observation ===
+		if state.ReActBridge != nil {
+			state.ReActBridge.RecordObservation(allResults)
+		}
+
+		state.TurnCount++
+
+		if deps.OnTurnComplete != nil {
+			deps.OnTurnComplete(ctx, state.Messages)
+		}
+
+		if params.MaxBudgetUsd > 0 && deps.GetCostUSD != nil && deps.GetCostUSD() >= params.MaxBudgetUsd {
 			if state.ReActBridge != nil {
-				state.ReActBridge.RecordObservation(allResults)
+				state.ReActBridge.MarkFailed("max_budget_usd")
 			}
+			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "max_budget_usd"}}
+			return
+		}
 
-			state.TurnCount++
-
-			if deps.OnTurnComplete != nil {
-				deps.OnTurnComplete(ctx, state.Messages)
+		if state.TurnCount >= params.MaxTurns {
+			if state.ReActBridge != nil {
+				state.ReActBridge.MarkFailed("max_turns_reached")
 			}
-
-			if params.MaxBudgetUsd > 0 && deps.GetCostUSD != nil && deps.GetCostUSD() >= params.MaxBudgetUsd {
-				if state.ReActBridge != nil {
-					state.ReActBridge.MarkFailed("max_budget_usd")
-				}
-				ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "max_budget_usd"}}
-				return
-			}
-
-			if state.TurnCount >= params.MaxTurns {
-				if state.ReActBridge != nil {
-					state.ReActBridge.MarkFailed("max_turns_reached")
-				}
-				ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "max_turns_reached"}}
-				return
-			}
+			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "max_turns_reached"}}
+			return
+		}
 
 		state.Transition = &Continue{Reason: ContinueNextTurn}
 	}

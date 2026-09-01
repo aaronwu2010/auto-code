@@ -12,6 +12,7 @@
 package query
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
@@ -43,6 +44,12 @@ type ReActBridge struct {
 	goalTracker *GoalTracker
 	// L5 工具执行验证结果缓存（最近一次）
 	lastVerification []*VerificationResult
+	// P1 验证门（可选，nil 时跳过）
+	verificationGate *VerificationGate
+	// P1 验证门需要的项目目录（可选）
+	projectDir string
+	// P1 上一次验证失败结果（用于 BuildPreCallContext 注入）
+	lastGateFailure *GateResult
 
 	mu sync.RWMutex
 }
@@ -201,10 +208,32 @@ func (b *ReActBridge) RecordObservation(toolResults map[int]*toolExecutionResult
 	}
 
 // MarkFinalAnswer 当模型输出最终文本（无 tool_calls）时调用。
-// 把 trace 标记为完成。
+// P1 增强：先跑验证门，失败则不标记完成，注入错误让下一轮继续修。
 func (b *ReActBridge) MarkFinalAnswer(answer string) {
 	if b == nil {
 		return
+	}
+
+	// P1: 验证门检查
+	b.mu.RLock()
+	gate := b.verificationGate
+	cwd := b.projectDir
+	b.mu.RUnlock()
+
+	if gate != nil && cwd != "" {
+		// 用 context.Background 因为这里没有上游 ctx，但 gate 自己有超时
+		result := gate.Run(context.Background(), cwd)
+		if !result.Skipped && !result.OverallPass {
+			// 验证失败 → 不标记完成，让下一轮继续修
+			b.mu.Lock()
+			b.lastGateFailure = result
+			b.mu.Unlock()
+			log.Printf("[ReAct-Bridge] verification gate FAILED (%s), injecting failure for next round", result.FirstFailureName)
+			return
+		}
+		if !result.Skipped && result.OverallPass {
+			log.Printf("[ReAct-Bridge] verification gate PASSED, completing trace")
+		}
 	}
 
 	b.mu.Lock()
@@ -212,6 +241,37 @@ func (b *ReActBridge) MarkFinalAnswer(answer string) {
 
 	b.trace.Complete(truncateForReAct(answer, 500))
 	log.Printf("[ReAct-Bridge] trace completed, %d total steps", len(b.trace.Steps))
+}
+
+// SetVerificationGate 注入验证门（P1）
+func (b *ReActBridge) SetVerificationGate(gate *VerificationGate, projectDir string) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.verificationGate = gate
+	b.projectDir = projectDir
+}
+
+// GetLastGateFailure 获取最近一次验证失败结果（用于 BuildPreCallContext）
+func (b *ReActBridge) GetLastGateFailure() *GateResult {
+	if b == nil {
+		return nil
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.lastGateFailure
+}
+
+// ClearLastGateFailure 清掉验证失败结果（新一轮开始时调用）
+func (b *ReActBridge) ClearLastGateFailure() {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.lastGateFailure = nil
 }
 
 // MarkFailed 当 queryLoop 因为 max_turns / error 等终止时调用。
@@ -318,16 +378,25 @@ func (b *ReActBridge) BuildPreCallContext() string {
 	}
 
 	// === 5. L5 ResultVerifier 验证结果（只取最近一轮的）===
-	if len(b.lastVerification) > 0 {
-		summary := BuildVerificationSummary(b.lastVerification)
-		if summary != "" {
-			sb.WriteString(summary + "\n\n")
+		if len(b.lastVerification) > 0 {
+			summary := BuildVerificationSummary(b.lastVerification)
+			if summary != "" {
+				sb.WriteString(summary + "\n\n")
+			}
+			// 清空，等下一轮再收集
+			b.lastVerification = nil
 		}
-		// 清空，等下一轮再收集
-		b.lastVerification = nil
-	}
 
-	return strings.TrimSpace(sb.String())
+		// === 6. P1 验证门失败注入 ===
+		if b.lastGateFailure != nil && !b.lastGateFailure.OverallPass {
+			msg := BuildGateFailureMessage(b.lastGateFailure)
+			if msg != "" {
+				sb.WriteString(msg + "\n")
+				b.lastGateFailure = nil // 只注入一次
+			}
+		}
+
+		return strings.TrimSpace(sb.String())
 }
 
 // Trace 返回内部 ReActTrace（只读）。用于 debug / metrics。
