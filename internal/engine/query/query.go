@@ -1,4 +1,4 @@
-package query
+﻿package query
 
 import (
 	"context"
@@ -521,8 +521,8 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 							if tool != nil {
 								var input any
 								var parseErr error
-								if tc.Function.Arguments != nil {
-									parseErr = json.Unmarshal(tc.Function.Arguments, &input)
+								if tc.Function.Arguments != "" {
+									parseErr = json.Unmarshal([]byte(tc.Function.Arguments), &input)
 								}
 								if parseErr != nil {
 									log.Printf("[Query] failed to parse args for %s: %v", tc.Function.Name, parseErr)
@@ -656,8 +656,8 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			}
 
 			var input any
-			if tc.Function.Arguments != nil {
-				if unmarshalErr := json.Unmarshal(tc.Function.Arguments, &input); unmarshalErr != nil {
+			if tc.Function.Arguments != "" {
+				if unmarshalErr := json.Unmarshal([]byte(tc.Function.Arguments), &input); unmarshalErr != nil {
 					log.Printf("[Query] failed to unmarshal args for %s: %v", tc.Function.Name, unmarshalErr)
 					state.Messages = append(state.Messages, types.Message{
 						Role:       types.RoleTool,
@@ -762,10 +762,7 @@ func mergeAssistantFragment(prev, fragment *types.Message) *types.Message {
 					prev.ToolCalls[matched].Function.Name = newTC.Function.Name
 					prev.ToolCalls[matched].Function.Arguments = newTC.Function.Arguments
 				} else if len(newTC.Function.Arguments) > 0 {
-					prev.ToolCalls[matched].Function.Arguments = append(
-						prev.ToolCalls[matched].Function.Arguments,
-						newTC.Function.Arguments...,
-					)
+					prev.ToolCalls[matched].Function.Arguments += newTC.Function.Arguments
 				}
 				if prev.ToolCalls[matched].Type == "" && newTC.Type != "" {
 					prev.ToolCalls[matched].Type = newTC.Type

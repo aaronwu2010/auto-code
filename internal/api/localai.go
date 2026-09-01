@@ -309,7 +309,7 @@ func (c *LocalAIClient) parseSSEStream(reader io.Reader, ch chan<- StreamMessage
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 
 	var (
-		toolCallsAcc []types.ToolCall
+		toolCallsMap  map[int]*types.ToolCall
 		toolCallsSent bool
 		finishReason  string
 		inputTokens   int64
@@ -334,6 +334,7 @@ func (c *LocalAIClient) parseSSEStream(reader io.Reader, ch chan<- StreamMessage
 		if data == "[DONE]" {
 			log.Printf("[LocalAI] stream done: input_tokens=%d, output_tokens=%d, finish_reason=%s", inputTokens, outputTokens, finishReason)
 
+			toolCallsAcc := sortedToolCalls(toolCallsMap)
 			if len(toolCallsAcc) > 0 {
 				msg := &types.Message{
 					Role:      types.RoleAssistant,
@@ -383,7 +384,7 @@ func (c *LocalAIClient) parseSSEStream(reader io.Reader, ch chan<- StreamMessage
 					toolCallsSent = true
 					ch <- StreamMessage{Type: "tool_calls_start"}
 				}
-				toolCallsAcc = append(toolCallsAcc, choice.Delta.ToolCalls...)
+				toolCallsMap = mergeToolCallDeltas(toolCallsMap, choice.Delta.ToolCalls)
 			}
 
 			if choice.FinishReason != "" {

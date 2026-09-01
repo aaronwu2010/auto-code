@@ -257,7 +257,7 @@ func (e *ExtractMemories) hasMemoryWritesSince(lastUUID string, messages []types
 			var input struct {
 				FilePath string `json:"file_path"`
 			}
-			if err := json.Unmarshal(tc.Function.Arguments, &input); err != nil {
+			if err := json.Unmarshal([]byte(tc.Function.Arguments), &input); err != nil {
 				continue
 			}
 			if input.FilePath == "" {

@@ -1223,7 +1223,7 @@ func (qe *QueryEngine) GetContextUsage(ctx context.Context) (*types.ContextUsage
 		messageTokens += len(messages[i].Content) / 4
 		for _, tc := range messages[i].ToolCalls {
 			messageTokens += len(tc.Function.Name) / 4
-			messageTokens += len(string(tc.Function.Arguments)) / 4
+			messageTokens += len(tc.Function.Arguments) / 4
 		}
 		if messages[i].Thinking != "" {
 			messageTokens += len(messages[i].Thinking) / 4

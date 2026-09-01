@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -707,6 +708,59 @@ func ConvertMessagesToOllama(messages []types.Message, systemPrompt string) []Ol
 		result = append(result, ollamaMsg)
 	}
 
+	return result
+}
+
+// mergeToolCallDeltas 将 SSE delta 中的 tool_calls 按 index 增量聚合。
+// OpenAI SSE 的 tool_calls 是分片传递的：同一个 tool_call 会多次出现在 delta 中，
+// 第一次带 id/type/function.name，后续只带 function.arguments 的增量字符串。
+// 此函数把它们按 index 合并成完整的 ToolCall。
+func mergeToolCallDeltas(acc map[int]*types.ToolCall, deltas []types.ToolCall) map[int]*types.ToolCall {
+	if acc == nil {
+		acc = make(map[int]*types.ToolCall)
+	}
+	for _, d := range deltas {
+		idx := d.Index
+		existing, ok := acc[idx]
+		if !ok {
+			tc := d // 值拷贝，避免修改原 delta
+			acc[idx] = &tc
+		} else {
+			// 增量合并：非空字段覆盖，arguments 字符串拼接
+			if d.ID != "" {
+				existing.ID = d.ID
+			}
+			if d.Type != "" {
+				existing.Type = d.Type
+			}
+			if d.Function.Name != "" {
+				existing.Function.Name = d.Function.Name
+			}
+			if d.Function.Arguments != "" {
+				existing.Function.Arguments += d.Function.Arguments
+			}
+		}
+	}
+	return acc
+}
+
+// sortedToolCalls 把按 index 聚合后的 tool_calls map 转成有序 slice。
+// 如果某些后端不传 index（值为 0），fallback 为按 map 迭代顺序追加——
+// 此时只有一个 tool_call 时恰好 index=0 没问题；多 call 且都没 index 时顺序未定义，
+// 但这种兼容实现极少，暂不处理。
+func sortedToolCalls(m map[int]*types.ToolCall) []types.ToolCall {
+	if len(m) == 0 {
+		return nil
+	}
+	indices := make([]int, 0, len(m))
+	for idx := range m {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+	result := make([]types.ToolCall, 0, len(indices))
+	for _, idx := range indices {
+		result = append(result, *m[idx])
+	}
 	return result
 }
 

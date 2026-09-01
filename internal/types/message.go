@@ -38,14 +38,15 @@ type ContentBlock struct {
 }
 
 type ToolCall struct {
+	Index    int          `json:"index,omitempty"`
 	ID       string       `json:"id,omitempty"`
 	Type     string       `json:"type,omitempty"`
 	Function FunctionCall `json:"function"`
 }
 
 type FunctionCall struct {
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments,omitempty"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments,omitempty"`
 }
 
 type Message struct {
@@ -102,7 +103,7 @@ func (m *Message) ToContentBlocks() []ContentBlock {
 			Type:      ContentToolUse,
 			ToolUseID: toolUseID,
 			ToolName:  tc.Function.Name,
-			ToolInput: tc.Function.Arguments,
+			ToolInput: json.RawMessage(tc.Function.Arguments),
 		})
 	}
 
