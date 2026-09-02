@@ -530,3 +530,70 @@ func (gt *GoalTracker) BlockUnreadySubtasks() {
 		}
 	}
 }
+
+// --- RuntimeReplanner 需要的公共 API ---
+
+// FindSubtask 按 ID 查找子任务
+func (gt *GoalTracker) FindSubtask(id string) *GoalSubtask {
+	gt.mu.RLock()
+	defer gt.mu.RUnlock()
+	for _, st := range gt.subtasks {
+		if st.ID == id {
+			return st
+		}
+	}
+	return nil
+}
+
+// GetAllSubtasks 返回所有子任务（拷贝引用，调用方只读）
+func (gt *GoalTracker) GetAllSubtasks() []*GoalSubtask {
+	gt.mu.RLock()
+	defer gt.mu.RUnlock()
+	result := make([]*GoalSubtask, len(gt.subtasks))
+	copy(result, gt.subtasks)
+	return result
+}
+
+// SetSubtaskStatus 设置子任务状态
+func (gt *GoalTracker) SetSubtaskStatus(id string, status TaskStatus) {
+	gt.mu.Lock()
+	defer gt.mu.Unlock()
+	for _, st := range gt.subtasks {
+		if st.ID == id {
+			st.Status = status
+			if status == TaskStatusRunning && st.StartedAt == nil {
+				t := time.Now()
+				st.StartedAt = &t
+			}
+			if (status == TaskStatusDone || status == TaskStatusFailed || status == TaskStatusBlocked) && st.CompletedAt == nil {
+				t := time.Now()
+				st.CompletedAt = &t
+			}
+			return
+		}
+	}
+}
+
+// SetSubtaskDescription 修改子任务描述（重规划时换方案）
+func (gt *GoalTracker) SetSubtaskDescription(id, desc string) {
+	gt.mu.Lock()
+	defer gt.mu.Unlock()
+	for _, st := range gt.subtasks {
+		if st.ID == id {
+			st.Description = desc
+			return
+		}
+	}
+}
+
+// FindFailedSubtask 返回第一个 Failed 状态的子任务（RuntimeReplanner 用）
+func (gt *GoalTracker) FindFailedSubtask() *GoalSubtask {
+	gt.mu.RLock()
+	defer gt.mu.RUnlock()
+	for _, st := range gt.subtasks {
+		if st.Status == TaskStatusFailed {
+			return st
+		}
+	}
+	return nil
+}

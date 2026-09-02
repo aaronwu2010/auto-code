@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"reflect"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/auto-code/auto-code/internal/compact"
 	"github.com/auto-code/auto-code/internal/hooks"
+	"github.com/auto-code/auto-code/internal/prompts"
 	"github.com/auto-code/auto-code/internal/tools"
 	"github.com/auto-code/auto-code/internal/types"
 )
@@ -108,6 +112,30 @@ type State struct {
 	// L2 ReAct Bridge：渐进式 Thought→Action→Observation 追踪 + 防重犯注入
 	// nil 时完全跳过，降级为裸 tool_calls 循环
 	ReActBridge *ReActBridge
+
+	// --- 智能增强 ---
+	CrossValidator     *CrossValidator     // R8 多角度交叉验证
+	UncertaintyEngine  *UncertaintyEngine  // R9 不确定性感知
+	ReflectLoop        *ReflectLoop        // R12 深度执行-反思循环
+	RuntimeReplanner   *RuntimeReplanner   // R3 执行中动态重规划
+
+	// --- 高级智能模式 ---
+	HypothesisExplorer  *HypothesisExplorer  // A 假设驱动探索
+	ProactiveProbe      *ProactiveProbe      // B 主动搜索触发器
+	FocusManager        *FocusManager        // D 注意力聚焦
+	AlternativeAnalyzer *AlternativeAnalyzer // C 多方案比较
+
+	// --- AI 助手优先设计移植 ---
+	ToolSelector        *ToolSelector              // 方案 1: 动态工具筛选
+	DynamicPromptEngine *prompts.DynamicPromptEngine // 方案 2: 任务适配 prompt
+	GuardRailEngine     *GuardRailEngine             // 方案 3: 前置硬约束
+	CurrentTaskType     TaskType                     // 当前任务类型（缓存）
+	ProjectLang         prompts.ProjectLang          // 项目语言（缓存）
+
+	// --- 上下文效率优化 ---
+	SmartToolResultFilter *SmartToolResultFilter // 优化 1: 工具结果智能截断
+	WorkingMemory         *WorkingMemory         // 优化 2: 工作记忆（已读文件摘要 + 修改历史）
+	PreciseTokenBudget    *PreciseTokenBudget    // 优化 3: 精确 token 预算分配
 }
 
 type HistorySnipTrackingState struct {
@@ -361,6 +389,38 @@ func Query(ctx context.Context, params QueryParams, deps QueryDeps) <-chan Query
 			}
 		}
 
+		// --- 智能增强模块初始化 ---
+		// R8 CrossValidator: 多角度交叉验证（编译/lint/安全/性能/影响范围）
+		state.CrossValidator = NewCrossValidator(true, params.ProjectDir)
+		// R9 UncertaintyEngine: 不确定性感知
+		state.UncertaintyEngine = NewUncertaintyEngine(true, params.ProjectDir)
+		// R12 ReflectLoop: 深度执行-反思循环
+		state.ReflectLoop = NewReflectLoop(DefaultReflectCycleConfig())
+		// R3 RuntimeReplanner: 执行中动态重规划（依赖 GoalTracker）
+		if gt := state.ReActBridge.GetGoalTracker(); gt != nil {
+			state.RuntimeReplanner = NewRuntimeReplanner(DefaultReplannerConfig(), gt)
+		}
+
+		// --- 高级智能模式初始化 ---
+		state.HypothesisExplorer = NewHypothesisExplorer(DefaultHypothesisExplorerConfig())
+		state.HypothesisExplorer.SetProjectDir(params.ProjectDir)
+		state.ProactiveProbe = NewProactiveProbe(DefaultProactiveProbeConfig())
+		state.FocusManager = NewFocusManager(DefaultFocusManagerConfig())
+		state.AlternativeAnalyzer = NewAlternativeAnalyzer(DefaultAlternativeAnalyzerConfig())
+
+		// --- AI 助手优先设计移植初始化 ---
+		state.ToolSelector = NewToolSelector(DefaultToolSelectorConfig())
+		state.DynamicPromptEngine = prompts.NewDynamicPromptEngine(true)
+		state.GuardRailEngine = NewGuardRailEngine(DefaultGuardRailConfig())
+
+		// 上下文效率优化（零 LLM 开销，纯规则）
+		state.SmartToolResultFilter = NewSmartToolResultFilter(true)
+		state.WorkingMemory = NewWorkingMemory()
+		state.PreciseTokenBudget = NewPreciseTokenBudget(DefaultTokenBudgetConfig())
+
+		// FocusManager 初始同步 GoalTracker
+		state.FocusManager.SyncFromGoalTracker(state.ReActBridge.GetGoalTracker())
+
 		if params.MaxTurns <= 0 {
 			params.MaxTurns = DefaultMaxTurns
 		}
@@ -399,6 +459,94 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			}
 			return "none"
 		}())
+
+		// === Turn 0: HypothesisExplorer 假设驱动探索 ===
+		if state.TurnCount == 0 && state.HypothesisExplorer != nil {
+			// 提取用户输入（第一条 user message）
+			var userInput string
+			for _, m := range messages {
+				if m.Role == types.RoleUser && m.Content != "" {
+					userInput = m.Content
+					break
+				}
+			}
+			if userInput != "" {
+				report := state.HypothesisExplorer.Analyze(ctx, userInput, nil, nil)
+				if report != nil && report.Triggered && report.RawContext != "" {
+					log.Printf("[HypothesisExplorer] triggered (task=%s, hyps=%d)", report.TaskType, len(report.Results))
+					hypMsg := types.Message{
+						Role:      types.RoleUser,
+						Content:   report.RawContext,
+						Timestamp: time.Now().Unix(),
+						IsMeta:    true,
+						UUID:      "hypothesis-explorer",
+					}
+					messages = append(messages, hypMsg)
+					state.Messages = append(state.Messages, hypMsg)
+
+					// 同步最佳假设到 FocusManager
+					state.FocusManager.SyncFromBestHypothesis(report)
+				}
+			}
+		}
+
+		// === Turn 0: DynamicPromptEngine 任务适配 Prompt ===
+		if state.TurnCount == 0 && state.DynamicPromptEngine != nil {
+			var userInput string
+			for _, m := range messages {
+				if m.Role == types.RoleUser && m.Content != "" {
+					userInput = m.Content
+					break
+				}
+			}
+			if userInput != "" {
+				// 检测任务类型
+				state.CurrentTaskType = ClassifyTask(userInput)
+				// 检测项目语言（从 Landscaper 或 params.ProjectDir 推断）
+				if fileExt := detectProjectExtFromDir(params.ProjectDir); fileExt != "" {
+					state.ProjectLang = prompts.DetectLangFromExt(fileExt)
+				}
+
+				if state.CurrentTaskType != TaskTypeUnknown {
+					lang := state.ProjectLang
+					if lang == prompts.LangUnknown {
+						lang = prompts.LangUnknown
+					}
+					// 映射 TaskType 到 prompts.TaskType
+					var dynTaskType prompts.TaskType
+					switch state.CurrentTaskType {
+					case TaskTypeDebug:
+						dynTaskType = prompts.DynTaskDebug
+					case TaskTypeFeature:
+						dynTaskType = prompts.DynTaskFeature
+					case TaskTypeRefactor:
+						dynTaskType = prompts.DynTaskRefactor
+					case TaskTypeExplain:
+						dynTaskType = prompts.DynTaskExplain
+					case TaskTypeBuild:
+						dynTaskType = prompts.DynTaskBuild
+					case TaskTypePerformance:
+						dynTaskType = prompts.DynTaskPerformance
+					default:
+						dynTaskType = prompts.DynTaskUnknown
+					}
+
+					if instr := state.DynamicPromptEngine.BuildTaskInstruction(dynTaskType, lang); instr != "" {
+						log.Printf("[DynamicPrompt] injected task guidance (task=%s, lang=%s, %d chars)",
+							state.CurrentTaskType, lang, len(instr))
+						dynMsg := types.Message{
+							Role:      types.RoleUser,
+							Content:   instr,
+							Timestamp: time.Now().Unix(),
+							IsMeta:    true,
+							UUID:      "dynamic-prompt",
+						}
+						messages = append(messages, dynMsg)
+						state.Messages = append(state.Messages, dynMsg)
+					}
+				}
+			}
+		}
 
 		if deps.Microcompact != nil {
 			messages = deps.Microcompact(messages)
@@ -489,6 +637,22 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			currentTools = deps.GetTools()
 		}
 
+		// === 方案 1: ToolSelector 动态工具筛选 ===
+		if state.ToolSelector != nil && len(currentTools) > state.ToolSelector.cfg.MaxTools {
+			// 推断项目扩展名
+			projExt := ""
+			if fileExt := detectProjectExtFromDir(params.ProjectDir); fileExt != "" {
+				projExt = fileExt
+			}
+			// 用缓存的 TaskType（Turn 0 时已检测）
+			selected := state.ToolSelector.Select(currentTools, state.CurrentTaskType, projExt)
+			if len(selected) > 0 && len(selected) < len(currentTools) {
+				log.Printf("[ToolSelector] filtered tools: %d -> %d (task=%s)",
+					len(currentTools), len(selected), state.CurrentTaskType)
+				currentTools = selected
+			}
+		}
+
 		if deps.OnPhaseChange != nil {
 			deps.OnPhaseChange("call_model", "", nil)
 		}
@@ -507,6 +671,132 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 				messages = append(messages, reactMsg)
 				// 也同步到 state.Messages（下一轮迭代会从 state.Messages 取）
 				state.Messages = append(state.Messages, reactMsg)
+			}
+		}
+
+		// === 智能增强 Hook: CallModel 前注入 ReflectLoop / RuntimeReplanner 上下文 ===
+		// R12 ReflectLoop: 每 N 步后触发深度反思
+		if state.ReflectLoop != nil && state.ReActBridge != nil {
+			shouldReflect := state.ReflectLoop.RecordAction(true) // 每轮视为 action
+			if shouldReflect {
+				var reflectCtx string
+				trigger := TriggerCycleLimit
+				trace := state.ReActBridge.Trace()
+				gt := state.ReActBridge.GetGoalTracker()
+				reflectCtx = state.ReflectLoop.BuildReflectContext(trace, gt, trigger)
+				if reflectCtx != "" {
+					log.Printf("[ReflectLoop] injecting reflect context (%d chars)", len(reflectCtx))
+					reflectMsg := types.Message{
+						Role:      types.RoleUser,
+						Content:   reflectCtx,
+						Timestamp: time.Now().Unix(),
+						IsMeta:    true,
+						UUID:      "reflect-loop",
+					}
+					messages = append(messages, reflectMsg)
+					state.Messages = append(state.Messages, reflectMsg)
+					// 反思后重置 cycle
+					state.ReflectLoop.CompleteReflectCycle(&ReflectResult{
+						CycleID:    state.ReflectLoop.cycleID,
+						Trigger:    trigger,
+						ActionCount: state.ReflectLoop.actionCount,
+					})
+				}
+			}
+		}
+
+		// R3 RuntimeReplanner: 注入重规划上下文（如果有 blocked/failed 子任务）
+		if state.RuntimeReplanner != nil {
+			if replanCtx := state.RuntimeReplanner.BuildReplannerContext(); replanCtx != "" {
+				log.Printf("[RuntimeReplanner] injecting replanner context (%d chars)", len(replanCtx))
+				replanMsg := types.Message{
+					Role:      types.RoleUser,
+					Content:   replanCtx,
+					Timestamp: time.Now().Unix(),
+					IsMeta:    true,
+					UUID:      "runtime-replan",
+				}
+				messages = append(messages, replanMsg)
+				state.Messages = append(state.Messages, replanMsg)
+			}
+		}
+
+		// D FocusManager: 每轮同步 + 注入 Top 3 焦点
+		if state.FocusManager != nil {
+			state.FocusManager.SyncFromGoalTracker(state.ReActBridge.GetGoalTracker())
+			state.FocusManager.Tick()
+			if focusCtx := state.FocusManager.BuildFocusContext(); focusCtx != "" {
+				log.Printf("[FocusManager] injecting focus context (%d chars)", len(focusCtx))
+				focusMsg := types.Message{
+					Role:      types.RoleUser,
+					Content:   focusCtx,
+					Timestamp: time.Now().Unix(),
+					IsMeta:    true,
+					UUID:      "focus-manager",
+				}
+				messages = append(messages, focusMsg)
+				state.Messages = append(state.Messages, focusMsg)
+			}
+		}
+
+		// B ProactiveProbe: 注入主动探测历史（提示 LLM "agent 已经探过哪些方向"）
+		if state.ProactiveProbe != nil {
+			state.ProactiveProbe.ResetCycle()
+			if probeCtx := state.ProactiveProbe.BuildProbeContext(); probeCtx != "" {
+				log.Printf("[ProactiveProbe] injecting probe context (%d chars)", len(probeCtx))
+				probeMsg := types.Message{
+					Role:      types.RoleUser,
+					Content:   probeCtx,
+					Timestamp: time.Now().Unix(),
+					IsMeta:    true,
+					UUID:      "proactive-probe",
+				}
+				messages = append(messages, probeMsg)
+				state.Messages = append(state.Messages, probeMsg)
+			}
+		}
+
+		// === 方案 3: GuardRailEngine 注入已读文件状态 ===
+		if state.GuardRailEngine != nil {
+			if guardCtx := state.GuardRailEngine.BuildGuardContext(); guardCtx != "" {
+				guardMsg := types.Message{
+					Role:      types.RoleUser,
+					Content:   guardCtx,
+					Timestamp: time.Now().Unix(),
+					IsMeta:    true,
+					UUID:      "guard-rail",
+				}
+				messages = append(messages, guardMsg)
+				state.Messages = append(state.Messages, guardMsg)
+			}
+			state.GuardRailEngine.Tick()
+		}
+
+		// === 优化 2: WorkingMemory 注入工作记忆 ===
+		if state.WorkingMemory != nil {
+			if memCtx := state.WorkingMemory.BuildContext(); memCtx != "" {
+				memMsg := types.Message{
+					Role:      types.RoleUser,
+					Content:   memCtx,
+					Timestamp: time.Now().Unix(),
+					IsMeta:    true,
+					UUID:      "working-memory",
+				}
+				messages = append(messages, memMsg)
+				state.Messages = append(state.Messages, memMsg)
+			}
+		}
+
+		// === 优化 3: PreciseTokenBudget 裁剪 messages ===
+		if state.PreciseTokenBudget != nil {
+			estimated := state.PreciseTokenBudget.EstimateMessages(messages)
+			if estimated > state.PreciseTokenBudget.cfg.TotalBudget {
+				log.Printf("[PreciseTokenBudget] estimated %d tokens > budget %d, trimming...",
+					estimated, state.PreciseTokenBudget.cfg.TotalBudget)
+				beforeCount := len(messages)
+				messages = state.PreciseTokenBudget.TrimMessages(messages)
+				log.Printf("[PreciseTokenBudget] trimmed from %d to %d messages, estimated: %d tokens",
+					beforeCount, len(messages), state.PreciseTokenBudget.EstimateMessages(messages))
 			}
 		}
 
@@ -595,6 +885,24 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 									ch <- QueryOutput{Type: "user", Message: &state.Messages[len(state.Messages)-1]}
 									continue
 								}
+
+								// === Hook 1: GuardRailEngine 硬约束检查 ===
+								if state.GuardRailEngine != nil {
+									decision := state.GuardRailEngine.CheckToolGuard(tc.Function.Name, input)
+									if !decision.Passed {
+										log.Printf("[GuardRail] BLOCKED %s: %s", tc.Function.Name, decision.Reason)
+										// 不拒绝——给 LLM 一个 "工具返回了提示"，让它自己决定先读再改
+										state.Messages = append(state.Messages, types.Message{
+											Role:       types.RoleTool,
+											Content:    "[GuardRail] " + decision.Suggestion,
+											ToolCallID: toolUseID,
+											Timestamp:  time.Now().Unix(),
+										})
+										ch <- QueryOutput{Type: "user", Message: &state.Messages[len(state.Messages)-1]}
+										continue
+									}
+								}
+
 								if tool.IsConcurrencySafe(input) {
 									streamingExecutor.AddTool(ctx, tool, input, toolUseID, i)
 								}
@@ -664,16 +972,70 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		}
 
 		if !needsFollowUp {
-			// === L2 ReAct Bridge Hook 4: 最终回答，trace 标记完成 ===
-			if state.ReActBridge != nil && assistantBuffer != nil {
-				state.ReActBridge.MarkFinalAnswer(assistantBuffer.Content)
+			// === Hook 4: CrossValidator 多角度验证最终回答 ===
+			if state.CrossValidator != nil && assistantBuffer != nil {
+				target := buildValidationTarget(messages, params.ProjectDir)
+				if target != nil && len(target.FilesChanged) > 0 {
+					cvResult := state.CrossValidator.Run(ctx, target)
+					log.Printf("[CrossValidator] final answer validation: pass=%v, issues=%d",
+						cvResult.OverallPass, countIssues(cvResult))
+					if !cvResult.OverallPass {
+						// 发现严重问题：不直接结束，注入验证结果让 LLM 修正
+						cvMsg := types.Message{
+							Role:      types.RoleUser,
+							Content:   formatCrossValidationHints(cvResult),
+							Timestamp: time.Now().Unix(),
+							IsMeta:    true,
+							UUID:      "cross-validation-hint",
+						}
+						messages = append(messages, cvMsg)
+						state.Messages = append(state.Messages, cvMsg)
+						log.Printf("[CrossValidator] injected %d issues, forcing additional turn", countIssues(cvResult))
+						// 不 return，让主循环继续走一轮
+						needsFollowUp = true
+					}
+				}
+
+				// === Hook 6: AlternativeAnalyzer 多方案比较 ===
+				if state.AlternativeAnalyzer != nil && needsFollowUp {
+					var userInput string
+					for _, m := range state.Messages {
+						if m.Role == types.RoleUser && !m.IsMeta && m.Content != "" {
+							userInput = m.Content
+						}
+					}
+					avgConf := 0.0
+					if state.UncertaintyEngine != nil {
+						avgConf = state.UncertaintyEngine.AverageConfidence()
+					}
+					altReport := state.AlternativeAnalyzer.Analyze(userInput, nil, avgConf)
+					if altReport != nil && altReport.ShouldCompare {
+						altMsg := types.Message{
+							Role:      types.RoleUser,
+							Content:   altReport.BuildPromptHint(),
+							Timestamp: time.Now().Unix(),
+							IsMeta:    true,
+							UUID:      "alternative-analysis",
+						}
+						messages = append(messages, altMsg)
+						state.Messages = append(state.Messages, altMsg)
+						log.Printf("[AlternativeAnalyzer] injected %s", altReport.Summary)
+					}
+				}
 			}
-			if stopReason != "" {
-				ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: stopReason}}
-			} else {
-				ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "completed"}}
+
+			if !needsFollowUp {
+				// === L2 ReAct Bridge Hook 4: 最终回答，trace 标记完成 ===
+				if state.ReActBridge != nil && assistantBuffer != nil {
+					state.ReActBridge.MarkFinalAnswer(assistantBuffer.Content)
+				}
+				if stopReason != "" {
+					ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: stopReason}}
+				} else {
+					ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "completed"}}
+				}
+				return
 			}
-			return
 		}
 		toolCalls := getLastToolCalls(state.Messages)
 		if len(toolCalls) == 0 {
@@ -840,6 +1202,129 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		// === L2 ReAct Bridge Hook 3: 所有 tool 执行完毕，记录 Observation ===
 		if state.ReActBridge != nil {
 			state.ReActBridge.RecordObservation(allResults)
+		}
+
+		// === 智能增强 Hook: 所有 tool 执行完毕后 ===
+		// Hook 2+3: GuardRailEngine 记录已读文件 + ToolSelector 记忆使用频率
+		for _, r := range allResults {
+			if r == nil || r.Result == nil {
+				continue
+			}
+			toolName := toolNameFromResult(r)
+			toolSuccess := r.Err == nil
+
+			if state.ToolSelector != nil {
+				state.ToolSelector.RecordToolUsage(toolName)
+			}
+			if state.GuardRailEngine != nil {
+				var filePath string
+				if r.Message != nil {
+					filePath = r.Message.Content
+				}
+				state.GuardRailEngine.RecordToolExecution(toolName, filePath, toolSuccess)
+			}
+
+			// === 优化 1: SmartToolResultFilter 智能截断 ===
+			if state.SmartToolResultFilter != nil && r.Message != nil {
+				filtered, truncated := state.SmartToolResultFilter.Filter(toolName, r.Message.Content)
+				if truncated {
+					log.Printf("[SmartResultFilter] %s: %d chars → %d chars",
+						toolName, len(r.Message.Content), len(filtered))
+					r.Message.Content = filtered
+				}
+			}
+
+			// === 优化 2: WorkingMemory 工作记忆 ===
+			if state.WorkingMemory != nil {
+				state.WorkingMemory.Tick()
+
+				switch strings.ToLower(toolName) {
+				case "read", "glob_read", "cat":
+					// 从 tool args 里提取 filePath（从 r.Result.Input 或 r.Message 的前 N 行提取）
+					if filePath := extractFilePathFromResult(r, toolName); filePath != "" {
+						content := ""
+						if r.Message != nil {
+							content = r.Message.Content
+						}
+						state.WorkingMemory.RecordRead(filePath, content)
+					}
+
+				case "edit", "write":
+					if filePath := extractFilePathFromResult(r, toolName); filePath != "" {
+						desc := "修改成功"
+						if !toolSuccess {
+							desc = fmt.Sprintf("修改失败: %s", truncateStr(r.Err.Error(), 60))
+						} else if r.Message != nil {
+							desc = truncateStr(r.Message.Content, 60)
+						}
+						state.WorkingMemory.RecordEdit(filePath, desc, toolName)
+					}
+				}
+			}
+		}
+
+		// R9 UncertaintyEngine: 对 tool 结果打分，低置信度时注入 probe 上下文
+		if state.UncertaintyEngine != nil {
+			for _, r := range allResults {
+				if r == nil || r.Result == nil {
+					continue
+				}
+				score := state.UncertaintyEngine.ScoreToolResult(
+					toolNameFromResult(r),
+					r.Err == nil,
+					func() string {
+						if r.Message != nil {
+							return r.Message.Content
+						}
+						return ""
+					}(),
+					func() string {
+						if r.Err != nil {
+							return r.Err.Error()
+						}
+						return ""
+					}(),
+				)
+				state.UncertaintyEngine.LogScore("tool_result:"+toolNameFromResult(r), score)
+
+				if score.SuggestedAction == ActionProbe || score.SuggestedAction == ActionLightVerify {
+					probeCtx := state.UncertaintyEngine.BuildProbeContext(score)
+					if probeCtx != "" {
+						probeMsg := types.Message{
+							Role:      types.RoleUser,
+							Content:   probeCtx,
+							Timestamp: time.Now().Unix(),
+							IsMeta:    true,
+							UUID:      "uncertainty-probe",
+						}
+						state.Messages = append(state.Messages, probeMsg)
+					}
+				}
+			}
+		}
+
+		// R3 RuntimeReplanner: 子任务失败时尝试自动恢复
+		if state.RuntimeReplanner != nil && state.ReActBridge != nil {
+			for _, r := range allResults {
+				if r == nil || r.Err == nil {
+					continue
+				}
+				toolName := toolNameFromResult(r)
+				// 找到对应的 GoalTracker 子任务并标记失败
+				if gt := state.ReActBridge.GetGoalTracker(); gt != nil {
+					if failedSt := gt.FindFailedSubtask(); failedSt != nil {
+						analysis := state.RuntimeReplanner.OnSubtaskFailed(failedSt.ID, r.Err.Error())
+						if analysis != nil {
+							log.Printf("[RuntimeReplanner] tool '%s' failure analysis: strategy=%s",
+								toolName, analysis.Strategy)
+							// 也触发 ReflectLoop 的 error 反思
+							if state.ReflectLoop != nil && state.ReflectLoop.ShouldReflectNow(TriggerError, len(state.ReActBridge.Trace().Steps)) {
+								state.ReflectLoop.RecordAction(false)
+							}
+						}
+					}
+				}
+			}
 		}
 
 		state.TurnCount++
@@ -1148,4 +1633,195 @@ func estimateTurnCount(messages []types.Message) int {
 		}
 	}
 	return turnCount
+}
+
+// extractFilePathFromResult 从 tool 执行结果的 message content 中提取文件路径
+// 用正则匹配 "# File: xxx" / "path=xxx" / "=== xxx ===" 等常见标记
+// 返回空字符串表示无法提取
+func extractFilePathFromResult(r *toolExecutionResult, toolName string) string {
+	if r == nil || r.Message == nil {
+		return ""
+	}
+	content := r.Message.Content
+	if content == "" {
+		return ""
+	}
+
+	// 常见路径标记
+	patterns := []string{
+		`(?m)^#\s*File:\s*(.+?)$`,       // "# File: main.go"
+		`(?m)^path[=:]\s*(.+?)$`,        // "path: main.go" 或 "path=main.go"
+		`(?m)^//\s*File:\s*(.+?)$`,      // "// File: main.go"
+		`(?m)^/\*\s*File:\s*(.+?)\s*\*/`, // "/* File: main.go */"
+		`(?m)^\s*(.+?\.\w+)\s*$`,        // 单独一行的 ".go" / ".ts" 文件路径（兜底）
+	}
+
+	for _, p := range patterns {
+		re, err := regexp.Compile(p)
+		if err != nil {
+			continue
+		}
+		matches := re.FindStringSubmatch(content)
+		if len(matches) > 1 {
+			path := strings.TrimSpace(matches[1])
+			if path != "" && (strings.Contains(path, ".") || strings.Contains(path, "/") || strings.Contains(path, "\\")) {
+				// 清理可能的 markdown 格式
+				path = strings.Trim(path, "`*")
+				return path
+			}
+		}
+	}
+
+	return ""
+}
+
+func toolNameFromResult(r *toolExecutionResult) string {
+	if r == nil {
+		return ""
+	}
+	// 优先用 toolUseID（唯一标识）
+	if r.ToolUseID != "" {
+		return r.ToolUseID
+	}
+	return ""
+}
+
+// detectProjectExtFromDir scans a project directory and returns the most common file extension.
+// Returns empty string on error or empty directory.
+func detectProjectExtFromDir(projectDir string) string {
+	if projectDir == "" {
+		return ""
+	}
+	entries, err := os.ReadDir(projectDir)
+	if err != nil {
+		return ""
+	}
+
+	counts := make(map[string]int)
+	for _, e := range entries {
+		name := e.Name()
+		idx := strings.LastIndex(name, ".")
+		if idx >= 0 {
+			ext := strings.ToLower(name[idx:])
+			counts[ext]++
+		}
+	}
+
+	var bestExt string
+	var bestCount int
+	for ext, c := range counts {
+		if c > bestCount {
+			bestCount = c
+			bestExt = ext
+		}
+	}
+	return bestExt
+}
+
+// ---- CrossValidator helper functions ----
+
+// buildValidationTarget 从 messages 中提取文件变更 + 工具轨迹，构建 CrossValidator 输入
+func buildValidationTarget(messages []types.Message, projectDir string) *ValidationTarget {
+	target := &ValidationTarget{
+		ProjectDir:      projectDir,
+		FilesChanged:    []FileChange{},
+		ToolTrace:       []ToolTraceEntry{},
+		PreviousContent: map[string]string{},
+		NewContent:      map[string]string{},
+	}
+
+	for i, msg := range messages {
+		// 从 assistant 的 tool calls 里找 Edit/Write 目标文件
+		if msg.Role == types.RoleAssistant {
+			for _, tc := range msg.ToolCalls {
+				name := strings.ToLower(tc.Function.Name)
+				if name == "edit" || name == "write" {
+					var args map[string]any
+					if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err == nil {
+						for _, key := range []string{"filePath", "file_path", "path", "file", "target"} {
+							if val, ok := args[key]; ok {
+								if path, ok := val.(string); ok && path != "" {
+									isNew := name == "write"
+									ext := ""
+									if idx := strings.LastIndex(path, "."); idx >= 0 {
+										ext = strings.ToLower(path[idx:])
+									}
+									target.FilesChanged = append(target.FilesChanged, FileChange{
+										Path:  path,
+										IsNew: isNew,
+										Ext:   ext,
+									})
+								}
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// 从 tool messages 里构建工具轨迹
+		if msg.Role == types.RoleTool && msg.ToolCallID != "" {
+			if i > 0 {
+				prevMsg := messages[i-1]
+				if prevMsg.Role == types.RoleAssistant {
+					for _, tc := range prevMsg.ToolCalls {
+						if tc.ID == msg.ToolCallID {
+							toolLower := strings.ToLower(msg.Content)
+							hasErr := strings.Contains(toolLower, "error") || strings.Contains(toolLower, "fail")
+							errStr := ""
+							if hasErr {
+								errStr = msg.Content
+							}
+							target.ToolTrace = append(target.ToolTrace, ToolTraceEntry{
+								ToolName: tc.Function.Name,
+								Input:    tc.Function.Arguments,
+								Success:  !hasErr,
+								Error:    errStr,
+							})
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return target
+}
+
+// countIssues 统计 CrossValidationResult 的总问题数
+func countIssues(result *CrossValidationResult) int {
+	if result == nil {
+		return 0
+	}
+	return result.CriticalCount + result.HighCount + result.MediumCount + result.LowCount
+}
+
+// formatCrossValidationHints 把 CrossValidationResult 格式化成注入给 LLM 的提示
+func formatCrossValidationHints(result *CrossValidationResult) string {
+	if result == nil || countIssues(result) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("[CrossValidator] 检测到 %d 个问题 (critical=%d, high=%d, medium=%d, low=%d)\n\n",
+		countIssues(result), result.CriticalCount, result.HighCount, result.MediumCount, result.LowCount))
+
+	for _, report := range result.Reports {
+		if report == nil || len(report.Issues) == 0 {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("--- %s ---\n", report.ValidatorName))
+		for _, issue := range report.Issues {
+			sb.WriteString(fmt.Sprintf("[%s] %s\n", issue.Severity, issue.Message))
+			if issue.FixHint != "" {
+				sb.WriteString(fmt.Sprintf("  -> 建议: %s\n", issue.FixHint))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("请修复以上问题后再给出最终回答。如果某些问题需要更多信息来确认，请先用 Read/Grep 收集。\n")
+	return sb.String()
 }

@@ -704,7 +704,7 @@ export namespace types {
 	}
 	export class FunctionCall {
 	    name: string;
-	    arguments?: number[];
+	    arguments?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new FunctionCall(source);
@@ -717,6 +717,7 @@ export namespace types {
 	    }
 	}
 	export class ToolCall {
+	    index?: number;
 	    id?: string;
 	    type?: string;
 	    function: FunctionCall;
@@ -727,6 +728,7 @@ export namespace types {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.index = source["index"];
 	        this.id = source["id"];
 	        this.type = source["type"];
 	        this.function = this.convertValues(source["function"], FunctionCall);
