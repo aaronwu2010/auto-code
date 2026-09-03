@@ -532,9 +532,11 @@ function App() {
       await loadConfig();
       await checkHealth();
       await loadModels();
+      await loadLocalAIConfig(); // 仅本地 setState，便宜
+      await loadOpenAIConfig();  // 仅本地 setState，便宜
       await loadProjectDir();
 
-      // 只加载已启用的后端配置（避免探测未启用的 API）
+      // 只加载已启用的后端模型列表（避免探测未启用的 API）
       const localaiCfg = await GetLocalAIConfig();
       if (localaiCfg && localaiCfg.enabled) {
         await loadLocalAIModels();
