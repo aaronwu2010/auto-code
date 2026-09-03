@@ -26,6 +26,13 @@ func isUNCPath(path string) bool {
 }
 
 func EnsurePathInProjectDirectory(filePath string, toolCtx *ToolUseContext) string {
+	// 先展开 ~ 家目录前缀
+	if strings.HasPrefix(filePath, "~") {
+		if home, err := os.UserHomeDir(); err == nil {
+			filePath = filepath.Join(home, filePath[1:])
+		}
+	}
+
 	if toolCtx == nil || toolCtx.ProjectDirectory == "" {
 		if resolved, err := filepath.EvalSymlinks(filePath); err == nil {
 			return resolved
@@ -34,7 +41,17 @@ func EnsurePathInProjectDirectory(filePath string, toolCtx *ToolUseContext) stri
 	}
 
 	projectDir := filepath.Clean(toolCtx.ProjectDirectory)
-	absPath, err := filepath.Abs(filePath)
+
+	// 如果是相对路径，基于 ProjectDirectory 解析（而不是 os.Getwd()）
+	var absPath string
+	if filepath.IsAbs(filePath) {
+		absPath = filePath
+	} else {
+		absPath = filepath.Join(projectDir, filePath)
+	}
+
+	var err error
+	absPath, err = filepath.Abs(absPath)
 	if err != nil {
 		return filePath
 	}

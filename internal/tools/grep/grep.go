@@ -66,7 +66,7 @@ func buildInputSchema() map[string]any {
 			},
 			"path": map[string]any{
 				"type":        "string",
-				"description": "File or directory to search in. If not specified, searches current working directory",
+				"description": "File or directory to search in. Defaults to the project directory if not specified.",
 			},
 			"include": map[string]any{
 				"type":        "string",
@@ -135,7 +135,6 @@ func (t *GrepTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseCo
 	if searchDir == "" {
 		searchDir = tools.GetDefaultSearchDir(toolCtx)
 	} else {
-		searchDir = expandPath(searchDir)
 		searchDir = tools.EnsurePathInProjectDirectory(searchDir, toolCtx)
 	}
 

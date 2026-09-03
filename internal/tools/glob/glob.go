@@ -56,7 +56,7 @@ func buildInputSchema() map[string]any {
 			},
 			"path": map[string]any{
 				"type":        "string",
-				"description": "The directory to search in. If not specified, the current working directory will be used.",
+				"description": "The directory to search in. Defaults to the project directory if not specified.",
 			},
 		},
 		"required":             []string{"pattern"},
@@ -110,7 +110,6 @@ func (t *GlobTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseCo
 	if searchDir == "" {
 		searchDir = tools.GetDefaultSearchDir(toolCtx)
 	} else {
-		searchDir = expandPath(searchDir)
 		searchDir = tools.EnsurePathInProjectDirectory(searchDir, toolCtx)
 	}
 
@@ -161,7 +160,7 @@ func (t *GlobTool) Prompt(_ context.Context, _ tools.PromptOptions) (string, err
 
 Usage:
 - The pattern parameter supports standard glob patterns (e.g., "**/*.js", "src/**/*.ts")
-- The path parameter is optional; defaults to current working directory if not specified
+- The path parameter is optional; defaults to the project directory if not specified
 - Results are limited to 100 files; use a more specific pattern if results are truncated
 - This tool only searches for file names, not file contents. Use GrepTool for content search.`, nil
 }
