@@ -704,7 +704,7 @@ export namespace types {
 	}
 	export class FunctionCall {
 	    name: string;
-	    arguments?: string;
+	    arguments?: number[];
 	
 	    static createFrom(source: any = {}) {
 	        return new FunctionCall(source);
