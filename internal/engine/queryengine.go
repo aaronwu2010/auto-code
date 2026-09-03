@@ -619,7 +619,7 @@ func (qe *QueryEngine) injectDecomposedPlan(ctx context.Context, prompt string) 
 		return
 	}
 
-	decomp, err := qe.taskDecomposer.Decompose(ctx, task, nil)
+	decomp, err := qe.taskDecomposer.Decompose(ctx, task, &planning.PlanContext{UserIntent: prompt})
 	if err != nil || decomp == nil || len(decomp.SubTasks) < 2 {
 		return // 1 步不需要 plan
 	}

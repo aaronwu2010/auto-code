@@ -63,6 +63,11 @@ func (d *BaseTaskDecomposer) Decompose(ctx context.Context, task *Task, context 
 	d.totalDecomposed++
 	d.mu.Unlock()
 
+	// nil 保护：确保 context 不为 nil（下游 decomposeByKeywords 会访问 context.UserIntent）
+	if context == nil {
+		context = &PlanContext{}
+	}
+
 	// 验证输入
 	if err := d.validateInput(task); err != nil {
 		d.mu.Lock()
