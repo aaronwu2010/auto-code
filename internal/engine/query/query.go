@@ -620,7 +620,25 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			lastMsg := messages[len(messages)-1]
 			// 仅当最后一条是 user 或 tool 消息时，才需要继续下一轮（assistant/meta 无需 follow-up）
 			if lastMsg.Role != types.RoleUser && lastMsg.Role != types.RoleTool {
-				log.Printf("[Query] terminal: no follow up needed (last role=%s)", lastMsg.Role)
+				log.Printf("[Query] terminal: no follow up needed (last role=%s, content_len=%d, is_meta=%v)",
+					lastMsg.Role, len(lastMsg.Content), lastMsg.IsMeta)
+				if len(lastMsg.ToolCalls) > 0 {
+					log.Printf("[Query] WARNING: last msg has %d tool_calls but role=%s!", len(lastMsg.ToolCalls), lastMsg.Role)
+				}
+				// 额外诊断：如果 LLM 返回了空 assistant（stop 无内容无 tool_calls），记录完整上下文
+				if lastMsg.Role == types.RoleAssistant && len(lastMsg.Content) == 0 && len(lastMsg.ToolCalls) == 0 {
+					log.Printf("[Query] WARNING: empty assistant response with stop reason!")
+					// 打印最近 3 条 messages 的角色
+					startIdx := len(messages) - 3
+					if startIdx < 0 {
+						startIdx = 0
+					}
+					for i := startIdx; i < len(messages); i++ {
+						m := messages[i]
+						log.Printf("[Query]   messages[%d]: role=%s content_len=%d tool_calls=%d is_meta=%v",
+							i, m.Role, len(m.Content), len(m.ToolCalls), m.IsMeta)
+					}
+				}
 				ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "no_follow_up_needed"}}
 				return
 			}
@@ -801,6 +819,13 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		}
 
 		log.Printf("[Query] calling CallModel...")
+		log.Printf("[Query] CallModel input: messages=%d, tools=%d",
+			len(messages), len(currentTools))
+		if len(messages) > 0 {
+			last := messages[len(messages)-1]
+			log.Printf("[Query] CallModel last msg: role=%s content_len=%d tool_calls=%d is_meta=%v",
+				last.Role, len(last.Content), len(last.ToolCalls), last.IsMeta)
+		}
 		streamCh, err := deps.CallModel(ctx, QueryParams{
 			Messages:     messages,
 			SystemPrompt: params.SystemPrompt,
@@ -828,6 +853,40 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			if firstStreamMsg {
 				log.Printf("[Query] first stream msg received, type=%s", msg.Type)
 				firstStreamMsg = false
+			}
+			// 每条 stream event 都打一行摘要（避免 silent 跳过）
+			switch msg.Type {
+			case "assistant":
+				var tcCount int
+				var contentLen int
+				if msg.Message != nil {
+					contentLen = len(msg.Message.Content)
+					tcCount = len(msg.Message.ToolCalls)
+				}
+				log.Printf("[Query] stream event=assistant content_len=%d tool_calls=%d", contentLen, tcCount)
+			case "stream_event":
+				// 从 Data 里取 stopReason（API 层已解析过）
+				var sr string
+				if w, ok := msg.Data.(*StreamMessageWrapper); ok {
+					sr = w.StopReason
+				} else if msg.Data != nil {
+					rv := reflect.ValueOf(msg.Data)
+					if rv.Kind() == reflect.Ptr {
+						rv = rv.Elem()
+					}
+					if rv.Kind() == reflect.Struct {
+						if f := rv.FieldByName("StopReason"); f.IsValid() && f.Kind() == reflect.String {
+							sr = f.String()
+						}
+					}
+				}
+				log.Printf("[Query] stream_event done=%v stopReason=%s", sr == "stop" || sr == "end_turn" || sr == "", sr)
+			case "error":
+				log.Printf("[Query] stream_event=error err=%v", msg.Error)
+			case "done":
+				log.Printf("[Query] stream_event=done")
+			default:
+				log.Printf("[Query] stream_event=%s", msg.Type)
 			}
 			select {
 			case <-ctx.Done():
@@ -945,9 +1004,33 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			}
 		}
 
+		// === 调试: stream 处理完毕后的完整状态 ===
+		log.Printf("[Query] --- stream done summary ---")
+		log.Printf("[Query] stopReason=%s, needsFollowUp=%v, assistantBuffer_nil=%v, assistantHasAppended=%v",
+			stopReason, needsFollowUp, assistantBuffer == nil, assistantHasAppended)
+		if assistantBuffer != nil {
+			log.Printf("[Query] assistantBuffer: content_len=%d thinking_len=%d tool_calls=%d",
+				len(assistantBuffer.Content), len(assistantBuffer.Thinking), len(assistantBuffer.ToolCalls))
+			if len(assistantBuffer.Content) > 0 {
+				preview := assistantBuffer.Content
+				if len(preview) > 200 {
+					preview = preview[:200] + "..."
+				}
+				log.Printf("[Query] assistant content preview: %s", preview)
+			}
+		}
+		log.Printf("[Query] after-stream state.Messages: count=%d", len(state.Messages))
+		if len(state.Messages) > 0 {
+			last := state.Messages[len(state.Messages)-1]
+			log.Printf("[Query] last state.Messages entry: role=%s content_len=%d tool_calls=%d is_meta=%v",
+				last.Role, len(last.Content), len(last.ToolCalls), last.IsMeta)
+		}
+
 		if assistantBuffer != nil && !assistantHasAppended {
 			state.Messages = append(state.Messages, *assistantBuffer)
 			assistantHasAppended = true
+			log.Printf("[Query] assistantBuffer appended to state.Messages: content_len=%d, thinking_len=%d, tool_calls=%d",
+				len(assistantBuffer.Content), len(assistantBuffer.Thinking), len(assistantBuffer.ToolCalls))
 
 			// === L2 ReAct Bridge Hook 2: 记录 Thought + Action ===
 			if state.ReActBridge != nil {

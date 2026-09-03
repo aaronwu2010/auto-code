@@ -437,6 +437,10 @@ type MCPServerUI struct {
 func (b *WailsBindings) ListLocalAIModels() ListLocalAIModelsResponse {
 	config := b.GetLocalAIConfig()
 
+	if !config.Enabled {
+		return ListLocalAIModelsResponse{}
+	}
+
 	client := b.createLocalAIClient(config)
 
 	models, err := client.ListModels(b.ctx)
@@ -496,6 +500,10 @@ type LocalAIHealthResponse struct {
 // CheckLocalAIHealth 检查 LocalAI 服务健康状态
 func (b *WailsBindings) CheckLocalAIHealth() LocalAIHealthResponse {
 	config := b.GetLocalAIConfig()
+
+	if !config.Enabled {
+		return LocalAIHealthResponse{Enabled: false, Connected: false}
+	}
 
 	client := b.createLocalAIClient(config)
 
@@ -612,6 +620,10 @@ type ListOpenAIModelsResponse struct {
 func (b *WailsBindings) ListOpenAIModels() ListOpenAIModelsResponse {
 	config := b.GetOpenAIConfig()
 
+	if !config.Enabled {
+		return ListOpenAIModelsResponse{}
+	}
+
 	client := b.createOpenAIClient(config)
 
 	models, err := client.ListModels(b.ctx)
@@ -645,6 +657,10 @@ type OpenAIHealthResponse struct {
 // CheckOpenAIHealth 检查 OpenAI API 健康状态（通过 GET /v1/models 验证 API Key 有效性）
 func (b *WailsBindings) CheckOpenAIHealth() OpenAIHealthResponse {
 	config := b.GetOpenAIConfig()
+
+	if !config.Enabled {
+		return OpenAIHealthResponse{Enabled: false, Connected: false}
+	}
 
 	client := b.createOpenAIClient(config)
 

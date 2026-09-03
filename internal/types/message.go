@@ -49,6 +49,38 @@ type FunctionCall struct {
 	Arguments string `json:"arguments,omitempty"`
 }
 
+// UnmarshalJSON 自定义 FunctionCall 解析
+// 不同后端返回的 arguments 格式不同：
+//   - OpenAI:    arguments 是 JSON string  "{\"filePath\":\"...\"}"
+//   - Ollama:    arguments 是 JSON object {"filePath":"..."}  ← 这里会炸
+//   - LocalAI:   可能两者都有
+// 统一兼容：无论是 string 还是 object，最终都存成 string
+func (fc *FunctionCall) UnmarshalJSON(data []byte) error {
+	// 先尝试默认解析（arguments 为 string）
+	type alias FunctionCall
+	var a struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments,omitempty"`
+	}
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	fc.Name = a.Name
+
+	// arguments 可能是 string，也可能是 object/array
+	if len(a.Arguments) > 0 {
+		// 尝试当 string
+		var s string
+		if err := json.Unmarshal(a.Arguments, &s); err == nil {
+			fc.Arguments = s
+		} else {
+			// 不是 string → 当作 object/array/number/marshal 成 string
+			fc.Arguments = string(a.Arguments)
+		}
+	}
+	return nil
+}
+
 type Message struct {
 	ID         string      `json:"id"`
 	Role       MessageRole `json:"role"`

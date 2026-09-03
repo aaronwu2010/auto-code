@@ -532,11 +532,19 @@ function App() {
       await loadConfig();
       await checkHealth();
       await loadModels();
-      await loadLocalAIConfig();
-      await loadLocalAIModels();
-      await loadOpenAIConfig();
-      await loadOpenAIModels();
       await loadProjectDir();
+
+      // 只加载已启用的后端配置（避免探测未启用的 API）
+      const localaiCfg = await GetLocalAIConfig();
+      if (localaiCfg && localaiCfg.enabled) {
+        await loadLocalAIModels();
+      }
+
+      const openaiCfg = await GetOpenAIConfig();
+      if (openaiCfg && openaiCfg.enabled) {
+        await loadOpenAIModels();
+      }
+
       GetContextUsage().then(setContextUsage).catch(() => {});
     } catch {}
   };
