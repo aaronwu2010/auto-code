@@ -45,8 +45,9 @@ func NewLogicValidator() *LogicValidator {
 			// 空 catch/except 块
 			regexp.MustCompile(`catch\s*\([^)]*\)\s*\{\s*\}`),
 			regexp.MustCompile(`except\s*:\s*\n\s*pass`),
-			// 无限循环无退出条件
-			regexp.MustCompile(`while\s+True\s*:\s*\n(?:\s+[^\n]+\n)*\s*(?!break|return)`),
+			// 无限循环无退出条件（保守匹配 while True/while 1/for(;;) + 缩进代码块）
+			regexp.MustCompile(`while\s+(True|1)\s*:\s*\n(?:\s+[^\n]+\n)+`),
+			regexp.MustCompile(`for\s*\(\s*;\s*;\s*\)\s*\{`),
 		},
 	}
 }

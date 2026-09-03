@@ -88,7 +88,7 @@ func extractSubtasksFromPrompt(prompt string) []*GoalSubtask {
 	var subtasks []*GoalSubtask
 
 	// 规则 1：编号列表 "1. xxx", "1) xxx", "① xxx"
-	numListRe := regexp.MustCompile(`(?m)^\s*\d+[\.\)\、]\s*(.+)$`)
+	numListRe := regexp.MustCompile(`(?m)^\s*\d+[\.\)、]\s*(.+)$`)
 	if matches := numListRe.FindAllStringSubmatch(prompt, -1); len(matches) >= 2 {
 		for i, m := range matches {
 			subtasks = append(subtasks, &GoalSubtask{
