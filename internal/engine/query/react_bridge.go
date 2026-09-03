@@ -101,8 +101,8 @@ func (b *ReActBridge) RecordThoughtAction(thoughtContent string, toolCalls []typ
 		b.toolCallCounts[name]++
 
 		params := map[string]interface{}{}
-		if tc.Function.Arguments != "" {
-			params["arguments"] = truncateForReAct(tc.Function.Arguments, 300)
+		if len(tc.Function.Arguments) > 0 {
+			params["arguments"] = truncateForReAct(tc.Function.ArgumentsString(), 300)
 		}
 		params["tool_use_id"] = tc.ID
 

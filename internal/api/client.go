@@ -736,8 +736,8 @@ func mergeToolCallDeltas(acc map[int]*types.ToolCall, deltas []types.ToolCall) m
 			if d.Function.Name != "" {
 				existing.Function.Name = d.Function.Name
 			}
-			if d.Function.Arguments != "" {
-				existing.Function.Arguments += d.Function.Arguments
+			if len(d.Function.Arguments) > 0 {
+				existing.Function.Arguments = append(existing.Function.Arguments, d.Function.Arguments...)
 			}
 		}
 	}

@@ -63,7 +63,7 @@ func (tb *PreciseTokenBudget) EstimateMessages(messages []types.Message) int {
 		total += tb.EstimateToken(m.Content)
 		// tool calls 的 arguments 也算 token
 		for _, tc := range m.ToolCalls {
-			total += tb.EstimateToken(tc.Function.Arguments)
+			total += tb.EstimateToken(tc.Function.ArgumentsString())
 			total += tb.EstimateToken(tc.Function.Name)
 		}
 	}

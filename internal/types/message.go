@@ -45,19 +45,17 @@ type ToolCall struct {
 }
 
 type FunctionCall struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments,omitempty"`
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
 }
 
 // UnmarshalJSON 自定义 FunctionCall 解析
 // 不同后端返回的 arguments 格式不同：
 //   - OpenAI:    arguments 是 JSON string  "{\"filePath\":\"...\"}"
-//   - Ollama:    arguments 是 JSON object {"filePath":"..."}  ← 这里会炸
+//   - Ollama:    arguments 是 JSON object {"filePath":"..."}
 //   - LocalAI:   可能两者都有
-// 统一兼容：无论是 string 还是 object，最终都存成 string
+// 用 json.RawMessage 保持原始格式，Marshal 时原样输出，两端兼容。
 func (fc *FunctionCall) UnmarshalJSON(data []byte) error {
-	// 先尝试默认解析（arguments 为 string）
-	type alias FunctionCall
 	var a struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments,omitempty"`
@@ -66,19 +64,23 @@ func (fc *FunctionCall) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	fc.Name = a.Name
-
-	// arguments 可能是 string，也可能是 object/array
-	if len(a.Arguments) > 0 {
-		// 尝试当 string
-		var s string
-		if err := json.Unmarshal(a.Arguments, &s); err == nil {
-			fc.Arguments = s
-		} else {
-			// 不是 string → 当作 object/array/number/marshal 成 string
-			fc.Arguments = string(a.Arguments)
-		}
-	}
+	fc.Arguments = a.Arguments
 	return nil
+}
+
+// ArgumentsString 返回 arguments 的字符串形式（供下游代码使用）
+// 如果原始是 JSON string（带引号），则去掉外层引号
+func (fc *FunctionCall) ArgumentsString() string {
+	if len(fc.Arguments) == 0 {
+		return ""
+	}
+	// 如果是 JSON string（OpenAI 格式），去掉外层引号
+	var s string
+	if err := json.Unmarshal(fc.Arguments, &s); err == nil {
+		return s
+	}
+	// 否则原样返回（Ollama object 格式）
+	return string(fc.Arguments)
 }
 
 type Message struct {

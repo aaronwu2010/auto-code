@@ -921,7 +921,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 							if tool != nil {
 								var input any
 								var parseErr error
-								argsStr := tc.Function.Arguments
+								argsStr := tc.Function.ArgumentsString()
 								if argsStr != "" {
 									parseErr = json.Unmarshal([]byte(argsStr), &input)
 									if parseErr != nil {
@@ -1186,7 +1186,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			}
 
 			var input any
-			argsStr := tc.Function.Arguments
+			argsStr := tc.Function.ArgumentsString()
 			if argsStr != "" {
 				var unmarshalErr error
 				unmarshalErr = json.Unmarshal([]byte(argsStr), &input)
@@ -1473,7 +1473,7 @@ func mergeAssistantFragment(prev, fragment *types.Message) *types.Message {
 					prev.ToolCalls[matched].Function.Name = newTC.Function.Name
 					prev.ToolCalls[matched].Function.Arguments = newTC.Function.Arguments
 				} else if len(newTC.Function.Arguments) > 0 {
-					prev.ToolCalls[matched].Function.Arguments += newTC.Function.Arguments
+					prev.ToolCalls[matched].Function.Arguments = append(prev.ToolCalls[matched].Function.Arguments, newTC.Function.Arguments...)
 				}
 				if prev.ToolCalls[matched].Type == "" && newTC.Type != "" {
 					prev.ToolCalls[matched].Type = newTC.Type
@@ -1858,7 +1858,7 @@ func buildValidationTarget(messages []types.Message, projectDir string) *Validat
 							}
 							target.ToolTrace = append(target.ToolTrace, ToolTraceEntry{
 								ToolName: tc.Function.Name,
-								Input:    tc.Function.Arguments,
+								Input:    tc.Function.ArgumentsString(),
 								Success:  !hasErr,
 								Error:    errStr,
 							})
