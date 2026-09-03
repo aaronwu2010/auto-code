@@ -132,6 +132,11 @@ type State struct {
 	CurrentTaskType     TaskType                     // 当前任务类型（缓存）
 	ProjectLang         prompts.ProjectLang          // 项目语言（缓存）
 
+	// --- PromptChecklistEngine: L3 场景 + L4 风险 checklist ---
+	ChecklistEngine    *prompts.ChecklistEngine
+	InjectedScenes     map[prompts.SceneType]bool   // 已注入的场景（去重）
+	InjectedRisks      map[prompts.RiskType]bool    // 已注入的风险（去重）
+
 	// --- 上下文效率优化 ---
 	SmartToolResultFilter *SmartToolResultFilter // 优化 1: 工具结果智能截断
 	WorkingMemory         *WorkingMemory         // 优化 2: 工作记忆（已读文件摘要 + 修改历史）
@@ -420,6 +425,11 @@ func Query(ctx context.Context, params QueryParams, deps QueryDeps) <-chan Query
 		state.DynamicPromptEngine = prompts.NewDynamicPromptEngine(true)
 		state.GuardRailEngine = NewGuardRailEngine(DefaultGuardRailConfig())
 
+		// PromptChecklistEngine: L3 场景 + L4 风险 checklist（零 LLM 开销）
+		state.ChecklistEngine = prompts.NewChecklistEngine(true)
+		state.InjectedScenes = make(map[prompts.SceneType]bool)
+		state.InjectedRisks = make(map[prompts.RiskType]bool)
+
 		// 上下文效率优化（零 LLM 开销，纯规则）
 		state.SmartToolResultFilter = NewSmartToolResultFilter(true)
 		state.WorkingMemory = NewWorkingMemory()
@@ -552,6 +562,61 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 						}
 						messages = append(messages, dynMsg)
 						state.Messages = append(state.Messages, dynMsg)
+					}
+
+					// L3 场景 + L4 风险 checklist 注入
+					if state.ChecklistEngine != nil {
+						scenes := prompts.DetectScenes(userInput, messages)
+						risks := prompts.DetectRisks(userInput, messages)
+
+						// 过滤已注入的（去重）
+						var newScenes []prompts.SceneType
+						for _, s := range scenes {
+							if !state.InjectedScenes[s] {
+								newScenes = append(newScenes, s)
+							}
+						}
+						var newRisks []prompts.RiskType
+						for _, r := range risks {
+							if !state.InjectedRisks[r] {
+								newRisks = append(newRisks, r)
+							}
+						}
+
+						if len(newScenes) > 0 || len(newRisks) > 0 {
+							sceneText := state.ChecklistEngine.BuildSceneChecklists(newScenes)
+							riskText := state.ChecklistEngine.BuildRiskChecklists(newRisks)
+
+							var checklistContent strings.Builder
+							checklistContent.WriteString("---\n\n")
+							if sceneText != "" {
+								checklistContent.WriteString(fmt.Sprintf("[Detected Scenes] %v\n\n%s\n\n", newScenes, sceneText))
+							}
+							if riskText != "" {
+								checklistContent.WriteString(fmt.Sprintf("[Detected Risks] %v\n\n%s\n\n", newRisks, riskText))
+							}
+
+							if checklistContent.Len() > 0 {
+								checklistMsg := types.Message{
+									Role:      types.RoleUser,
+									Content:   strings.TrimSpace(checklistContent.String()),
+									Timestamp: time.Now().Unix(),
+									IsMeta:    true,
+									UUID:      "checklist-scenes-risks",
+								}
+								messages = append(messages, checklistMsg)
+								state.Messages = append(state.Messages, checklistMsg)
+
+								// 标记已注入
+								for _, s := range newScenes {
+									state.InjectedScenes[s] = true
+								}
+								for _, r := range newRisks {
+									state.InjectedRisks[r] = true
+								}
+								log.Printf("[ChecklistEngine] injected scenes=%v risks=%v", newScenes, newRisks)
+							}
+						}
 					}
 				}
 			}
@@ -811,6 +876,69 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 				}
 				messages = append(messages, memMsg)
 				state.Messages = append(state.Messages, memMsg)
+			}
+		}
+
+		// === Turn N 动态 ChecklistEngine: 从已执行的工具结果中补充检测场景/风险 ===
+		if state.ChecklistEngine != nil && state.TurnCount > 0 {
+			// 收集最近 tool messages
+			var toolResults []string
+			for i := len(state.Messages) - 1; i >= 0 && len(toolResults) < 5; i-- {
+				if state.Messages[i].Role == types.RoleTool {
+					toolResults = append(toolResults, state.Messages[i].Content)
+				}
+			}
+			if len(toolResults) > 0 {
+				newScenes := prompts.DetectScenesFromToolResults(toolResults)
+				newRisks := prompts.DetectRisksFromContent("", strings.Join(toolResults, "\n"))
+
+				// 过滤已注入的
+				var freshScenes []prompts.SceneType
+				for _, s := range newScenes {
+					if !state.InjectedScenes[s] {
+						freshScenes = append(freshScenes, s)
+					}
+				}
+				var freshRisks []prompts.RiskType
+				for _, r := range newRisks {
+					if !state.InjectedRisks[r] {
+						freshRisks = append(freshRisks, r)
+					}
+				}
+
+				if len(freshScenes) > 0 || len(freshRisks) > 0 {
+					sceneText := state.ChecklistEngine.BuildSceneChecklists(freshScenes)
+					riskText := state.ChecklistEngine.BuildRiskChecklists(freshRisks)
+
+					var sb strings.Builder
+					sb.WriteString("---\n\n")
+					if sceneText != "" {
+						sb.WriteString(fmt.Sprintf("[Detected Scenes (turn %d)] %v\n\n%s\n\n", state.TurnCount, freshScenes, sceneText))
+					}
+					if riskText != "" {
+						sb.WriteString(fmt.Sprintf("[Detected Risks (turn %d)] %v\n\n%s\n\n", state.TurnCount, freshRisks, riskText))
+					}
+					if content := strings.TrimSpace(sb.String()); content != "" {
+						clMsg := types.Message{
+							Role:      types.RoleUser,
+							Content:   content,
+							Timestamp: time.Now().Unix(),
+							IsMeta:    true,
+							UUID:      fmt.Sprintf("checklist-turn-%d", state.TurnCount),
+						}
+						messages = append(messages, clMsg)
+						state.Messages = append(state.Messages, clMsg)
+
+						for _, s := range freshScenes {
+							state.InjectedScenes[s] = true
+						}
+						for _, r := range freshRisks {
+							state.InjectedRisks[r] = true
+						}
+						log.Printf("[ChecklistEngine Turn %d] dynamically injected scenes=%v risks=%v",
+							state.TurnCount, freshScenes, freshRisks)
+					}
+				}
 			}
 		}
 
