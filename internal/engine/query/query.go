@@ -692,17 +692,18 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 
 		if len(messages) > 0 {
 			lastMsg := messages[len(messages)-1]
-			// 仅当最后一条是 user 或 tool 消息时，才需要继续下一轮（assistant/meta 无需 follow-up）
-			if lastMsg.Role != types.RoleUser && lastMsg.Role != types.RoleTool {
-				log.Printf("[Query] terminal: no follow up needed (last role=%s, content_len=%d, is_meta=%v)",
-					lastMsg.Role, len(lastMsg.Content), lastMsg.IsMeta)
-				if len(lastMsg.ToolCalls) > 0 {
-					log.Printf("[Query] WARNING: last msg has %d tool_calls but role=%s!", len(lastMsg.ToolCalls), lastMsg.Role)
-				}
+			// 需要 follow up 的条件：最后一条是 user/tool，或 assistant 带 tool_calls
+			// （assistant 带 tool_calls 时需要执行那些工具，不能当作 terminal）
+			needsFollowUp := lastMsg.Role == types.RoleUser ||
+				lastMsg.Role == types.RoleTool ||
+				(lastMsg.Role == types.RoleAssistant && len(lastMsg.ToolCalls) > 0)
+
+			if !needsFollowUp {
+				log.Printf("[Query] terminal: no follow up needed (last role=%s, content_len=%d, tool_calls=%d, is_meta=%v)",
+					lastMsg.Role, len(lastMsg.Content), len(lastMsg.ToolCalls), lastMsg.IsMeta)
 				// 额外诊断：如果 LLM 返回了空 assistant（stop 无内容无 tool_calls），记录完整上下文
 				if lastMsg.Role == types.RoleAssistant && len(lastMsg.Content) == 0 && len(lastMsg.ToolCalls) == 0 {
 					log.Printf("[Query] WARNING: empty assistant response with stop reason!")
-					// 打印最近 3 条 messages 的角色
 					startIdx := len(messages) - 3
 					if startIdx < 0 {
 						startIdx = 0
