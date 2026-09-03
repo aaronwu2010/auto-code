@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -25,6 +26,11 @@ func isUNCPath(path string) bool {
 	return strings.HasPrefix(path, "\\\\") || strings.HasPrefix(path, "//")
 }
 
+// EnsurePathInProjectDirectory 规范化文件路径：
+//  1. 展开 ~ 家目录前缀
+//  2. 相对路径 → 基于 ProjectDirectory 解析（不是 os.Getwd()）
+//  3. 绝对路径 → 原样保留
+//  4. 如果最终路径不在项目目录内 → 打 warning 日志，但不强制修改（尊重 LLM 的意图）
 func EnsurePathInProjectDirectory(filePath string, toolCtx *ToolUseContext) string {
 	// 先展开 ~ 家目录前缀
 	if strings.HasPrefix(filePath, "~") {
@@ -34,15 +40,20 @@ func EnsurePathInProjectDirectory(filePath string, toolCtx *ToolUseContext) stri
 	}
 
 	if toolCtx == nil || toolCtx.ProjectDirectory == "" {
-		if resolved, err := filepath.EvalSymlinks(filePath); err == nil {
+		// 没有项目目录上下文 → 只做基础规范化
+		absPath, err := filepath.Abs(filePath)
+		if err != nil {
+			return filePath
+		}
+		if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
 			return resolved
 		}
-		return filePath
+		return absPath
 	}
 
 	projectDir := filepath.Clean(toolCtx.ProjectDirectory)
 
-	// 如果是相对路径，基于 ProjectDirectory 解析（而不是 os.Getwd()）
+	// 相对路径基于 ProjectDirectory 解析（而不是 os.Getwd()）
 	var absPath string
 	if filepath.IsAbs(filePath) {
 		absPath = filePath
@@ -55,14 +66,15 @@ func EnsurePathInProjectDirectory(filePath string, toolCtx *ToolUseContext) stri
 	if err != nil {
 		return filePath
 	}
+	absPath = filepath.Clean(absPath)
 
 	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
 		absPath = resolved
 	}
 
+	// 超出项目目录 → 打 warning 但不修改（截断文件名会破坏用户意图）
 	if !isPathWithinProject(absPath, projectDir) {
-		fileName := filepath.Base(filePath)
-		return filepath.Join(projectDir, fileName)
+		log.Printf("[PathSafety] path %q is outside project directory %q; using as-is", absPath, projectDir)
 	}
 
 	return absPath
