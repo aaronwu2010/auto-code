@@ -164,6 +164,25 @@ func (d *DynamicPromptEngine) BuildTaskInstruction(taskType TaskType, lang Proje
 		}
 	}
 
+	// 代码生成完整性 checklist
+	// feature/build 任务类型 → 需要确保项目可编译运行 + README
+	// explain 任务类型 → 设计方案应该输出到 design.md
+	if taskType == DynTaskFeature || taskType == DynTaskBuild {
+		if checklist := d.buildCompletenessChecklist(lang, true); checklist != "" {
+			sb.WriteString("\n---\n\n")
+			sb.WriteString(checklist)
+			sb.WriteString("\n")
+		}
+	} else if taskType == DynTaskExplain {
+		// 设计方案类 explain → 建议输出到 design.md
+		sb.WriteString("\n---\n\n")
+		sb.WriteString(`[Design Output] 如果你正在输出设计方案或架构分析:
+- 将完整设计内容写入 design.md 文件
+- 包含: 背景/目标、架构图（文字描述即可）、模块划分、数据流、关键接口、实施步骤
+- 如果用户只是问一个简单问题（不需要完整设计文档），忽略这条`)
+		sb.WriteString("\n")
+	}
+
 	return sb.String()
 }
 
@@ -215,4 +234,92 @@ func (d *DynamicPromptEngine) buildLangInstruction(lang ProjectLang) string {
 	}
 
 	return ""
+}
+
+// buildCompletenessChecklist 构建代码生成完整性 checklist
+// 确保 feature/build 任务生成的代码"开箱即编译运行"
+//
+// 核心理念：写完代码不等于完成——要检查"这个项目还缺什么才能独立编译运行"
+// includeDocs=true 时追加 README.md 文档建议
+func (d *DynamicPromptEngine) buildCompletenessChecklist(lang ProjectLang, includeDocs bool) string {
+	// 构建配置（必须）+ README（建议）按语言组合
+	var checklist string
+
+	switch lang {
+	case LangGo:
+		checklist = `[Completeness Checklist] Go 项目可编译检查清单:
+
+创建新项目时，必须确保以下文件齐全:
+- ☑️ go.mod: 模块声明 + 依赖管理（go mod tidy 自动同步）
+- ☑️ main.go: package main + func main() 入口函数
+- ☑️ 正确的 package 声明（每个 .go 文件首行）
+- ☑️ import 路径正确（标准库 / 第三方 / 项目内部）
+- ☑️ 如果用了第三方包 → go mod tidy 后再构建
+
+验证命令: go build ./... && go vet ./... && go test ./...`
+
+	case LangPython:
+		checklist = `[Completeness Checklist] Python 项目可运行检查清单:
+
+创建新项目时，必须确保以下文件齐全:
+- ☑️ requirements.txt 或 pyproject.toml: 依赖声明
+- ☑️ main.py 或 app.py: 入口（if __name__ == "__main__"）
+- ☑️ 正确的 import 语句（from xxx import yyy / import xxx）
+- ☑️ __init__.py: 包目录下必须有
+
+验证命令: pip install -r requirements.txt && python main.py`
+
+	case LangJava:
+		checklist = `[Completeness Checklist] Java 项目可编译检查清单:
+
+创建新项目时，必须确保以下文件齐全:
+- ☑️ pom.xml (Maven) 或 build.gradle (Gradle): 构建配置 + 依赖
+- ☑️ 正确的 package 声明（必须与目录结构匹配）
+- ☑️ public static void main(String[] args) 入口
+- ☑️ 正确的 import 语句
+
+验证命令: mvn compile && mvn test`
+
+	case LangTypeScript, LangJavaScript:
+		checklist = `[Completeness Checklist] JS/TS 项目可运行检查清单:
+
+创建新项目时，必须确保以下文件齐全:
+- ☑️ package.json: 依赖 + scripts（build, test, start）
+- ☑️ tsconfig.json（TS 项目）: 编译配置
+- ☑️ 入口文件 index.ts / app.ts
+- ☑️ ES module import/export 正确
+
+验证命令: npm install && npm run build && npm test`
+
+	case LangRust:
+		checklist = `[Completeness Checklist] Rust 项目可编译检查清单:
+
+创建新项目时，必须确保以下文件齐全:
+- ☑️ Cargo.toml: 包声明 + 依赖 + features
+- ☑️ src/main.rs 或 src/lib.rs: 入口
+- ☑️ 正确的 use 语句导入
+- ☑️ mod 声明模块可见性
+
+验证命令: cargo build && cargo test && cargo clippy`
+
+	default:
+		checklist = `[Completeness Checklist] 新项目完整性检查清单:
+
+写完代码后，请主动检查:
+1. 是否有正确的构建/依赖配置文件（Makefile / build.gradle / package.json / requirements.txt 等）
+2. 是否有正确的入口文件
+3. 所有 import/include 是否正确
+4. 用对应的构建命令验证能否成功编译运行`
+	}
+
+	// 追加 README 文档建议
+	if includeDocs {
+		checklist += `
+
+文档建议（强烈推荐但非强制）:
+- 📄 README.md: 项目说明 + 运行方法 + 目录结构 + 使用示例
+  包含: 项目概述、安装步骤、快速开始、核心功能、目录结构说明`
+	}
+
+	return checklist
 }
