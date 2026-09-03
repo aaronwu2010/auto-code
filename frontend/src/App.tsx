@@ -140,10 +140,8 @@ function App() {
     setActivityLog([...sessionActivityRef.current]);
   }, []);
 
-  const resetSessionActivity = useCallback(() => {
-    sessionActivityRef.current = [];
-    setActivityLog([]);
-  }, []);
+  // 注意：不再提供 resetSessionActivity，保留完整执行步骤历史
+  // sessionActivityRef 累积所有对话的 activity，上限 100 条
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -441,9 +439,7 @@ function App() {
         if (event.type === "processing_update") {
           const v = event.value as boolean;
           setIsLoading(v);
-          if (v) {
-            resetSessionActivity();
-          }
+          // 注意：不再在新对话开始时清空 activityLog，保留完整执行步骤历史
         }
         if (event.type === "tool_use_update") {
           const v = event.value as { tool_name: string; status: string; input?: unknown } | null;
