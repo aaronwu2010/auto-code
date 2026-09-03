@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -688,7 +689,7 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		defer close(ch)
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("[Engine] panic recovered: %v", r)
+				log.Printf("[Engine] panic recovered: %v\n%s", r, debug.Stack())
 			}
 		}()
 

@@ -377,6 +377,7 @@ func Query(ctx context.Context, params QueryParams, deps QueryDeps) <-chan Query
 		// L2 ReAct Bridge：自动启用（nil-safe，不想要 ReAct 设成 nil 即可）
 		// goal 取第一条 user 消息的 content（即用户的原始 prompt）
 		state.ReActBridge = NewReActBridge(extractGoalFromMessages(params.Messages))
+		log.Printf("[Query] init step 1: ReActBridge created")
 
 		// P1 增强：初始化 GoalTracker 依赖推断 + 注入验证门
 		if state.ReActBridge != nil {
@@ -388,18 +389,23 @@ func Query(ctx context.Context, params QueryParams, deps QueryDeps) <-chan Query
 				state.ReActBridge.SetVerificationGate(gate, params.ProjectDir)
 			}
 		}
+		log.Printf("[Query] init step 2: GoalTracker + VerificationGate done")
 
 		// --- 智能增强模块初始化 ---
 		// R8 CrossValidator: 多角度交叉验证（编译/lint/安全/性能/影响范围）
 		state.CrossValidator = NewCrossValidator(true, params.ProjectDir)
+		log.Printf("[Query] init step 3a: CrossValidator done")
 		// R9 UncertaintyEngine: 不确定性感知
 		state.UncertaintyEngine = NewUncertaintyEngine(true, params.ProjectDir)
+		log.Printf("[Query] init step 3b: UncertaintyEngine done")
 		// R12 ReflectLoop: 深度执行-反思循环
 		state.ReflectLoop = NewReflectLoop(DefaultReflectCycleConfig())
+		log.Printf("[Query] init step 3c: ReflectLoop done")
 		// R3 RuntimeReplanner: 执行中动态重规划（依赖 GoalTracker）
 		if gt := state.ReActBridge.GetGoalTracker(); gt != nil {
 			state.RuntimeReplanner = NewRuntimeReplanner(DefaultReplannerConfig(), gt)
 		}
+		log.Printf("[Query] init step 3d: RuntimeReplanner done")
 
 		// --- 高级智能模式初始化 ---
 		state.HypothesisExplorer = NewHypothesisExplorer(DefaultHypothesisExplorerConfig())
@@ -407,6 +413,7 @@ func Query(ctx context.Context, params QueryParams, deps QueryDeps) <-chan Query
 		state.ProactiveProbe = NewProactiveProbe(DefaultProactiveProbeConfig())
 		state.FocusManager = NewFocusManager(DefaultFocusManagerConfig())
 		state.AlternativeAnalyzer = NewAlternativeAnalyzer(DefaultAlternativeAnalyzerConfig())
+		log.Printf("[Query] init step 4: Advanced modes done")
 
 		// --- AI 助手优先设计移植初始化 ---
 		state.ToolSelector = NewToolSelector(DefaultToolSelectorConfig())
@@ -417,9 +424,11 @@ func Query(ctx context.Context, params QueryParams, deps QueryDeps) <-chan Query
 		state.SmartToolResultFilter = NewSmartToolResultFilter(true)
 		state.WorkingMemory = NewWorkingMemory()
 		state.PreciseTokenBudget = NewPreciseTokenBudget(DefaultTokenBudgetConfig())
+		log.Printf("[Query] init step 5: AI-assistant designs done")
 
 		// FocusManager 初始同步 GoalTracker
 		state.FocusManager.SyncFromGoalTracker(state.ReActBridge.GetGoalTracker())
+		log.Printf("[Query] init step 6: FocusManager synced")
 
 		if params.MaxTurns <= 0 {
 			params.MaxTurns = DefaultMaxTurns
