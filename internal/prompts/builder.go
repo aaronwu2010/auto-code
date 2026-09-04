@@ -28,6 +28,9 @@ func BuildSystemPrompt(ctx context.Context, config SystemPromptConfig) string {
 	// 添加"根因分析方法论"（不要猜测，要追踪代码）
 	builder.AddSection(GetDebugMethodologySection())
 
+	// 添加"编码后自验证指南"（写完代码主动跑 build/vet/test）
+	builder.AddSection(GetBuildVerifySection())
+
 	// 添加系统段落
 	builder.AddSection(GetSystemSection())
 
@@ -66,6 +69,7 @@ func BuildMinimalSystemPrompt() string {
 	builder.AddSection(GetToolUsageSection())
 	builder.AddSection(GetSmartAgentSection())
 	builder.AddSection(GetDebugMethodologySection())
+	builder.AddSection(GetBuildVerifySection())
 	builder.AddSection(GetSystemSection())
 	builder.AddSection(GetDoingTasksSection())
 
