@@ -48,6 +48,10 @@ type QueryParams struct {
 	// P0/P1: 项目目录（用于 Landscaper 环境扫描 + VerificationGate 构建验证）
 	// 为空则跳过相关功能（nil-safe 降级）
 	ProjectDir string
+	// ContextWindowSize: 模型的上下文窗口大小（token 数）
+	// 由 QueryEngine 通过 ShowModel 从 API 客户端获取
+	// 0 表示未知，使用保守默认值 32768
+	ContextWindowSize int
 }
 
 type QueryDeps struct {
@@ -724,11 +728,13 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			for _, msg := range messages {
 				estimatedTokens += len(msg.Content) / 4
 			}
-			windowSize := 200000
-			threshold := windowSize - 10000
+			// 使用模型的真实上下文窗口大小，而非硬编码 200000
+			windowSize := getEffectiveContextWindowSize(params.ContextWindowSize)
+			threshold := compact.GetAutoCompactThreshold(windowSize)
+			state.AutoCompactTracking.CompactTokenThreshold = int64(threshold)
 			state.AutoCompactTracking.ShouldAutoCompact = estimatedTokens >= threshold
 			if state.AutoCompactTracking.ShouldAutoCompact {
-				log.Printf("[Query] auto-compact 触发: estimated %d tokens >= threshold %d", estimatedTokens, threshold)
+				log.Printf("[Query] auto-compact 触发: estimated %d tokens >= threshold %d (window=%d)", estimatedTokens, threshold, windowSize)
 			}
 		}
 
@@ -1961,6 +1967,19 @@ func estimateTurnCount(messages []types.Message) int {
 		}
 	}
 	return turnCount
+}
+
+// getEffectiveContextWindowSize 返回有效的模型上下文窗口大小。
+// 如果传入的 size > 0，直接使用；否则使用保守默认值 32768。
+// 这个默认值是 gemma4:31b 通过 ollama.com API 的实际窗口大小。
+// 之前硬编码 200000 导致小窗口模型永远不会触发压缩——等到 190000 tokens 才压缩，
+// 但模型实际只有 32768 token 窗口，早就爆了。
+func getEffectiveContextWindowSize(size int) int {
+	if size > 0 {
+		return size
+	}
+	// 保守默认值：大多数本地/云模型的最小窗口
+	return 32768
 }
 
 // extractFilePathFromResult 从 tool 执行结果的 message content 中提取文件路径

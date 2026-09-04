@@ -89,6 +89,10 @@ type QueryEngine struct {
 	// 智能增强开关（可后续暴露到 UI，默认 true）
 	planningEnabled   bool
 	reflectionEnabled bool
+
+	// 模型上下文窗口大小（token 数），由 ShowModel 获取并缓存
+	// 用于 compact 链路计算压缩阈值
+	contextWindowSize int
 }
 
 type QueryEngineConfig struct {
@@ -262,6 +266,15 @@ func (qe *QueryEngine) setupAgentTool() {
 }
 
 func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTools []string, maxTurns int, onProgress func(string)) (string, error) {
+	// Lazy init contextWindowSize（如果 SubmitMessage 还没调过）
+	if qe.contextWindowSize == 0 {
+		if ctxLen, err := qe.ShowModel(ctx, string(qe.config.UserSpecifiedModel)); err == nil && ctxLen > 0 {
+			qe.contextWindowSize = ctxLen
+		} else {
+			qe.contextWindowSize = 32768
+		}
+	}
+
 	if onProgress != nil {
 		onProgress("Building sub-agent tool pool...")
 	}
@@ -339,15 +352,16 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 	}
 
 	queryParams := query.QueryParams{
-		Messages:     messages,
-		SystemPrompt: systemPrompt,
-		Tools:        subTools,
-		CanUseTool:   canUseTool,
-		ToolUseCtx:   toolUseCtx,
-		MaxTurns:     maxTurns,
-		MaxBudgetUsd: qe.getConfig().MaxBudgetUsd,
-		Model:        qe.config.UserSpecifiedModel,
-		ProjectDir:   qe.getProjectDirectory(),
+		Messages:          messages,
+		SystemPrompt:      systemPrompt,
+		Tools:             subTools,
+		CanUseTool:        canUseTool,
+		ToolUseCtx:        toolUseCtx,
+		MaxTurns:          maxTurns,
+		MaxBudgetUsd:      qe.getConfig().MaxBudgetUsd,
+		Model:             qe.config.UserSpecifiedModel,
+		ProjectDir:        qe.getProjectDirectory(),
+		ContextWindowSize: qe.contextWindowSize,
 	}
 
 	var mu sync.Mutex
@@ -684,6 +698,18 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 	ch := make(chan SDKMessage, 256)
 	log.Printf("[Engine] SubmitMessage: called, prompt_len=%d", len(prompt))
 
+	// 获取模型的真实上下文窗口大小，用于 compact 链路
+	// 之前硬编码 200000 导致小窗口模型（如 gemma4:31b 的 32768）永远不会触发压缩
+	contextWindowSize := 0
+	if ctxLen, err := qe.ShowModel(ctx, string(qe.config.UserSpecifiedModel)); err == nil && ctxLen > 0 {
+		contextWindowSize = ctxLen
+		log.Printf("[Engine] ShowModel: context_window=%d", contextWindowSize)
+	} else {
+		contextWindowSize = 32768 // 保守默认值
+		log.Printf("[Engine] ShowModel failed: %v, using default context_window=%d", err, contextWindowSize)
+	}
+	qe.contextWindowSize = contextWindowSize
+
 	go func() {
 		log.Printf("[Engine] SubmitMessage: goroutine started")
 		defer close(ch)
@@ -897,15 +923,16 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		msgsAfterCompact := qe.getMessagesAfterCompactBoundary()
 		log.Printf("[Engine] SubmitMessage: messages after compact: %d (total: %d)", len(msgsAfterCompact), len(qe.messages))
 		queryParams := query.QueryParams{
-			Messages:     msgsAfterCompact,
-			SystemPrompt: systemPrompt,
-			Tools:        activeTools,
-			CanUseTool:   canUseTool,
-			ToolUseCtx:   toolUseCtx,
-			MaxTurns:     qe.getConfig().MaxTurns,
-			MaxBudgetUsd: qe.getConfig().MaxBudgetUsd,
-			Model:        qe.config.UserSpecifiedModel,
-			ProjectDir:   qe.getProjectDirectory(),
+			Messages:          msgsAfterCompact,
+			SystemPrompt:      systemPrompt,
+			Tools:             activeTools,
+			CanUseTool:        canUseTool,
+			ToolUseCtx:        toolUseCtx,
+			MaxTurns:          qe.getConfig().MaxTurns,
+			MaxBudgetUsd:      qe.getConfig().MaxBudgetUsd,
+			Model:             qe.config.UserSpecifiedModel,
+			ProjectDir:        qe.getProjectDirectory(),
+			ContextWindowSize: contextWindowSize,
 		}
 
 		phaseTurnCount := 0
@@ -2360,10 +2387,13 @@ func (qe *QueryEngine) autoCompact(messages []types.Message) (*query.CompactionR
 		totalTokens += len(msg.Content) / 4
 	}
 
-	windowSize := 200000
-	autoCompactThreshold := windowSize - compact.AutoCompactBufferTokens
+	windowSize := qe.contextWindowSize
+	if windowSize <= 0 {
+		windowSize = 32768 // 保守默认值
+	}
+	autoCompactThreshold := compact.GetAutoCompactThreshold(windowSize)
 
-	if !ShouldAutoCompact(totalTokens, windowSize) {
+	if !compact.ShouldAutoCompact(totalTokens, windowSize) {
 		log.Printf("[Compact] token 未达阈值, 跳过压缩")
 		return nil, nil
 	}
@@ -2552,14 +2582,6 @@ func convertCompactMessagesToTypes(compactMsgs []compact.CompactMessage, origMes
 		}
 	}
 	return result
-}
-
-func ShouldAutoCompact(currentTokens, windowSize int) bool {
-	if windowSize <= 0 {
-		windowSize = 200000
-	}
-	threshold := windowSize - 10000 // AutoCompactBufferTokens
-	return currentTokens >= threshold
 }
 
 func generateSessionID() types.SessionID {

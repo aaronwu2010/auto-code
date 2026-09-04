@@ -22,6 +22,9 @@ func BuildSystemPrompt(ctx context.Context, config SystemPromptConfig) string {
 	// 添加工具使用指导（关键：告诉 AI 使用工具而不是只返回文本）
 	builder.AddSection(GetToolUsageSection())
 
+	// 添加"聪明 Agent"行为指南（意图理解 + 完整交付 + 执行后验证）
+	builder.AddSection(GetSmartAgentSection())
+
 	// 添加系统段落
 	builder.AddSection(GetSystemSection())
 
@@ -58,6 +61,7 @@ func BuildMinimalSystemPrompt() string {
 
 	builder.AddSection(GetSimpleIntroSection())
 	builder.AddSection(GetToolUsageSection())
+	builder.AddSection(GetSmartAgentSection())
 	builder.AddSection(GetSystemSection())
 	builder.AddSection(GetDoingTasksSection())
 

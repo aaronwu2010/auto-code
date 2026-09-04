@@ -44,7 +44,9 @@ func GetEffectiveContextWindowSize(configuredWindowSize int) int {
 	if configuredWindowSize > 0 {
 		return configuredWindowSize
 	}
-	return 200000
+	// 保守默认值 32768：gemma4:31b 通过 ollama.com API 的实际窗口大小
+	// 之前硬编码 200000 导致小窗口模型永远不会触发压缩
+	return 32768
 }
 
 func GetAutoCompactThreshold(windowSize int) int {
