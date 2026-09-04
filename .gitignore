@@ -1,4 +1,7 @@
 .codeartsdoer
+.codegraph
 .arts
 *.exe
 .auto
+build/*
+bin/*
