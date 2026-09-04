@@ -1,9 +1,18 @@
 package prompts
 
-// SelfCheckPrompt 返回生成后自检的引导 prompt
+// SelfCheckPrompt 返回生成后自检的引导 prompt。
 //
-// 触发时机：agent 完成代码生成后（在 query.go 中，当检测到 agent 连续 N 次输出无 tool call 且任务类型为 feature/build 时）
-// 这是"运行时验证闭环"的 Prompt 层实现
+// 注意：此函数当前**未接入**任何调用方。它的设计目标是在 feature/build 任务中，
+// 当 agent 宣称"完成"但 VerificationGate 还没跑之前，引导 LLM 主动回读自检。
+//
+// 当前 VerificationGate 已经在 ReActBridge.MarkFinalAnswer() 中自动触发，
+// 并通过 BuildGateFailureMessage() 把编译错误注入下一轮。
+// SelfCheckPrompt 是 VerificationGate 的"Prompt 层补充"——让 LLM 在
+// build 失败之前先主动检查一遍，减少不必要的 build 轮次。
+//
+// 接入计划（P3）：在 query.go 的 !needsFollowUp 分支中，
+// VerificationGate.Run() 返回 skipped 时（比如项目还没写完），
+// 注入此 prompt 引导 LLM 自查。
 func SelfCheckPrompt() string {
 	return `[Self-Check & Verify] 你刚完成了代码生成。在结束任务之前，请执行以下自检：
 

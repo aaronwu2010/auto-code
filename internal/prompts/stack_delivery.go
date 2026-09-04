@@ -2,6 +2,7 @@ package prompts
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -21,15 +22,16 @@ const (
 )
 
 // DetectProjectType 从项目目录结构 + 构建文件推断项目类型
-// 传入项目根目录下检测到的关键文件列表（go.mod, package.json, docker-compose.yml 等）
-func DetectProjectType(cwd string, keyFiles []string) ProjectType {
-	// 标准化文件名
+// 自行扫描 cwd 下的关键文件，无需外部传入 keyFiles
+func DetectProjectType(cwd string) ProjectType {
+	if cwd == "" {
+		return ProjectUnknown
+	}
+
 	has := func(names ...string) bool {
-		for _, f := range keyFiles {
-			for _, n := range names {
-				if strings.EqualFold(filepath.Base(f), n) || strings.Contains(strings.ToLower(f), strings.ToLower(n)) {
-					return true
-				}
+		for _, n := range names {
+			if _, err := os.Stat(filepath.Join(cwd, n)); err == nil {
+				return true
 			}
 		}
 		return false
@@ -38,7 +40,7 @@ func DetectProjectType(cwd string, keyFiles []string) ProjectType {
 	// 检测子目录（frontend/, backend/, client/, server/）
 	hasSubdir := func(names ...string) bool {
 		for _, sub := range names {
-			if has(sub) {
+			if info, err := os.Stat(filepath.Join(cwd, sub)); err == nil && info.IsDir() {
 				return true
 			}
 		}
@@ -46,15 +48,12 @@ func DetectProjectType(cwd string, keyFiles []string) ProjectType {
 	}
 
 	// Web 全栈：同时有前端和后端构建文件
-	hasFrontend := has("package.json", "vite.config", "webpack.config", "next.config", "nuxt.config")
-	hasBackend := has("go.mod", "requirements.txt", "pyproject.toml", "Cargo.toml", "pom.xml", "build.gradle")
+	hasFrontend := has("package.json", "vite.config.ts", "vite.config.js", "webpack.config.js", "next.config.js", "nuxt.config.ts")
+	hasBackend := has("go.mod", "requirements.txt", "pyproject.toml", "Cargo.toml", "pom.xml", "build.gradle", "Makefile")
 	if hasFrontend && hasBackend {
 		return ProjectWebFullstack
 	}
 	if hasSubdir("frontend", "backend", "client", "server", "web") {
-		return ProjectWebFullstack
-	}
-	if hasFrontend && strings.Contains(strings.ToLower(cwd), "fullstack") {
 		return ProjectWebFullstack
 	}
 
@@ -62,15 +61,12 @@ func DetectProjectType(cwd string, keyFiles []string) ProjectType {
 	if has("cobra", "urfave/cli", "click", "typer", "commander", "cli") {
 		return ProjectCLI
 	}
-	if has("main.go", "main.py", "main.rs", "index.ts") && hasSubdir("cmd", "bin") {
+	if has("main.go", "main.py", "main.rs") && hasSubdir("cmd", "bin") {
 		return ProjectCLI
 	}
 
 	// 库/SDK：有 lib/ pkg/ 目录
 	if hasSubdir("lib", "pkg", "sdk") && !hasSubdir("cmd", "bin") {
-		return ProjectLibrary
-	}
-	if has("lib.rs", "pkg/mod") {
 		return ProjectLibrary
 	}
 
@@ -80,36 +76,25 @@ func DetectProjectType(cwd string, keyFiles []string) ProjectType {
 	}
 
 	// ML/数据科学
-	if hasSubdir("notebooks", "models", "training") || has("requirements.txt") {
-		// requirements.txt 也可能是 Web 后端，进一步判断
-		if has("model", "dataset", "training", "inference") {
-			return ProjectML
-		}
+	if hasSubdir("notebooks", "models", "training") {
+		return ProjectML
 	}
 
 	// 后端服务：有 Dockerfile 或 docker-compose
 	if has("docker-compose.yml", "docker-compose.yaml", "Dockerfile") {
 		return ProjectService
 	}
-	if has("go.mod") || has("Cargo.toml") {
+	// 有后端构建文件但没有前端 → 后端服务
+	if hasBackend {
 		return ProjectService
 	}
 
 	// 移动端
-	if has("android", "ios", "flutter", "react-native") {
+	if hasSubdir("android", "ios", "flutter") || has("android", "ios", "flutter", "react-native") {
 		return ProjectMobile
 	}
 
 	return ProjectUnknown
-}
-
-// DetectKeyFiles 扫描项目根目录下的关键文件名
-// 返回文件名列表（用于推断项目类型）
-func DetectKeyFiles(cwd string) []string {
-	// 这里只做轻量检测——实际文件列表由 query.go 的 Glob 调用获取
-	// 这个函数作为占位，真正的检测应该用 Glob 结果
-	_ = cwd
-	return nil
 }
 
 // StackDeliveryChecklist 根据项目类型返回完整交付物 checklist

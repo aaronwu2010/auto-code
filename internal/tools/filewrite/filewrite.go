@@ -33,13 +33,6 @@ type FileWriteOutput struct {
 
 type FileWriteTool struct {
 	*tools.BaseTool
-	confirmOverwrite func(ctx context.Context, filePath string) (bool, error)
-}
-
-// SetConfirmOverwriteHandler 注入覆盖确认回调。当最终结果文件（auto_generated=false）
-// 已存在时调用，返回 true 表示用户选择覆盖。未注入时安全默认为不覆盖（追加时间戳）。
-func (t *FileWriteTool) SetConfirmOverwriteHandler(handler func(ctx context.Context, filePath string) (bool, error)) {
-	t.confirmOverwrite = handler
 }
 
 func NewFileWriteTool() *FileWriteTool {

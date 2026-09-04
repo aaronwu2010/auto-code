@@ -639,7 +639,9 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 						default:
 							pTaskType = prompts.DynTaskUnknown
 						}
-						deliveryText := prompts.StackDeliveryChecklist(pTaskType, prompts.ProjectUnknown, state.ProjectLang)
+						// 用 ProjectDir 检测实际项目类型，而非硬编码 ProjectUnknown
+						projType := prompts.DetectProjectType(params.ProjectDir)
+						deliveryText := prompts.StackDeliveryChecklist(pTaskType, projType, state.ProjectLang)
 						if deliveryText != "" {
 							deliveryMsg := types.Message{
 								Role:      types.RoleUser,
@@ -651,7 +653,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 							messages = append(messages, deliveryMsg)
 							state.Messages = append(state.Messages, deliveryMsg)
 							state.InjectedStackDelivery = true
-							log.Printf("[StackDelivery] injected for task=%s lang=%s", state.CurrentTaskType, state.ProjectLang)
+							log.Printf("[StackDelivery] injected for task=%s lang=%s projType=%s", state.CurrentTaskType, state.ProjectLang, projType)
 						}
 					}
 

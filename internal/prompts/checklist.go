@@ -71,14 +71,14 @@ func (ce *ChecklistEngine) BuildRiskChecklists(risks []RiskType) string {
 	return strings.TrimSpace(sb.String())
 }
 
-// BuildAll 一次性构建所有 checklist（L1-L5）
-// 返回完整的 IsMeta message 内容
+// BuildAll 一次性构建所有 checklist（L1-L4）。
 //
-// L1 任务类型层 + L2 语言层: 来自 DynamicPromptEngine.BuildTaskInstruction
-// L3 场景层 + L4 风险层: 来自 ChecklistEngine 自身
-// L5 全栈交付层: StackDeliveryChecklist（feature/build 触发）
-// L6 参考迁移层: ReferenceMigrationGuide（检测到参考关键字时触发）
-func (ce *ChecklistEngine) BuildAll(taskType TaskType, lang ProjectLang, scenes []SceneType, risks []RiskType, prompt string) string {
+// 注意：L5 全栈交付清单和 L6 参考项目迁移指南不在此方法中构建，
+// 而是在 query.go 的 Turn 0 注入逻辑中直接调用 prompts.StackDeliveryChecklist() /
+// prompts.ReferenceMigrationGuide()。这是因为它们需要访问 ProjectDirectory
+// 来做 DetectProjectType 判断，而 BuildAll 签名没有 projectDir 参数。
+// 如需在非 query.go 场景使用 L5/L6，请直接调用 prompts 包的对应函数。
+func (ce *ChecklistEngine) BuildAll(taskType TaskType, lang ProjectLang, scenes []SceneType, risks []RiskType) string {
 	if ce == nil || !ce.enabled {
 		return ""
 	}
@@ -106,20 +106,6 @@ func (ce *ChecklistEngine) BuildAll(taskType TaskType, lang ProjectLang, scenes 
 		sb.WriteString("---\n\n")
 		sb.WriteString(fmt.Sprintf("[Detected Risks] %v\n\n", risks))
 		sb.WriteString(riskText)
-		sb.WriteString("\n\n")
-	}
-
-	// L5: 全栈交付清单（feature/build 任务触发）
-	if deliveryText := StackDeliveryChecklist(taskType, ProjectUnknown, lang); deliveryText != "" {
-		sb.WriteString("---\n\n")
-		sb.WriteString(deliveryText)
-		sb.WriteString("\n\n")
-	}
-
-	// L6: 参考项目迁移指南（检测到参考关键字时触发）
-	if DetectReferencePrompt(prompt) {
-		sb.WriteString("---\n\n")
-		sb.WriteString(ReferenceMigrationGuide())
 		sb.WriteString("\n\n")
 	}
 
