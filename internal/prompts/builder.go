@@ -25,6 +25,9 @@ func BuildSystemPrompt(ctx context.Context, config SystemPromptConfig) string {
 	// 添加"聪明 Agent"行为指南（意图理解 + 完整交付 + 执行后验证）
 	builder.AddSection(GetSmartAgentSection())
 
+	// 添加"根因分析方法论"（不要猜测，要追踪代码）
+	builder.AddSection(GetDebugMethodologySection())
+
 	// 添加系统段落
 	builder.AddSection(GetSystemSection())
 
@@ -62,6 +65,7 @@ func BuildMinimalSystemPrompt() string {
 	builder.AddSection(GetSimpleIntroSection())
 	builder.AddSection(GetToolUsageSection())
 	builder.AddSection(GetSmartAgentSection())
+	builder.AddSection(GetDebugMethodologySection())
 	builder.AddSection(GetSystemSection())
 	builder.AddSection(GetDoingTasksSection())
 
