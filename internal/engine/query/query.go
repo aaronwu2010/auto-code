@@ -1336,25 +1336,40 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			}
 
 			if !needsFollowUp {
-				// === L2 ReAct Bridge Hook 4: 最终回答，trace 标记完成 ===
+				// === L2 ReAct Bridge Hook 4: 最终回答，trace 标记完成 + 验证门 ===
+				shouldComplete := true
 				if state.ReActBridge != nil && assistantBuffer != nil {
-					state.ReActBridge.MarkFinalAnswer(assistantBuffer.Content)
+					shouldComplete = state.ReActBridge.MarkFinalAnswer(assistantBuffer.Content)
 				}
-				if stopReason != "" {
-					ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: stopReason}}
+				if !shouldComplete {
+					// 验证门失败 → 不发送 terminal，注入失败消息让主循环继续
+					needsFollowUp = true
+					log.Printf("[Query] Verification gate blocked completion, forcing additional turn")
+					// 不 return，继续走下面的 tool_calls 检查（会是空，然后继续循环）
 				} else {
-					ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "completed"}}
+					if stopReason != "" {
+						ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: stopReason}}
+					} else {
+						ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "completed"}}
+					}
+					return
 				}
-				return
 			}
 		}
 		toolCalls := getLastToolCalls(state.Messages)
 		if len(toolCalls) == 0 {
+			shouldComplete := true
 			if state.ReActBridge != nil && assistantBuffer != nil {
-				state.ReActBridge.MarkFinalAnswer(assistantBuffer.Content)
+				shouldComplete = state.ReActBridge.MarkFinalAnswer(assistantBuffer.Content)
 			}
-			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "completed"}}
-			return
+			if !shouldComplete {
+				// 验证门失败 → 不退出，继续循环
+				needsFollowUp = true
+				log.Printf("[Query] Verification gate blocked completion (no tool_calls path), forcing additional turn")
+			} else {
+				ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "completed"}}
+				return
+			}
 		}
 
 		streamingResults := streamingExecutor.WaitForAllResults(0)

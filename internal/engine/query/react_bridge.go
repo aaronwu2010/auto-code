@@ -208,10 +208,11 @@ func (b *ReActBridge) RecordObservation(toolResults map[int]*toolExecutionResult
 	}
 
 // MarkFinalAnswer 当模型输出最终文本（无 tool_calls）时调用。
-// P1 增强：先跑验证门，失败则不标记完成，注入错误让下一轮继续修。
-func (b *ReActBridge) MarkFinalAnswer(answer string) {
+// 返回 true 表示可以安全结束（验证通过或跳过），返回 false 表示验证失败，
+// 调用方不应发送 terminal，应继续让 LLM 修复。
+func (b *ReActBridge) MarkFinalAnswer(answer string) bool {
 	if b == nil {
-		return
+		return true // 无 bridge → 视为可以结束
 	}
 
 	// P1: 验证门检查
@@ -228,8 +229,8 @@ func (b *ReActBridge) MarkFinalAnswer(answer string) {
 			b.mu.Lock()
 			b.lastGateFailure = result
 			b.mu.Unlock()
-			log.Printf("[ReAct-Bridge] verification gate FAILED (%s), injecting failure for next round", result.FirstFailureName)
-			return
+			log.Printf("[ReAct-Bridge] verification gate FAILED (%s), will force additional turn", result.FirstFailureName)
+			return false
 		}
 		if !result.Skipped && result.OverallPass {
 			log.Printf("[ReAct-Bridge] verification gate PASSED, completing trace")
@@ -241,6 +242,7 @@ func (b *ReActBridge) MarkFinalAnswer(answer string) {
 
 	b.trace.Complete(truncateForReAct(answer, 500))
 	log.Printf("[ReAct-Bridge] trace completed, %d total steps", len(b.trace.Steps))
+	return true
 }
 
 // SetVerificationGate 注入验证门（P1）

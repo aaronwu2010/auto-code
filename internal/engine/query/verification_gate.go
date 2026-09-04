@@ -1,4 +1,4 @@
-﻿package query
+package query
 
 import (
 	"context"
@@ -277,6 +277,14 @@ func (g *VerificationGate) getVerificationCommands(pt ProjectType) []Verificatio
 		return []VerificationCommand{
 			{Name: "cargo build", Cmd: "cargo", Args: []string{"build", "--quiet"}, Timeout: 120 * time.Second},
 			{Name: "cargo test", Cmd: "cargo", Args: []string{"test", "--quiet"}, Timeout: 120 * time.Second},
+		}
+	case ProjectTypeJava:
+		return []VerificationCommand{
+			{Name: "mvn compile", Cmd: "mvn", Args: []string{"compile", "-q"}, Timeout: 120 * time.Second},
+		}
+	case ProjectTypeGeneric:
+		return []VerificationCommand{
+			{Name: "make test", Cmd: "make", Args: []string{"test"}, Timeout: 60 * time.Second},
 		}
 	default:
 		return nil
