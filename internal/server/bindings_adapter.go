@@ -14,6 +14,9 @@ import (
 	"github.com/auto-code/auto-code/internal/types"
 )
 
+// apiKeyMask 是前端显示用的固定掩码，避免暴露真实 key
+const apiKeyMask = "********"
+
 // bindings_adapter.go 复用 QueryEngine + AppState，对外暴露与
 // state.WailsBindings 等价的 API 表面。区别在于：
 //   - 不依赖 Wails runtime
@@ -268,7 +271,19 @@ type OllamaConfigRequest struct {
 // SetOllamaConfig 同时持久化到 AppState 并热更新 QueryEngine。
 func (a *Adapter) SetOllamaConfig(req OllamaConfigRequest) error {
 	a.appState.SetSetting("ollama_base_url", req.BaseURL)
-	a.appState.SetSetting("ollama_api_key", req.APIKey)
+
+	// 确定有效的 api_key：新值有效就用新值，否则保留旧值
+	apiKeyToUse := req.APIKey
+	if req.APIKey == "" || req.APIKey == apiKeyMask {
+		if oldKey, ok := a.appState.GetSetting("ollama_api_key"); ok {
+			if s, ok := oldKey.(string); ok {
+				apiKeyToUse = s
+			}
+		}
+	} else {
+		a.appState.SetSetting("ollama_api_key", req.APIKey)
+	}
+
 	a.appState.SetSetting("ollama_model", req.Model)
 
 	if req.Model != "" {
@@ -277,7 +292,7 @@ func (a *Adapter) SetOllamaConfig(req OllamaConfigRequest) error {
 
 	eng, _ := a.engineOrError()
 	if eng != nil {
-		eng.SetOllamaConfig(req.BaseURL, req.APIKey, req.Model)
+		eng.SetOllamaConfig(req.BaseURL, apiKeyToUse, req.Model)
 	}
 	return nil
 }
@@ -288,10 +303,16 @@ func (a *Adapter) GetOllamaConfig() OllamaConfigRequest {
 	apiKey, _ := a.appState.GetSetting("ollama_api_key")
 	model := string(a.appState.GetMainLoopModel())
 
+	hasKey := apiKey != ""
+	maskedKey := ""
+	if hasKey {
+		maskedKey = apiKeyMask
+	}
+
 	return OllamaConfigRequest{
 		BaseURL:   toString(baseURL, "http://localhost:11434/api"),
-		APIKey:    toString(apiKey, ""),
-		HasAPIKey: apiKey != "",
+		APIKey:    maskedKey,
+		HasAPIKey: hasKey,
 		Model:     model,
 	}
 }
@@ -394,7 +415,19 @@ type OpenAIConfigRequest struct {
 // SetOpenAIConfig 设置 OpenAI 配置
 func (a *Adapter) SetOpenAIConfig(req OpenAIConfigRequest) error {
 	a.appState.SetSetting("openai_base_url", req.BaseURL)
-	a.appState.SetSetting("openai_api_key", req.APIKey)
+
+	// 确定有效的 api_key：新值有效就用新值，否则保留旧值
+	apiKeyToUse := req.APIKey
+	if req.APIKey == "" || req.APIKey == apiKeyMask {
+		if oldKey, ok := a.appState.GetSetting("openai_api_key"); ok {
+			if s, ok := oldKey.(string); ok {
+				apiKeyToUse = s
+			}
+		}
+	} else {
+		a.appState.SetSetting("openai_api_key", req.APIKey)
+	}
+
 	a.appState.SetSetting("openai_model", req.Model)
 	a.appState.SetSetting("openai_enabled", req.Enabled)
 
@@ -404,7 +437,7 @@ func (a *Adapter) SetOpenAIConfig(req OpenAIConfigRequest) error {
 
 	eng, _ := a.engineOrError()
 	if eng != nil {
-		eng.SetOpenAIConfig(req.BaseURL, req.APIKey, req.Model)
+		eng.SetOpenAIConfig(req.BaseURL, apiKeyToUse, req.Model)
 		eng.SwitchToOpenAI(req.Enabled)
 	}
 	return nil
@@ -432,10 +465,16 @@ func (a *Adapter) GetOpenAIConfig() OpenAIConfigRequest {
 		}
 	}
 
+	hasKey := apiKey != ""
+	maskedKey := ""
+	if hasKey {
+		maskedKey = apiKeyMask
+	}
+
 	return OpenAIConfigRequest{
 		BaseURL:   toString(baseURL, api.DefaultOpenAIConfig().BaseURL),
-		APIKey:    toString(apiKey, ""),
-		HasAPIKey: apiKey != "" && toString(apiKey, "") != "",
+		APIKey:    maskedKey,
+		HasAPIKey: hasKey,
 		Model:     model,
 		Enabled:   isEnabled,
 	}
