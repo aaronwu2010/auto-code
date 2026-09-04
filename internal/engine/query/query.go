@@ -1244,6 +1244,44 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			return
 		}
 
+		// === 空 response 自动重试 ===
+		// 问题：模型有时会返回空 response（content="", tool_calls=[]），stop_reason="stop"
+		// 这在 Ollama 云 API（ollama.com）上更常见，尤其是多轮对话后期
+		// 检测条件：assistantBuffer 为 nil 或 content+tool_calls 都为空，且 stop_reason="stop"
+		isEmptyResponse := assistantBuffer == nil ||
+			(len(assistantBuffer.Content) == 0 && len(assistantBuffer.ToolCalls) == 0)
+		if isEmptyResponse && stopReason != "max_output_tokens" {
+			// 统计连续空 response 次数，避免无限重试
+			state.MaxOutputTokensRecoveryCount++
+			if state.MaxOutputTokensRecoveryCount <= 2 {
+				log.Printf("[Query] EMPTY RESPONSE detected (count=%d), injecting retry prompt...", state.MaxOutputTokensRecoveryCount)
+
+				// 注入一个重试 prompt，引导模型继续工作
+				retryMsg := types.Message{
+					Role:      types.RoleUser,
+					Content:   "[Recovery] 你刚才返回了一个空响应（没有内容也没有工具调用）。请继续执行你的任务——要么调用工具来获取/修改信息，要么输出最终答案。",
+					Timestamp: time.Now().Unix(),
+					IsMeta:    true,
+					UUID:      fmt.Sprintf("empty-retry-%d", state.MaxOutputTokensRecoveryCount),
+				}
+				messages = append(messages, retryMsg)
+				state.Messages = append(state.Messages, retryMsg)
+
+				// 需要 follow up，让主循环继续
+				needsFollowUp = true
+
+				log.Printf("[Query] Empty response retry prompt injected, will re-call model")
+			} else {
+				// 连续 3 次空 response，放弃重试
+				log.Printf("[Query] EMPTY RESPONSE x%d, giving up", state.MaxOutputTokensRecoveryCount)
+				if state.ReActBridge != nil {
+					state.ReActBridge.MarkFailed("empty_response_persistent")
+				}
+				ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "empty_response_persistent"}}
+				return
+			}
+		}
+
 		if !needsFollowUp {
 			// === Hook 4: CrossValidator 多角度验证最终回答 ===
 			if state.CrossValidator != nil && assistantBuffer != nil {
