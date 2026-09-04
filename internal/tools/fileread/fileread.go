@@ -145,7 +145,16 @@ func (t *FileReadTool) Call(ctx context.Context, input any, toolCtx *tools.ToolU
 		return nil, fmt.Errorf("invalid input type for FileReadTool: expected FileReadInput or map[string]any, got %T", input)
 	}
 
-	filePath := expandPath(inp.FilePath)
+	filePath := inp.FilePath
+
+	// 只展开 ~ 家目录前缀，不要提前做 filepath.Abs() —— 那会基于 os.Getwd()
+	// 把相对路径转成绝对路径，导致后面 EnsurePathInProjectDirectory 看不到相对路径，
+	// 无法正确基于项目目录解析。
+	if strings.HasPrefix(filePath, "~") {
+		if home, err := os.UserHomeDir(); err == nil {
+			filePath = filepath.Join(home, filePath[1:])
+		}
+	}
 
 	filePath = tools.EnsurePathInProjectDirectory(filePath, toolCtx)
 
