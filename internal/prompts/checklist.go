@@ -71,8 +71,13 @@ func (ce *ChecklistEngine) BuildRiskChecklists(risks []RiskType) string {
 	return strings.TrimSpace(sb.String())
 }
 
-// BuildAll 一次性构建所有 checklist（L1-L4）
+// BuildAll 一次性构建所有 checklist（L1-L5）
 // 返回完整的 IsMeta message 内容
+//
+// L1 任务类型层 + L2 语言层: 来自 DynamicPromptEngine.BuildTaskInstruction
+// L3 场景层 + L4 风险层: 来自 ChecklistEngine 自身
+// L5 全栈交付层: StackDeliveryChecklist（feature/build 触发）
+// L6 参考迁移层: ReferenceMigrationGuide（检测到参考关键字时触发）
 func (ce *ChecklistEngine) BuildAll(taskType TaskType, lang ProjectLang, scenes []SceneType, risks []RiskType, prompt string) string {
 	if ce == nil || !ce.enabled {
 		return ""
@@ -101,6 +106,20 @@ func (ce *ChecklistEngine) BuildAll(taskType TaskType, lang ProjectLang, scenes 
 		sb.WriteString("---\n\n")
 		sb.WriteString(fmt.Sprintf("[Detected Risks] %v\n\n", risks))
 		sb.WriteString(riskText)
+		sb.WriteString("\n\n")
+	}
+
+	// L5: 全栈交付清单（feature/build 任务触发）
+	if deliveryText := StackDeliveryChecklist(taskType, ProjectUnknown, lang); deliveryText != "" {
+		sb.WriteString("---\n\n")
+		sb.WriteString(deliveryText)
+		sb.WriteString("\n\n")
+	}
+
+	// L6: 参考项目迁移指南（检测到参考关键字时触发）
+	if DetectReferencePrompt(prompt) {
+		sb.WriteString("---\n\n")
+		sb.WriteString(ReferenceMigrationGuide())
 		sb.WriteString("\n\n")
 	}
 

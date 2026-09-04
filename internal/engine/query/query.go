@@ -137,6 +137,10 @@ type State struct {
 	InjectedScenes     map[prompts.SceneType]bool   // 已注入的场景（去重）
 	InjectedRisks      map[prompts.RiskType]bool    // 已注入的风险（去重）
 
+	// --- L5 全栈交付 + L6 参考迁移（完美交付能力） ---
+	InjectedStackDelivery  bool   // 是否已注入全栈交付清单
+	InjectedReferenceGuide bool   // 是否已注入参考项目迁移指南
+
 	// --- 上下文效率优化 ---
 	SmartToolResultFilter *SmartToolResultFilter // 优化 1: 工具结果智能截断
 	WorkingMemory         *WorkingMemory         // 优化 2: 工作记忆（已读文件摘要 + 修改历史）
@@ -430,6 +434,10 @@ func Query(ctx context.Context, params QueryParams, deps QueryDeps) <-chan Query
 		state.InjectedScenes = make(map[prompts.SceneType]bool)
 		state.InjectedRisks = make(map[prompts.RiskType]bool)
 
+		// L5 全栈交付 + L6 参考迁移（完美交付能力，零 LLM 开销）
+		state.InjectedStackDelivery = false
+		state.InjectedReferenceGuide = false
+
 		// 上下文效率优化（零 LLM 开销，纯规则）
 		state.SmartToolResultFilter = NewSmartToolResultFilter(true)
 		state.WorkingMemory = NewWorkingMemory()
@@ -617,6 +625,50 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 								log.Printf("[ChecklistEngine] injected scenes=%v risks=%v", newScenes, newRisks)
 							}
 						}
+					}
+
+					// L5 全栈交付清单注入（feature/build 任务，只注入一次）
+					if (state.CurrentTaskType == TaskTypeFeature || state.CurrentTaskType == TaskTypeBuild) && !state.InjectedStackDelivery {
+						// 转换 query.TaskType → prompts.TaskType（底层都是字符串，直接转）
+						var pTaskType prompts.TaskType
+						switch state.CurrentTaskType {
+						case TaskTypeFeature:
+							pTaskType = prompts.DynTaskFeature
+						case TaskTypeBuild:
+							pTaskType = prompts.DynTaskBuild
+						default:
+							pTaskType = prompts.DynTaskUnknown
+						}
+						deliveryText := prompts.StackDeliveryChecklist(pTaskType, prompts.ProjectUnknown, state.ProjectLang)
+						if deliveryText != "" {
+							deliveryMsg := types.Message{
+								Role:      types.RoleUser,
+								Content:   deliveryText,
+								Timestamp: time.Now().Unix(),
+								IsMeta:    true,
+								UUID:      "stack-delivery",
+							}
+							messages = append(messages, deliveryMsg)
+							state.Messages = append(state.Messages, deliveryMsg)
+							state.InjectedStackDelivery = true
+							log.Printf("[StackDelivery] injected for task=%s lang=%s", state.CurrentTaskType, state.ProjectLang)
+						}
+					}
+
+					// L6 参考项目迁移指南注入（检测到"参考/基于"关键字，只注入一次）
+					if !state.InjectedReferenceGuide && prompts.DetectReferencePrompt(userInput) {
+						migrationText := prompts.ReferenceMigrationGuide()
+						migrationMsg := types.Message{
+							Role:      types.RoleUser,
+							Content:   migrationText,
+							Timestamp: time.Now().Unix(),
+							IsMeta:    true,
+							UUID:      "reference-migration",
+						}
+						messages = append(messages, migrationMsg)
+						state.Messages = append(state.Messages, migrationMsg)
+						state.InjectedReferenceGuide = true
+						log.Printf("[ReferenceMigration] injected")
 					}
 				}
 			}
