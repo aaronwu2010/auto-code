@@ -12,16 +12,18 @@ import (
 	"strings"
 	"time"
 
+	html2md "github.com/JohannesKaufmann/html-to-markdown"
+	"github.com/PuerkitoBio/goquery"
 	"github.com/auto-code/auto-code/internal/tools"
 	"github.com/auto-code/auto-code/internal/types"
 )
 
 const (
 	toolName        = "WebFetch"
-	maxResultChars  = 100000
+	maxResultChars  = 500000 // 返回给模型的上限（500KB，约 125K tokens）
 	descriptionText = "Fetches and reads the content of any public URL (web page). Call this tool whenever the user provides a URL or link and asks about its content."
 	requestTimeout  = 30 * time.Second
-	maxResponseSize = 51200
+	maxResponseSize = 2097152 // 2MB 响应体上限（覆盖 99% 的文档页面）
 )
 
 type WebFetchInput struct {
@@ -212,8 +214,7 @@ func (t *WebFetchTool) Prompt(_ context.Context, _ tools.PromptOptions) (string,
 }
 
 func stripHTMLTags(s string) string {
-	s = removeScriptAndStyleBlocks(s)
-	s = removeNoisySections(s)
+	// 降级：简单去标签
 	var sb strings.Builder
 	inTag := false
 	for _, ch := range s {
@@ -240,123 +241,45 @@ func stripHTMLTags(s string) string {
 	return strings.TrimSpace(out)
 }
 
-func removeScriptAndStyleBlocks(s string) string {
-	lower := strings.ToLower(s)
-	out := new(strings.Builder)
-	i := 0
-	for i < len(s) {
-		// find <script or <style
-		si := strings.Index(lower[i:], "<script")
-		st := strings.Index(lower[i:], "<style")
-		next := -1
-		tagLen := 0
-		switch {
-		case si != -1 && (st == -1 || si < st):
-			next = si
-			tagLen = len("<script")
-		case st != -1:
-			next = st
-			tagLen = len("<style")
-		default:
-			out.WriteString(s[i:])
-			return out.String()
-		}
-		out.WriteString(s[i : i+next])
-		// find end of open tag (>)
-		openEnd := strings.IndexByte(s[i+next:], '>')
-		if openEnd == -1 {
-			return out.String()
-		}
-		// find closing </script> or </style>
-		searchFrom := i + next + openEnd + 1
-		var closeTag string
-		if tagLen == len("<script") {
-			closeTag = "</script>"
-		} else {
-			closeTag = "</style>"
-		}
-		ci := strings.Index(strings.ToLower(s[searchFrom:]), closeTag)
-		if ci == -1 {
-			return out.String()
-		}
-		i = searchFrom + ci + len(closeTag)
-	}
-	return out.String()
-}
-
-func removeNoisySections(s string) string {
-	lower := strings.ToLower(s)
-	out := new(strings.Builder)
-	i := 0
-	noisyTags := []string{"<nav", "<header", "<footer", "<aside", "<noscript"}
-	closeTags := []string{"</nav>", "</header>", "</footer>", "</aside>", "</noscript>"}
-	for i < len(s) {
-		nextIdx := -1
-		tagIdx := -1
-		for ti, tag := range noisyTags {
-			idx := strings.Index(lower[i:], tag)
-			if idx != -1 && (nextIdx == -1 || idx < nextIdx) {
-				nextIdx = idx
-				tagIdx = ti
-			}
-		}
-		if nextIdx == -1 {
-			out.WriteString(s[i:])
-			return out.String()
-		}
-		out.WriteString(s[i : i+nextIdx])
-		openEnd := strings.IndexByte(s[i+nextIdx:], '>')
-		if openEnd == -1 {
-			return out.String()
-		}
-		searchFrom := i + nextIdx + openEnd + 1
-		ci := strings.Index(strings.ToLower(s[searchFrom:]), closeTags[tagIdx])
-		if ci == -1 {
-			return out.String()
-		}
-		i = searchFrom + ci + len(closeTags[tagIdx])
-	}
-	return out.String()
-}
-
+// htmlToMarkdown 把 HTML 转为 Markdown。
+// 使用 html-to-markdown 库（基于 goquery + cascadia），比手写字符串替换更准确。
+// 正确处理表格、图片、链接、代码块。script/style/nav/footer 等噪音标签通过 goquery 预先移除。
 func htmlToMarkdown(s string) string {
-	s = removeScriptAndStyleBlocks(s)
-	s = removeNoisySections(s)
-	s = strings.ReplaceAll(s, "<h1", "\n# <h1")
-	s = strings.ReplaceAll(s, "<h2", "\n## <h2")
-	s = strings.ReplaceAll(s, "<h3", "\n### <h3")
-	s = strings.ReplaceAll(s, "<h4", "\n#### <h4")
-	s = strings.ReplaceAll(s, "<h5", "\n##### <h5")
-	s = strings.ReplaceAll(s, "<h6", "\n###### <h6")
-	s = strings.ReplaceAll(s, "</h1>", "\n")
-	s = strings.ReplaceAll(s, "</h2>", "\n")
-	s = strings.ReplaceAll(s, "</h3>", "\n")
-	s = strings.ReplaceAll(s, "</h4>", "\n")
-	s = strings.ReplaceAll(s, "</h5>", "\n")
-	s = strings.ReplaceAll(s, "</h6>", "\n")
-	s = strings.ReplaceAll(s, "<p>", "\n")
-	s = strings.ReplaceAll(s, "</p>", "\n")
-	s = strings.ReplaceAll(s, "<br>", "\n")
-	s = strings.ReplaceAll(s, "<br/>", "\n")
-	s = strings.ReplaceAll(s, "<br />", "\n")
-	s = strings.ReplaceAll(s, "<li>", "- ")
-	s = strings.ReplaceAll(s, "</li>", "\n")
-	s = strings.ReplaceAll(s, "<strong>", "**")
-	s = strings.ReplaceAll(s, "</strong>", "**")
-	s = strings.ReplaceAll(s, "<b>", "**")
-	s = strings.ReplaceAll(s, "</b>", "**")
-	s = strings.ReplaceAll(s, "<em>", "*")
-	s = strings.ReplaceAll(s, "</em>", "*")
-	s = strings.ReplaceAll(s, "<i>", "*")
-	s = strings.ReplaceAll(s, "</i>", "*")
-	s = strings.ReplaceAll(s, "<code>", "`")
-	s = strings.ReplaceAll(s, "</code>", "`")
-	s = strings.ReplaceAll(s, "<pre>", "\n```\n")
-	s = strings.ReplaceAll(s, "</pre>", "\n```\n")
-	s = strings.ReplaceAll(s, "<hr>", "\n---\n")
-	s = strings.ReplaceAll(s, "<hr/>", "\n---\n")
-	s = stripHTMLTags(s)
-	return s
+	// 先用 goquery 移除噪音标签，再交给 converter
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(s))
+	if err == nil {
+		noiseTags := []string{
+			"script", "style", "nav", "header", "footer", "aside", "noscript",
+			"svg", "form", "input", "button", "select", "textarea",
+			"iframe", "canvas", "video", "audio",
+		}
+		for _, tag := range noiseTags {
+			doc.Find(tag).Remove()
+		}
+		if html, err := doc.Html(); err == nil {
+			s = html
+		}
+	}
+
+	converter := html2md.NewConverter("", true, nil)
+
+	markdown, err := converter.ConvertString(s)
+	if err != nil {
+		// 降级
+		return stripHTMLTags(s)
+	}
+
+	// 输出长度限制
+	if len(markdown) > maxResultChars {
+		markdown = markdown[:maxResultChars]
+	}
+
+	// 清理多余空行
+	for strings.Contains(markdown, "\n\n\n") {
+		markdown = strings.ReplaceAll(markdown, "\n\n\n", "\n\n")
+	}
+
+	return strings.TrimSpace(markdown)
 }
 
 func ParseWebFetchInput(raw map[string]any) (WebFetchInput, error) {
