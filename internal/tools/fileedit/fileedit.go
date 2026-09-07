@@ -1,4 +1,4 @@
-package fileedit
+﻿package fileedit
 
 import (
 	"context"

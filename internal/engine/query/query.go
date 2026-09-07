@@ -113,6 +113,10 @@ type State struct {
 	Transition                   *Continue
 	HistorySnipTracking          *HistorySnipTrackingState
 
+	// --- 空 response 重试（独立于 MaxOutputTokensRecoveryCount）---
+	// 原来复用 MaxOutputTokensRecoveryCount 导致 max_output_tokens 恢复和空 response 恢复互相干扰
+	EmptyResponseRetryCount int
+
 	// L2 ReAct Bridge：渐进式 Thought→Action→Observation 追踪 + 防重犯注入
 	// nil 时完全跳过，降级为裸 tool_calls 循环
 	ReActBridge *ReActBridge
@@ -1259,10 +1263,10 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		isEmptyResponse := assistantBuffer == nil ||
 			(len(assistantBuffer.Content) == 0 && len(assistantBuffer.ToolCalls) == 0)
 		if isEmptyResponse && stopReason != "max_output_tokens" {
-			// 统计连续空 response 次数，避免无限重试
-			state.MaxOutputTokensRecoveryCount++
-			if state.MaxOutputTokensRecoveryCount <= 2 {
-				log.Printf("[Query] EMPTY RESPONSE detected (count=%d), injecting retry prompt...", state.MaxOutputTokensRecoveryCount)
+			// 统计连续空 response 次数，避免无限重试（独立于 MaxOutputTokensRecoveryCount）
+			state.EmptyResponseRetryCount++
+			if state.EmptyResponseRetryCount <= 2 {
+				log.Printf("[Query] EMPTY RESPONSE detected (count=%d), injecting retry prompt...", state.EmptyResponseRetryCount)
 
 				// 注入一个重试 prompt，引导模型继续工作
 				retryMsg := types.Message{
@@ -1270,7 +1274,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 					Content:   "[Recovery] 你刚才返回了一个空响应（没有内容也没有工具调用）。请继续执行你的任务——要么调用工具来获取/修改信息，要么输出最终答案。",
 					Timestamp: time.Now().Unix(),
 					IsMeta:    true,
-					UUID:      fmt.Sprintf("empty-retry-%d", state.MaxOutputTokensRecoveryCount),
+					UUID:      fmt.Sprintf("empty-retry-%d", state.EmptyResponseRetryCount),
 				}
 				messages = append(messages, retryMsg)
 				state.Messages = append(state.Messages, retryMsg)
@@ -1281,7 +1285,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 				log.Printf("[Query] Empty response retry prompt injected, will re-call model")
 			} else {
 				// 连续 3 次空 response，放弃重试
-				log.Printf("[Query] EMPTY RESPONSE x%d, giving up", state.MaxOutputTokensRecoveryCount)
+				log.Printf("[Query] EMPTY RESPONSE x%d, giving up", state.EmptyResponseRetryCount)
 				if state.ReActBridge != nil {
 					state.ReActBridge.MarkFailed("empty_response_persistent")
 				}
