@@ -28,6 +28,9 @@ func BuildSystemPrompt(ctx context.Context, config SystemPromptConfig) string {
 	// 添加"根因分析方法论"（不要猜测，要追踪代码）
 	builder.AddSection(GetDebugMethodologySection())
 
+	// 添加"自适应执行策略"（根因优先 + 分层递进 + 降级恢复）
+	builder.AddSection(GetAdaptiveExecutionSection())
+
 	// 添加"编码后自验证指南"（写完代码主动跑 build/vet/test）
 	builder.AddSection(GetBuildVerifySection())
 
@@ -66,12 +69,13 @@ func BuildMinimalSystemPrompt() string {
 	builder := NewSystemPromptBuilder()
 
 	builder.AddSection(GetSimpleIntroSection())
-	builder.AddSection(GetToolUsageSection())
-	builder.AddSection(GetSmartAgentSection())
-	builder.AddSection(GetDebugMethodologySection())
-	builder.AddSection(GetBuildVerifySection())
-	builder.AddSection(GetSystemSection())
-	builder.AddSection(GetDoingTasksSection())
+        builder.AddSection(GetToolUsageSection())
+        builder.AddSection(GetSmartAgentSection())
+        builder.AddSection(GetDebugMethodologySection())
+        builder.AddSection(GetAdaptiveExecutionSection())
+        builder.AddSection(GetBuildVerifySection())
+        builder.AddSection(GetSystemSection())
+        builder.AddSection(GetDoingTasksSection())
 
 	return builder.Build()
 }
