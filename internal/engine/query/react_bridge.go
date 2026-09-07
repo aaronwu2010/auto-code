@@ -14,11 +14,11 @@ package query
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/auto-code/auto-code/internal/pkg/logger"
 	"github.com/auto-code/auto-code/internal/planning"
 	"github.com/auto-code/auto-code/internal/types"
 )
@@ -115,8 +115,7 @@ func (b *ReActBridge) RecordThoughtAction(thoughtContent string, toolCalls []typ
 		b.trace.ActionCount++
 	}
 
-	log.Printf("[ReAct-Bridge] recorded thought(len=%d) + %d actions, trace has %d steps",
-		len(thoughtContent), len(toolCalls), len(b.trace.Steps))
+	logger.NewModule("ReAct-Bridge").Info("recorded thought", "thought_len", len(thoughtContent), "actions", len(toolCalls), "steps", len(b.trace.Steps))
 }
 
 // RecordObservation 在所有 tool 执行完毕后调用。
@@ -158,54 +157,54 @@ func (b *ReActBridge) RecordObservation(toolResults map[int]*toolExecutionResult
 		b.trace.AddStep(obsStep)
 
 		// 更新 failures map + GoalTracker + L5 验证
-			if result != nil {
-				toolName := "unknown"
-				// 从最近的 action step 里找 tool name
-				for i := len(b.trace.Steps) - 1; i >= 0; i-- {
-					if b.trace.Steps[i].Type == planning.ReActStepAction {
-						toolName = b.trace.Steps[i].Action
-						break
-					}
+		if result != nil {
+			toolName := "unknown"
+			// 从最近的 action step 里找 tool name
+			for i := len(b.trace.Steps) - 1; i >= 0; i-- {
+				if b.trace.Steps[i].Type == planning.ReActStepAction {
+					toolName = b.trace.Steps[i].Action
+					break
 				}
-				key := toolName
-				rec, ok := b.failures[key]
-				if !ok {
-					rec = &toolFailureRecord{}
-					b.failures[key] = rec
-				}
-				success := result.Err == nil
-				if !success {
-					rec.Count++
-					rec.LastError = truncateForReAct(result.Err.Error(), 200)
-					b.trace.RetryCount++
-				} else {
-					if result.Message != nil {
-						rec.LastSuccessResult = truncateForReAct(result.Message.Content, 200)
-					}
-				}
-
-				// L6 GoalTracker 更新状态
-				if b.goalTracker != nil {
-					resultHint := ""
-					if result.Message != nil {
-						resultHint = truncateForReAct(result.Message.Content, 100)
-					}
-					b.goalTracker.OnToolCall(toolName, success, resultHint)
-				}
-
-				// L5 ResultVerifier 调用
-				content := ""
-				if result.Message != nil {
-					content = result.Message.Content
-				}
-				vr := VerifyToolResult(toolName, content, result.Err)
-				b.lastVerification = append(b.lastVerification, vr)
 			}
-		}
+			key := toolName
+			rec, ok := b.failures[key]
+			if !ok {
+				rec = &toolFailureRecord{}
+				b.failures[key] = rec
+			}
+			success := result.Err == nil
+			if !success {
+				rec.Count++
+				rec.LastError = truncateForReAct(result.Err.Error(), 200)
+				b.trace.RetryCount++
+			} else {
+				if result.Message != nil {
+					rec.LastSuccessResult = truncateForReAct(result.Message.Content, 200)
+				}
+			}
 
-		log.Printf("[ReAct-Bridge] recorded %d observations, trace has %d steps, goalTracker: %s",
-			len(toolResults), len(b.trace.Steps), b.goalTracker.Summary())
+			// L6 GoalTracker 更新状态
+			if b.goalTracker != nil {
+				resultHint := ""
+				if result.Message != nil {
+					resultHint = truncateForReAct(result.Message.Content, 100)
+				}
+				b.goalTracker.OnToolCall(toolName, success, resultHint)
+			}
+
+			// L5 ResultVerifier 调用
+			content := ""
+			if result.Message != nil {
+				content = result.Message.Content
+			}
+			vr := VerifyToolResult(toolName, content, result.Err)
+			b.lastVerification = append(b.lastVerification, vr)
+		}
 	}
+
+	logger.NewModule("ReAct-Bridge").Info("recorded observations",
+		"observations", len(toolResults), "steps", len(b.trace.Steps), "goalTracker", b.goalTracker.Summary())
+}
 
 // MarkFinalAnswer 当模型输出最终文本（无 tool_calls）时调用。
 // 返回 true 表示可以安全结束（验证通过或跳过），返回 false 表示验证失败，
@@ -229,11 +228,11 @@ func (b *ReActBridge) MarkFinalAnswer(answer string) bool {
 			b.mu.Lock()
 			b.lastGateFailure = result
 			b.mu.Unlock()
-			log.Printf("[ReAct-Bridge] verification gate FAILED (%s), will force additional turn", result.FirstFailureName)
+			logger.NewModule("ReAct-Bridge").Warn("verification gate FAILED", "first_failure", result.FirstFailureName)
 			return false
 		}
 		if !result.Skipped && result.OverallPass {
-			log.Printf("[ReAct-Bridge] verification gate PASSED, completing trace")
+			logger.NewModule("ReAct-Bridge").Info("verification gate PASSED, completing trace")
 		}
 	}
 
@@ -241,7 +240,7 @@ func (b *ReActBridge) MarkFinalAnswer(answer string) bool {
 	defer b.mu.Unlock()
 
 	b.trace.Complete(truncateForReAct(answer, 500))
-	log.Printf("[ReAct-Bridge] trace completed, %d total steps", len(b.trace.Steps))
+	logger.NewModule("ReAct-Bridge").Info("trace completed", "total_steps", len(b.trace.Steps))
 	return true
 }
 
@@ -286,7 +285,7 @@ func (b *ReActBridge) MarkFailed(reason string) {
 	defer b.mu.Unlock()
 
 	b.trace.Fail(reason)
-	log.Printf("[ReAct-Bridge] trace failed: %s, %d steps", reason, len(b.trace.Steps))
+	logger.NewModule("ReAct-Bridge").Warn("trace failed", "reason", reason, "steps", len(b.trace.Steps))
 }
 
 // BuildPreCallContext 在下一轮 CallModel 之前调用。
@@ -380,25 +379,25 @@ func (b *ReActBridge) BuildPreCallContext() string {
 	}
 
 	// === 5. L5 ResultVerifier 验证结果（只取最近一轮的）===
-		if len(b.lastVerification) > 0 {
-			summary := BuildVerificationSummary(b.lastVerification)
-			if summary != "" {
-				sb.WriteString(summary + "\n\n")
-			}
-			// 清空，等下一轮再收集
-			b.lastVerification = nil
+	if len(b.lastVerification) > 0 {
+		summary := BuildVerificationSummary(b.lastVerification)
+		if summary != "" {
+			sb.WriteString(summary + "\n\n")
 		}
+		// 清空，等下一轮再收集
+		b.lastVerification = nil
+	}
 
-		// === 6. P1 验证门失败注入 ===
-		if b.lastGateFailure != nil && !b.lastGateFailure.OverallPass {
-			msg := BuildGateFailureMessage(b.lastGateFailure)
-			if msg != "" {
-				sb.WriteString(msg + "\n")
-				b.lastGateFailure = nil // 只注入一次
-			}
+	// === 6. P1 验证门失败注入 ===
+	if b.lastGateFailure != nil && !b.lastGateFailure.OverallPass {
+		msg := BuildGateFailureMessage(b.lastGateFailure)
+		if msg != "" {
+			sb.WriteString(msg + "\n")
+			b.lastGateFailure = nil // 只注入一次
 		}
+	}
 
-		return strings.TrimSpace(sb.String())
+	return strings.TrimSpace(sb.String())
 }
 
 // Trace 返回内部 ReActTrace（只读）。用于 debug / metrics。

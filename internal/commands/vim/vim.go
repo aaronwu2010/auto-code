@@ -1,4 +1,4 @@
-﻿package vim
+package vim
 
 import (
 	"context"

@@ -36,9 +36,9 @@ type LSPInput struct {
 
 type LSPTool struct {
 	*tools.BaseTool
-	mu       sync.Mutex
-	clients  map[string]*LSPClient
-	nextID   int64
+	mu      sync.Mutex
+	clients map[string]*LSPClient
+	nextID  int64
 }
 
 type jsonRPCRequest struct {

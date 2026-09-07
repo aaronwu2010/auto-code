@@ -3,7 +3,6 @@ package query
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/auto-code/auto-code/internal/pkg/logger"
 )
 
 // ProjectType 项目类型
@@ -26,16 +27,16 @@ const (
 	ProjectTypeGeneric // 有 Makefile / build 脚本
 
 	// 扩展主流语言/框架
-	ProjectTypeCpp      // C/C++ (CMakeLists.txt)
-	ProjectTypeCSharp   // C# / .NET (.csproj / .sln)
-	ProjectTypePHP      // PHP (composer.json)
-	ProjectTypeRuby     // Ruby (Gemfile)
-	ProjectTypeSwift    // Swift (Package.swift)
-	ProjectTypeScala    // Scala (build.sbt)
-	ProjectTypeElixir   // Elixir (mix.exs)
-	ProjectTypeHaskell  // Haskell (package.yaml / *.cabal)
-	ProjectTypeZig      // Zig (build.zig)
-	ProjectTypeDart     // Dart / Flutter (pubspec.yaml)
+	ProjectTypeCpp     // C/C++ (CMakeLists.txt)
+	ProjectTypeCSharp  // C# / .NET (.csproj / .sln)
+	ProjectTypePHP     // PHP (composer.json)
+	ProjectTypeRuby    // Ruby (Gemfile)
+	ProjectTypeSwift   // Swift (Package.swift)
+	ProjectTypeScala   // Scala (build.sbt)
+	ProjectTypeElixir  // Elixir (mix.exs)
+	ProjectTypeHaskell // Haskell (package.yaml / *.cabal)
+	ProjectTypeZig     // Zig (build.zig)
+	ProjectTypeDart    // Dart / Flutter (pubspec.yaml)
 )
 
 func (p ProjectType) String() string {
@@ -180,7 +181,7 @@ func (g *VerificationGate) Run(ctx context.Context, cwd string) *GateResult {
 
 		// PreCheck：如果定义了且返回 false，跳过这条命令（不加入 checks 也不视为失败）
 		if cmd.PreCheck != nil && !cmd.PreCheck(cwd) {
-			log.Printf("[VerificationGate] skipping %s: pre-check failed", cmd.Name)
+			logger.NewModule("VerificationGate").Info("skipping %s: pre-check failed", cmd.Name)
 			continue
 		}
 
@@ -210,7 +211,7 @@ func (g *VerificationGate) Run(ctx context.Context, cwd string) *GateResult {
 		}
 	}
 
-	log.Printf("[VerificationGate] %s project: pass=%v, %d checks, %.0fms, first_fail=%s",
+	logger.NewModule("VerificationGate").Info("%s project: pass=%v, %d checks, %.0fms, first_fail=%s",
 		projType, result.OverallPass, len(result.Checks), float64(result.TotalDuration)/float64(time.Millisecond), result.FirstFailureName)
 
 	return result
@@ -418,8 +419,8 @@ func (g *VerificationGate) getVerificationCommands(pt ProjectType) []Verificatio
 		return []VerificationCommand{
 			// 1. cmake 配置 + make 编译（检测到 CMakeLists.txt）
 			{Name: "cmake + make", Cmd: "cmake",
-				Args: []string{"--build", ".", "--config", "Debug"},
-				Timeout: 180 * time.Second,
+				Args:     []string{"--build", ".", "--config", "Debug"},
+				Timeout:  180 * time.Second,
 				PreCheck: func(cwd string) bool { return hasFile(cwd, "CMakeLists.txt") }},
 			// 2. cppcheck（静态分析，可选）
 			{Name: "cppcheck", Cmd: "cppcheck", Args: []string{".", "--error-exitcode=1"}, Timeout: 30 * time.Second,
@@ -433,11 +434,11 @@ func (g *VerificationGate) getVerificationCommands(pt ProjectType) []Verificatio
 			{Name: "dotnet build", Cmd: "dotnet", Args: []string{"build", "-v", "q"}, Timeout: 120 * time.Second},
 			// 2. dotnet format — 格式检查
 			{Name: "dotnet format --verify-no-changes", Cmd: "dotnet",
-				Args: []string{"format", "--verify-no-changes"},
+				Args:    []string{"format", "--verify-no-changes"},
 				Timeout: 60 * time.Second},
 			// 3. dotnet test — 单元测试（只跑包含测试的项目）
 			{Name: "dotnet test", Cmd: "dotnet",
-				Args: []string{"test", "--no-build", "-v", "q", "--filter", "FullyQualifiedName~Test"},
+				Args:    []string{"test", "--no-build", "-v", "q", "--filter", "FullyQualifiedName~Test"},
 				Timeout: 120 * time.Second},
 		}
 

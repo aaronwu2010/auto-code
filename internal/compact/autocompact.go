@@ -3,7 +3,7 @@ package compact
 import "github.com/auto-code/auto-code/internal/ablation"
 
 const (
-	AutoCompactBufferTokens      = 10000
+	AutoCompactBufferTokens = 10000
 	// WarningThresholdBufferTokens = 30000  ->  剩余 <30k 时触发轻度压缩
 	WarningThresholdBufferTokens = 30000
 	// ErrorThresholdBufferTokens = 15000  ->  剩余 <15k 时触发强制压缩（必须小于 Warning 阈值）

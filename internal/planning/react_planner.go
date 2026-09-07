@@ -10,14 +10,14 @@ import (
 // ReActPlanner ReAct 模式规划器
 // 实现 Thought → Action → Observation 循环
 type ReActPlanner struct {
-	config       *ReActConfig
-	thoughtGen   ThoughtGenerator
-	actionExec   ActionExecutor
-	observer     ObservationCollector
+	config     *ReActConfig
+	thoughtGen ThoughtGenerator
+	actionExec ActionExecutor
+	observer   ObservationCollector
 
 	// 运行时状态
-	traces       map[string]*ReActTrace
-	mu           sync.RWMutex
+	traces map[string]*ReActTrace
+	mu     sync.RWMutex
 
 	// 统计信息
 	totalRuns      int64
@@ -48,8 +48,8 @@ func NewReActPlanner(config *ReActConfig) *ReActPlanner {
 	}
 
 	return &ReActPlanner{
-		config:  config,
-		traces:  make(map[string]*ReActTrace),
+		config: config,
+		traces: make(map[string]*ReActTrace),
 	}
 }
 

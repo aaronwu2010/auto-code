@@ -1,14 +1,13 @@
 package skills
 
-
 type BundledSkillDefinition struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Prompt      string `json:"prompt"`
-	IsEnabled   bool   `json:"isEnabled"`
-	DisableModel bool  `json:"disableModel,omitempty"`
-	Type        string `json:"type"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Prompt       string `json:"prompt"`
+	IsEnabled    bool   `json:"isEnabled"`
+	DisableModel bool   `json:"disableModel,omitempty"`
+	Type         string `json:"type"`
 }
 
 var bundledSkills map[string]*BundledSkillDefinition

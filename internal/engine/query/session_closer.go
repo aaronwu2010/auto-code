@@ -1,12 +1,12 @@
-﻿// Package query 的 SessionCloser：阶段 5 跨 session 经验闭环。
+// Package query 的 SessionCloser：阶段 5 跨 session 经验闭环。
 //
 // 当一个 SubmitMessage 会话结束时（defer 里调一次），从 ReActBridge 的 trace + failures + goalTracker
 // 里自动提取有价值的经验 → 写入 ExperienceStore → 下次 session 启动时自动 Recall。
 //
 // 三种经验：
-//   1. 失败模式（ExperienceTypeFailure）：同一个 tool 失败 ≥ 2 次
-//   2. 成功链（ExperienceTypePattern）：连续的 action→success observation 序列
-//   3. 整体成功（ExperienceTypeSuccess）：session 整体成功时的总结
+//  1. 失败模式（ExperienceTypeFailure）：同一个 tool 失败 ≥ 2 次
+//  2. 成功链（ExperienceTypePattern）：连续的 action→success observation 序列
+//  3. 整体成功（ExperienceTypeSuccess）：session 整体成功时的总结
 package query
 
 import (
@@ -14,10 +14,10 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
+	"github.com/auto-code/auto-code/internal/pkg/logger"
 	"github.com/auto-code/auto-code/internal/planning"
 	"github.com/auto-code/auto-code/internal/reflection"
 )
@@ -37,7 +37,7 @@ func CloseSession(ctx context.Context, bridge *ReActBridge, goalTracker *GoalTra
 
 	// 只有当 session 有实际 action 时才提取
 	if trace.ActionCount < 2 {
-		log.Printf("[SessionCloser] only %d actions, skip experience extraction", trace.ActionCount)
+		logger.NewModule("SessionCloser").Info("only %d actions, skip experience extraction", trace.ActionCount)
 		return
 	}
 
@@ -127,14 +127,14 @@ func CloseSession(ctx context.Context, bridge *ReActBridge, goalTracker *GoalTra
 	for _, exp := range experiences {
 		exp.Timestamp = time.Now()
 		if err := store.Save(ctx, exp); err != nil {
-			log.Printf("[SessionCloser] failed to save experience %s: %v", exp.ID, err)
+			logger.NewModule("SessionCloser").Info("failed to save experience %s: %v", exp.ID, err)
 			continue
 		}
 		saved++
-		log.Printf("[SessionCloser] saved experience: id=%s type=%s eff=%.2f", exp.ID, exp.Type, exp.Effectiveness)
+		logger.NewModule("SessionCloser").Info("saved experience: id=%s type=%s eff=%.2f", exp.ID, exp.Type, exp.Effectiveness)
 	}
 
-	log.Printf("[SessionCloser] session ended, extracted %d experiences, saved %d (trace success=%v, actions=%d, retries=%d)",
+	logger.NewModule("SessionCloser").Info("session ended, extracted %d experiences, saved %d (trace success=%v, actions=%d, retries=%d)",
 		len(experiences), saved, trace.Success, trace.ActionCount, trace.RetryCount)
 }
 

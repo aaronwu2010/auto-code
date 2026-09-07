@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"sync"
 
 	"github.com/auto-code/auto-code/internal/api"
 	engctx "github.com/auto-code/auto-code/internal/engine/context"
+	"github.com/auto-code/auto-code/internal/pkg/logger"
 	"github.com/auto-code/auto-code/internal/state"
 	"github.com/auto-code/auto-code/internal/tools/registry"
 	"github.com/auto-code/auto-code/internal/types"
@@ -150,11 +150,11 @@ func (a *Adapter) SendMessage(ctx context.Context, req SendMessageRequest) SendM
 		for msg := range outputCh {
 			a.emitEvent("query:message", msg)
 			if msg.Type == "result" || msg.Type == "error" {
-				log.Printf("[Server] message stream ended: type=%s", msg.Type)
+				logger.NewModule("Server").Info("message stream ended: type=%s", msg.Type)
 				return
 			}
 		}
-		log.Printf("[Server] message stream channel closed without terminal event")
+		logger.NewModule("Server").Info("message stream channel closed without terminal event")
 	}()
 
 	return SendMessageResponse{

@@ -4,13 +4,12 @@ import (
 	"context"
 
 	"github.com/auto-code/auto-code/internal/tools"
-
 )
 
 type CoordinatorMode struct {
-	enabled       bool
-	allowedTools  []string
-	userContext   map[string]string
+	enabled      bool
+	allowedTools []string
+	userContext  map[string]string
 }
 
 func NewCoordinatorMode() *CoordinatorMode {

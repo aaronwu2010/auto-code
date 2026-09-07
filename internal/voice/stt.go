@@ -15,16 +15,16 @@ import (
 )
 
 const (
-	voiceStreamPath      = "/api/ws/speech_to_text/voice_stream"
-	keepaliveIntervalMS  = 8000
-	keepaliveMsg         = `{"type":"KeepAlive"}`
-	closeStreamMsg       = `{"type":"CloseStream"}`
-	finalizeSafetyMS     = 5000
-	finalizeNoDataMS     = 1500
-	wsWriteTimeout       = 10 * time.Second
-	wsReadTimeout        = 30 * time.Second
-	wsMaxMessageSize     = 65536
-	wsPingInterval       = 25 * time.Second
+	voiceStreamPath     = "/api/ws/speech_to_text/voice_stream"
+	keepaliveIntervalMS = 8000
+	keepaliveMsg        = `{"type":"KeepAlive"}`
+	closeStreamMsg      = `{"type":"CloseStream"}`
+	finalizeSafetyMS    = 5000
+	finalizeNoDataMS    = 1500
+	wsWriteTimeout      = 10 * time.Second
+	wsReadTimeout       = 30 * time.Second
+	wsMaxMessageSize    = 65536
+	wsPingInterval      = 25 * time.Second
 )
 
 type FinalizeSource string

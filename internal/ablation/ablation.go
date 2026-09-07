@@ -5,22 +5,22 @@ import "os"
 const (
 	EnvAblationBaseline = "AUTO_CODE_ABLATION_BASELINE"
 
-	EnvDisableThinking     = "AUTO_CODE_DISABLE_THINKING"
-	EnvDisableCompact      = "AUTO_CODE_DISABLE_COMPACT"
-	EnvDisableAutoCompact  = "AUTO_CODE_DISABLE_AUTO_COMPACT"
-	EnvDisableAutoMemory   = "AUTO_CODE_DISABLE_AUTO_MEMORY"
-	EnvDisableBackground   = "AUTO_CODE_DISABLE_BACKGROUND_TASKS"
-	EnvDisableHistorySnip  = "AUTO_CODE_DISABLE_HISTORY_SNIP"
+	EnvDisableThinking        = "AUTO_CODE_DISABLE_THINKING"
+	EnvDisableCompact         = "AUTO_CODE_DISABLE_COMPACT"
+	EnvDisableAutoCompact     = "AUTO_CODE_DISABLE_AUTO_COMPACT"
+	EnvDisableAutoMemory      = "AUTO_CODE_DISABLE_AUTO_MEMORY"
+	EnvDisableBackground      = "AUTO_CODE_DISABLE_BACKGROUND_TASKS"
+	EnvDisableHistorySnip     = "AUTO_CODE_DISABLE_HISTORY_SNIP"
 	EnvDisableContextCollapse = "AUTO_CODE_DISABLE_CONTEXT_COLLAPSE"
 )
 
 type AblationFlags struct {
-	DisableThinking       bool
-	DisableCompact        bool
-	DisableAutoCompact    bool
-	DisableAutoMemory     bool
-	DisableBackground     bool
-	DisableHistorySnip    bool
+	DisableThinking        bool
+	DisableCompact         bool
+	DisableAutoCompact     bool
+	DisableAutoMemory      bool
+	DisableBackground      bool
+	DisableHistorySnip     bool
 	DisableContextCollapse bool
 }
 

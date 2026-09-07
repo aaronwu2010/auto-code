@@ -33,29 +33,29 @@ func DefaultHypothesisExplorerConfig() HypothesisExplorerConfig {
 // Hypothesis 一个可验证的假设
 type Hypothesis struct {
 	ID          string   `json:"id"`
-	Description string   `json:"description"`   // 人类可读描述
-	Keywords    []string `json:"keywords"`       // 搜索关键词
-	FileHints   []string `json:"file_hints"`     // 可能相关的文件模式（*.go, *_test.go）
-	Confidence  float64  `json:"confidence"`     // 假设本身的初始置信度（0-1）
+	Description string   `json:"description"` // 人类可读描述
+	Keywords    []string `json:"keywords"`    // 搜索关键词
+	FileHints   []string `json:"file_hints"`  // 可能相关的文件模式（*.go, *_test.go）
+	Confidence  float64  `json:"confidence"`  // 假设本身的初始置信度（0-1）
 }
 
 // HypothesisResult 单个假设的验证结果
 type HypothesisResult struct {
-	Hypothesis    *Hypothesis `json:"hypothesis"`
-	MatchedFiles  []string    `json:"matched_files"`   // 搜索命中的文件
-	MatchCount    int         `json:"match_count"`     // 关键词总命中次数
-	Verified      bool        `json:"verified"`        // 是否被验证为真
-	FinalScore    float64     `json:"final_score"`     // 综合得分（0-1，越高越可能）
-	Summary       string      `json:"summary"`         // 一句话总结
+	Hypothesis   *Hypothesis `json:"hypothesis"`
+	MatchedFiles []string    `json:"matched_files"` // 搜索命中的文件
+	MatchCount   int         `json:"match_count"`   // 关键词总命中次数
+	Verified     bool        `json:"verified"`      // 是否被验证为真
+	FinalScore   float64     `json:"final_score"`   // 综合得分（0-1，越高越可能）
+	Summary      string      `json:"summary"`       // 一句话总结
 }
 
 // HypothesisReport 探索报告
 type HypothesisReport struct {
-	Triggered     bool               `json:"triggered"`
-	TaskType      string             `json:"task_type"`
-	Results       []*HypothesisResult `json:"results"`
-	BestHypothesis *HypothesisResult  `json:"best_hypothesis,omitempty"`
-	RawContext    string             `json:"raw_context"`
+	Triggered      bool                `json:"triggered"`
+	TaskType       string              `json:"task_type"`
+	Results        []*HypothesisResult `json:"results"`
+	BestHypothesis *HypothesisResult   `json:"best_hypothesis,omitempty"`
+	RawContext     string              `json:"raw_context"`
 }
 
 // HypothesisExplorer 假设驱动探索器（方案 A）

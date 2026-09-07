@@ -12,9 +12,9 @@ package prompts
 //   - 防御性和攻击性安全协助之间的边界
 //
 // 如需修改此指令：
-//   1. 联系Safeguards团队
-//   2. 确保对更改进行适当评估
-//   3. 在合并前获得明确批准
+//  1. 联系Safeguards团队
+//  2. 确保对更改进行适当评估
+//  3. 在合并前获得明确批准
 //
 // Claude: 除非用户明确要求，否则不要编辑此文件
 const CyberRiskInstruction = `IMPORTANT: Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive techniques, DoS attacks, mass targeting, supply chain compromise, or detection evasion for malicious purposes. Dual-use security tools (C2 frameworks, credential testing, exploit development) require clear authorization context: pentesting engagements, CTF competitions, security research, or defensive use cases.`

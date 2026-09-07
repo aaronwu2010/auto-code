@@ -8,10 +8,10 @@ import (
 
 // ProactiveProbeConfig 主动搜索触发器配置
 type ProactiveProbeConfig struct {
-	Enabled               bool    // 总开关
-	MinConfidenceToProbe  float64 // 低于此置信度时触发主动探测（默认 0.4）
-	MaxProbesPerCycle     int     // 每轮最多触发几次探测（默认 2）
-	MaxTotalProbes        int     // 整个 session 最多触发几次（默认 5）
+	Enabled              bool    // 总开关
+	MinConfidenceToProbe float64 // 低于此置信度时触发主动探测（默认 0.4）
+	MaxProbesPerCycle    int     // 每轮最多触发几次探测（默认 2）
+	MaxTotalProbes       int     // 整个 session 最多触发几次（默认 5）
 }
 
 // DefaultProactiveProbeConfig 默认配置
@@ -26,7 +26,7 @@ func DefaultProactiveProbeConfig() ProactiveProbeConfig {
 
 // ProbeAction 一次探测行动
 type ProbeAction struct {
-	Type        string   `json:"type"`        // "grep_synonym" | "grep_broader" | "read_similar"
+	Type        string   `json:"type"` // "grep_synonym" | "grep_broader" | "read_similar"
 	OriginalKW  string   `json:"original_kw"`
 	NewKeywords []string `json:"new_keywords"`
 	Reason      string   `json:"reason"`
@@ -55,8 +55,8 @@ type ProbeRecord struct {
 type ProactiveProbe struct {
 	cfg      ProactiveProbeConfig
 	mu       sync.Mutex
-	totalCnt int          // session 级别的探测计数
-	cycleCnt int          // 当前轮探测计数
+	totalCnt int           // session 级别的探测计数
+	cycleCnt int           // 当前轮探测计数
 	probeLog []ProbeRecord // 历史探测记录
 
 	// 同义词 / 扩展词库
@@ -80,12 +80,12 @@ func NewProactiveProbe(cfg ProactiveProbeConfig) *ProactiveProbe {
 func buildSynonymMap() map[string][]string {
 	return map[string][]string{
 		// 错误相关
-		"error":   {"err", "exception", "fail", "issue"},
-		"fail":    {"error", "err", "exception", "crash"},
-		"panic":   {"fatal", "crash", "abort", "exception"},
-		"nil":     {"null", "none", "undefined", "empty"},
+		"error": {"err", "exception", "fail", "issue"},
+		"fail":  {"error", "err", "exception", "crash"},
+		"panic": {"fatal", "crash", "abort", "exception"},
+		"nil":   {"null", "none", "undefined", "empty"},
 		// 并发相关
-		"mutex":   {"lock", "rwmutex", "semaphore"},
+		"mutex":     {"lock", "rwmutex", "semaphore"},
 		"goroutine": {"thread", "async", "concurrent", "routine"},
 		// 网络相关
 		"timeout": {"deadline", "expire", "connection refused"},
@@ -95,14 +95,14 @@ func buildSynonymMap() map[string][]string {
 		"marshal": {"serialize", "encode", "to_json"},
 		"config":  {"settings", "options", "params", "configuration"},
 		// 性能相关
-		"slow":    {"latency", "bottleneck", "performance", "delay"},
-		"leak":    {"resource leak", "memory leak", "goroutine leak"},
+		"slow": {"latency", "bottleneck", "performance", "delay"},
+		"leak": {"resource leak", "memory leak", "goroutine leak"},
 		// 中文扩展
-		"错误":     {"报错", "异常", "panic", "error"},
-		"超时":     {"timeout", "deadline", "卡住"},
-		"崩溃":     {"crash", "panic", "fatal"},
-		"并发":     {"goroutine", "thread", "concurrent"},
-		"锁定":     {"lock", "mutex", "死锁", "deadlock"},
+		"错误": {"报错", "异常", "panic", "error"},
+		"超时": {"timeout", "deadline", "卡住"},
+		"崩溃": {"crash", "panic", "fatal"},
+		"并发": {"goroutine", "thread", "concurrent"},
+		"锁定": {"lock", "mutex", "死锁", "deadlock"},
 	}
 }
 

@@ -7,15 +7,15 @@ import (
 
 // FilterConfig 每个工具类型的截断配置
 type FilterConfig struct {
-	Enabled      bool // 是否启用截断
-	MaxTotalChars int // 最多保留的总字符数（0 = 不截断）
+	Enabled       bool // 是否启用截断
+	MaxTotalChars int  // 最多保留的总字符数（0 = 不截断）
 	// "head-tail" 模式: 保留前 N 行 + 后 M 行
-	HeadLines    int
-	TailLines    int
+	HeadLines int
+	TailLines int
 	// "first-N" 模式: 只保留前 N 行
-	FirstNLines  int
+	FirstNLines int
 	// "match-count" 模式: 只保留前 N 条匹配 + 总数
-	MatchCount   int
+	MatchCount int
 	// 零结果提示: 当输出为空/零结果时是否注入建议
 	SuggestEmpty bool
 }

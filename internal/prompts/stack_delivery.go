@@ -16,7 +16,7 @@ const (
 	ProjectLibrary      ProjectType = "library"       // 库/SDK
 	ProjectService      ProjectType = "service"       // 后端服务/微服务
 	ProjectScaffold     ProjectType = "scaffold"      // 脚手架/模板生成器
-	ProjectMobile       ProjectType = "mobile"         // 移动端应用
+	ProjectMobile       ProjectType = "mobile"        // 移动端应用
 	ProjectML           ProjectType = "ml"            // ML/数据科学项目
 	ProjectUnknown      ProjectType = "unknown"
 )

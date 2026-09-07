@@ -11,12 +11,13 @@ package query
 
 import (
 	"fmt"
-	"log"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/auto-code/auto-code/internal/pkg/logger"
 )
 
 // TaskStatus 子任务状态
@@ -51,7 +52,7 @@ type GoalSubtask struct {
 // GoalTracker 是 L6 大目标状态追踪器。
 // nil-safe：bridge 是可选的，没有 trace 也能独立运行。
 type GoalTracker struct {
-	goal    string
+	goal     string
 	subtasks []*GoalSubtask
 
 	// tool 调用历史，用于自动更新子任务状态
@@ -70,10 +71,10 @@ type toolCallRecord struct {
 // NewGoalTracker 从用户 prompt 里自动提取子任务。
 func NewGoalTracker(goal string) *GoalTracker {
 	gt := &GoalTracker{
-		goal:    goal,
+		goal:     goal,
 		subtasks: extractSubtasksFromPrompt(goal),
 	}
-	log.Printf("[GoalTracker] extracted %d subtasks from goal: %q", len(gt.subtasks), truncateForReAct(goal, 60))
+	logger.NewModule("GoalTracker").Info("extracted %d subtasks from goal: %q", len(gt.subtasks), truncateForReAct(goal, 60))
 	return gt
 }
 
@@ -138,13 +139,13 @@ func guessToolHints(desc string) []string {
 	var hints []string
 
 	toolKeywords := map[string][]string{
-		"bash":         {"编译", "build", "go build", "npm", "pip install", "运行", "run", "执行", "test", "grep", "find", "git ", "安装", "install", "shell", "命令", "进程"},
-		"read_file":    {"读取", "查看", "看一下", "open", "read", "读", "分析", "检查", "check", "查看代码", "内容"},
-		"edit_file":    {"修改", "修复", "fix", "edit", "改", "edit", "patch", "写入", "创建", "create", "新建", "重命名", "rename"},
-		"glob":         {"查找", "搜索", "glob", "文件", "哪些文件", "列出", "list", "找"},
-		"grep":         {"搜索", "grep", "查找", "匹配", "哪个文件包含"},
-		"web_fetch":    {"网页", "文档", "参考", "web", "fetch", "浏览器", "浏览", "查一下"},
-		"image_gen":    {"图片", "image", "生成图像", "画画"},
+		"bash":      {"编译", "build", "go build", "npm", "pip install", "运行", "run", "执行", "test", "grep", "find", "git ", "安装", "install", "shell", "命令", "进程"},
+		"read_file": {"读取", "查看", "看一下", "open", "read", "读", "分析", "检查", "check", "查看代码", "内容"},
+		"edit_file": {"修改", "修复", "fix", "edit", "改", "edit", "patch", "写入", "创建", "create", "新建", "重命名", "rename"},
+		"glob":      {"查找", "搜索", "glob", "文件", "哪些文件", "列出", "list", "找"},
+		"grep":      {"搜索", "grep", "查找", "匹配", "哪个文件包含"},
+		"web_fetch": {"网页", "文档", "参考", "web", "fetch", "浏览器", "浏览", "查一下"},
+		"image_gen": {"图片", "image", "生成图像", "画画"},
 	}
 
 	for tool, kws := range toolKeywords {
@@ -185,7 +186,7 @@ func (gt *GoalTracker) OnToolCall(toolName string, success bool, resultHint stri
 				now := time.Now()
 				st.Status = TaskStatusRunning
 				st.StartedAt = &now
-				log.Printf("[GoalTracker] subtask %s marked running (tool=%s)", st.ID, toolName)
+				logger.NewModule("GoalTracker").Info("subtask %s marked running (tool=%s)", st.ID, toolName)
 				goto moved
 			}
 		}
@@ -199,7 +200,7 @@ func (gt *GoalTracker) OnToolCall(toolName string, success bool, resultHint stri
 				now := time.Now()
 				st.Status = TaskStatusDone
 				st.CompletedAt = &now
-				log.Printf("[GoalTracker] subtask %s marked done", st.ID)
+				logger.NewModule("GoalTracker").Info("subtask %s marked done", st.ID)
 				break // 一次只完成一个
 			}
 		}
@@ -210,7 +211,7 @@ func (gt *GoalTracker) OnToolCall(toolName string, success bool, resultHint stri
 				now := time.Now()
 				gt.subtasks[i].Status = TaskStatusFailed
 				gt.subtasks[i].CompletedAt = &now
-				log.Printf("[GoalTracker] subtask %s marked failed (tool=%s)", gt.subtasks[i].ID, toolName)
+				logger.NewModule("GoalTracker").Info("subtask %s marked failed (tool=%s)", gt.subtasks[i].ID, toolName)
 				break
 			}
 		}
@@ -366,7 +367,7 @@ func (gt *GoalTracker) InferDependencies() {
 
 	// 跑一次拓扑排序验证
 	if _, err := gt.topologicalSortInternal(); err != nil {
-		log.Printf("[GoalTracker] dependency inference resulted in cycle, clearing all deps: %v", err)
+		logger.NewModule("GoalTracker").Info("dependency inference resulted in cycle, clearing all deps: %v", err)
 		for _, st := range gt.subtasks {
 			st.DependsOn = nil
 		}

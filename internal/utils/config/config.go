@@ -3,16 +3,17 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/auto-code/auto-code/internal/pkg/logger"
 )
 
 type GlobalConfig struct {
-	mu     sync.RWMutex
-	path   string
-	data   map[string]any
+	mu   sync.RWMutex
+	path string
+	data map[string]any
 }
 
 func NewGlobalConfig(configDir string) *GlobalConfig {
@@ -77,7 +78,7 @@ func (c *GlobalConfig) load() {
 		return
 	}
 	if err := json.Unmarshal(data, &c.data); err != nil {
-		log.Printf("[GlobalConfig] failed to parse config file %s: %v", c.path, err)
+		logger.NewModule("GlobalConfig").Info("failed to parse config file %s: %v", c.path, err)
 	}
 }
 

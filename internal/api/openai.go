@@ -7,11 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/auto-code/auto-code/internal/pkg/logger"
 	"github.com/auto-code/auto-code/internal/types"
 )
 
@@ -58,6 +58,7 @@ func NewOpenAIClient(config OpenAIConfig) *OpenAIClient {
 // normalizeOpenAIBaseURL 处理 OpenAI 兼容端点的 BaseURL：
 //   - 去掉尾部的斜杠
 //   - 如果不以 /v1 /v2 等版本号结尾，自动追加 /v1
+//
 // 这样用户无论填 "https://api.openai.com" 还是 "https://api.openai.com/v1"
 // 都能正确拼成 /v1/chat/completions。
 func normalizeOpenAIBaseURL(base string) string {
@@ -130,10 +131,10 @@ type OpenAIChatStreamEvent struct {
 	Created int64  `json:"created"`
 	Model   string `json:"model"`
 	Choices []struct {
-		Index        int           `json:"index"`
-		Delta        OpenAIDelta   `json:"delta"`
-		FinishReason string        `json:"finish_reason,omitempty"`
-		LogProbs     any           `json:"logprobs,omitempty"`
+		Index        int         `json:"index"`
+		Delta        OpenAIDelta `json:"delta"`
+		FinishReason string      `json:"finish_reason,omitempty"`
+		LogProbs     any         `json:"logprobs,omitempty"`
 	} `json:"choices"`
 	Usage *struct {
 		PromptTokens     int `json:"prompt_tokens"`
@@ -217,7 +218,7 @@ func (c *OpenAIClient) ChatWithStreaming(ctx context.Context, req OpenAIChatRequ
 				if delay > rc.MaxDelay {
 					delay = rc.MaxDelay
 				}
-				log.Printf("[OpenAI] retry attempt %d after %v delay", attempts, delay)
+				logger.NewModule("OpenAI").Info("retry attempt %d after %v delay", attempts, delay)
 				select {
 				case <-ctx.Done():
 					ch <- StreamMessage{Type: "error", Error: ctx.Err()}
@@ -239,13 +240,13 @@ func (c *OpenAIClient) ChatWithStreaming(ctx context.Context, req OpenAIChatRequ
 			lastErr = err
 			if apiErr, ok := err.(*OpenAIClientError); ok {
 				if !apiErr.Retryable {
-					log.Printf("[OpenAI] non-retryable error %d (%s): %s", apiErr.StatusCode, apiErr.Type, apiErr.Message)
+					logger.NewModule("OpenAI").Info("non-retryable error %d (%s): %s", apiErr.StatusCode, apiErr.Type, apiErr.Message)
 					ch <- StreamMessage{Type: "error", Error: apiErr}
 					return
 				}
 			}
 
-			log.Printf("[OpenAI] stream attempt %d failed (will retry): %v", attempts, err)
+			logger.NewModule("OpenAI").Info("stream attempt %d failed (will retry): %v", attempts, err)
 			attempts++
 			if attempts > rc.MaxRetries {
 				ch <- StreamMessage{
@@ -309,7 +310,7 @@ func (c *OpenAIClient) executeChatStream(ctx context.Context, req OpenAIChatRequ
 	}
 
 	url := strings.TrimRight(c.config.BaseURL, "/") + "/chat/completions"
-	log.Printf("[OpenAI] POST %s, model=%s, msgs=%d, tools=%d, body_len=%d", url, req.Model, len(req.Messages), len(req.Tools), len(body))
+	logger.NewModule("OpenAI").Info("POST %s, model=%s, msgs=%d, tools=%d, body_len=%d", url, req.Model, len(req.Messages), len(req.Tools), len(body))
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -352,7 +353,7 @@ func (c *OpenAIClient) parseSSEStream(reader io.Reader, ch chan<- StreamMessage)
 		line := scanner.Text()
 
 		if firstLine {
-			log.Printf("[OpenAI] parseSSEStream: first line received (%d bytes)", len(line))
+			logger.NewModule("OpenAI").Info("parseSSEStream: first line received (%d bytes)", len(line))
 			firstLine = false
 		}
 
@@ -363,7 +364,7 @@ func (c *OpenAIClient) parseSSEStream(reader io.Reader, ch chan<- StreamMessage)
 		data := strings.TrimPrefix(line, "data: ")
 
 		if data == "[DONE]" {
-			log.Printf("[OpenAI] stream done: input_tokens=%d, output_tokens=%d, finish_reason=%s", inputTokens, outputTokens, finishReason)
+			logger.NewModule("OpenAI").Info("stream done: input_tokens=%d, output_tokens=%d, finish_reason=%s", inputTokens, outputTokens, finishReason)
 
 			// 把 map 按 index 排序转为 slice
 			toolCallsAcc := sortedToolCalls(toolCallsMap)
@@ -395,7 +396,7 @@ func (c *OpenAIClient) parseSSEStream(reader io.Reader, ch chan<- StreamMessage)
 
 		var event OpenAIChatStreamEvent
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
-			log.Printf("[OpenAI] stream: skipping malformed SSE line: %v", err)
+			logger.NewModule("OpenAI").Info("stream: skipping malformed SSE line: %v", err)
 			continue
 		}
 
@@ -448,7 +449,7 @@ func (c *OpenAIClient) parseSSEStream(reader io.Reader, ch chan<- StreamMessage)
 	}
 
 	if err := scanner.Err(); err != nil {
-		log.Printf("[OpenAI] stream scanner error: %v", err)
+		logger.NewModule("OpenAI").Info("stream scanner error: %v", err)
 		return &OpenAIClientError{StatusCode: 0, Message: err.Error(), Retryable: true, Type: "stream_error"}
 	}
 
@@ -570,8 +571,8 @@ func (c *OpenAIClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	models := make([]ModelInfo, len(result.Data))
 	for i, m := range result.Data {
 		models[i] = ModelInfo{
-			Name:      m.ID,
-			Model:     m.ID,
+			Name:       m.ID,
+			Model:      m.ID,
 			ModifiedAt: time.Unix(m.Created, 0).Format(time.RFC3339),
 		}
 	}
@@ -603,16 +604,16 @@ func (c *OpenAIClient) CheckHealth(ctx context.Context) *HealthStatus {
 func (c *OpenAIClient) ShowModel(ctx context.Context, modelName string) (int, error) {
 	// OpenAI /v1/models 不返回 context_length，用模型名匹配已知值
 	known := map[string]int{
-		"gpt-4o":        128000,
-		"gpt-4o-mini":   128000,
-		"gpt-4o-2024-11-20": 128000,
-		"gpt-4o-2024-05-13": 128000,
-		"gpt-4o-2024-08-06": 128000,
-		"gpt-4":                8192,
+		"gpt-4o":              128000,
+		"gpt-4o-mini":         128000,
+		"gpt-4o-2024-11-20":   128000,
+		"gpt-4o-2024-05-13":   128000,
+		"gpt-4o-2024-08-06":   128000,
+		"gpt-4":               8192,
 		"gpt-4-turbo":         128000,
-		"gpt-4-turbo-preview":  128000,
+		"gpt-4-turbo-preview": 128000,
 		"gpt-4-1106-preview":  128000,
-		"gpt-4-0613":           8192,
+		"gpt-4-0613":          8192,
 		"gpt-3.5-turbo":       16385,
 		"gpt-3.5-turbo-1106":  16385,
 		"gpt-3.5-turbo-16k":   16385,

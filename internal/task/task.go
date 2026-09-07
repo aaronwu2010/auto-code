@@ -32,16 +32,16 @@ func IsTerminalTaskStatus(status TaskStatus) bool {
 }
 
 type TaskState struct {
-	TaskID      types.TaskID `json:"task_id"`
-	Type        TaskType     `json:"type"`
-	Status      TaskStatus   `json:"status"`
-	Title       string       `json:"title"`
-	Description string       `json:"description"`
-	ActiveForm  string       `json:"active_form,omitempty"`
-	CreatedAt   time.Time    `json:"created_at"`
-	UpdatedAt   time.Time    `json:"updated_at"`
-	AgentID     types.AgentID `json:"agent_id,omitempty"`
-	Metadata    any          `json:"metadata,omitempty"`
+	TaskID      types.TaskID   `json:"task_id"`
+	Type        TaskType       `json:"type"`
+	Status      TaskStatus     `json:"status"`
+	Title       string         `json:"title"`
+	Description string         `json:"description"`
+	ActiveForm  string         `json:"active_form,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	AgentID     types.AgentID  `json:"agent_id,omitempty"`
+	Metadata    any            `json:"metadata,omitempty"`
 	BlockedBy   []types.TaskID `json:"blocked_by,omitempty"`
 }
 

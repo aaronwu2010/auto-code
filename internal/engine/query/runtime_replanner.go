@@ -3,11 +3,11 @@
 // 设计目标：发现路径不对时自动"擦掉后面几步"重新规划。
 //
 // 工作模式：
-//   1. 订阅 GoalTracker 的子任务状态变化
-//   2. 监听 CrossValidator / ReflectLoop / UncertaintyEngine 的触发事件
-//   3. 当发现子任务失败/阻塞时，分析是否可恢复/可重定向
-//   4. 通过修改 GoalTracker 的子任务状态来"擦掉"后面的坏计划
-//   5. 注入修正提示到下一轮 CallModel
+//  1. 订阅 GoalTracker 的子任务状态变化
+//  2. 监听 CrossValidator / ReflectLoop / UncertaintyEngine 的触发事件
+//  3. 当发现子任务失败/阻塞时，分析是否可恢复/可重定向
+//  4. 通过修改 GoalTracker 的子任务状态来"擦掉"后面的坏计划
+//  5. 注入修正提示到下一轮 CallModel
 //
 // 恢复策略：
 //   - Recoverable: 换参数重试（通知 ErrorHandler）
@@ -17,17 +17,18 @@ package query
 
 import (
 	"fmt"
-	"log"
 	"strings"
 	"sync"
+
+	"github.com/auto-code/auto-code/internal/pkg/logger"
 )
 
 // ReplannerConfig 重规划配置
 type ReplannerConfig struct {
-	Enabled              bool  // 总开关
-	MaxFailBeforeBlock   int   // 子任务连续失败多少次标记为 blocked
-	AutoSkipDependents   bool  // 前置 blocked 后自动跳过后续依赖任务
-	MaxReplansPerSession int   // 单次 session 最多重规划次数
+	Enabled              bool // 总开关
+	MaxFailBeforeBlock   int  // 子任务连续失败多少次标记为 blocked
+	AutoSkipDependents   bool // 前置 blocked 后自动跳过后续依赖任务
+	MaxReplansPerSession int  // 单次 session 最多重规划次数
 }
 
 // DefaultReplannerConfig 默认配置
@@ -55,7 +56,7 @@ type FailureAnalysis struct {
 type RecoveryStrategy string
 
 const (
-	StrategyRecoverable RecoveryStrategy = "recoverable" // 换参数重试
+	StrategyRecoverable  RecoveryStrategy = "recoverable"  // 换参数重试
 	StrategyRedirectable RecoveryStrategy = "redirectable" // 换方案
 	StrategyBlocked      RecoveryStrategy = "blocked"      // 无法自动恢复，需要用户
 	StrategySkip         RecoveryStrategy = "skip"         // 跳过，不影响主目标
@@ -63,9 +64,9 @@ const (
 
 // RuntimeReplanner 执行中动态重规划器
 type RuntimeReplanner struct {
-	cfg        ReplannerConfig
-	goal       *GoalTracker
-	planLock   int // 重规划次数
+	cfg      ReplannerConfig
+	goal     *GoalTracker
+	planLock int // 重规划次数
 
 	// 子任务连续失败计数
 	failCounts map[string]int
@@ -95,7 +96,7 @@ func (rp *RuntimeReplanner) OnSubtaskFailed(subtaskID string, errorMsg string) *
 	rp.failCounts[subtaskID]++
 	failCount := rp.failCounts[subtaskID]
 
-	log.Printf("[Replanner] subtask '%s' failed (%d times), analyzing...", subtaskID, failCount)
+	logger.NewModule("Replanner").Info("subtask '%s' failed (%d times), analyzing...", subtaskID, failCount)
 
 	subtask := rp.goal.FindSubtask(subtaskID)
 	if subtask == nil {
@@ -107,11 +108,11 @@ func (rp *RuntimeReplanner) OnSubtaskFailed(subtaskID string, errorMsg string) *
 	switch analysis.Strategy {
 	case StrategyRecoverable:
 		// 通知 ErrorHandler 自动重试（不修改子任务状态）
-		log.Printf("[Replanner] '%s': recoverable, will auto-retry", subtaskID)
+		logger.NewModule("Replanner").Info("'%s': recoverable, will auto-retry", subtaskID)
 
 	case StrategyRedirectable:
 		// 修改子任务描述，换个方案
-		log.Printf("[Replanner] '%s': redirecting to '%s'", subtaskID, truncateStr(analysis.Adjustment, 80))
+		logger.NewModule("Replanner").Info("'%s': redirecting to '%s'", subtaskID, truncateStr(analysis.Adjustment, 80))
 		rp.goal.SetSubtaskDescription(subtaskID, analysis.Adjustment)
 		// 重置状态为 pending
 		rp.goal.SetSubtaskStatus(subtaskID, TaskStatusPending)
@@ -120,7 +121,7 @@ func (rp *RuntimeReplanner) OnSubtaskFailed(subtaskID string, errorMsg string) *
 
 	case StrategyBlocked:
 		// 标记为 blocked，自动跳过依赖它的后续任务
-		log.Printf("[Replanner] '%s': blocked after %d failures", subtaskID, failCount)
+		logger.NewModule("Replanner").Info("'%s': blocked after %d failures", subtaskID, failCount)
 		rp.goal.SetSubtaskStatus(subtaskID, TaskStatusBlocked)
 		if rp.cfg.AutoSkipDependents {
 			rp.skipDependents(subtaskID)
@@ -128,7 +129,7 @@ func (rp *RuntimeReplanner) OnSubtaskFailed(subtaskID string, errorMsg string) *
 
 	case StrategySkip:
 		// 直接标记 done（相当于跳过）
-		log.Printf("[Replanner] '%s': skipping (blocked or non-critical)", subtaskID)
+		logger.NewModule("Replanner").Info("'%s': skipping (blocked or non-critical)", subtaskID)
 		rp.goal.SetSubtaskStatus(subtaskID, TaskStatusDone)
 		analysis.Skipped = true
 	}
@@ -334,7 +335,7 @@ func (rp *RuntimeReplanner) skipDependents(blockedID string) {
 		}
 		for _, dep := range st.DependsOn {
 			if dep == blockedID {
-				log.Printf("[Replanner] skipping dependent subtask '%s' (depends on blocked '%s')",
+				logger.NewModule("Replanner").Info("skipping dependent subtask '%s' (depends on blocked '%s')",
 					st.Description, blockedID)
 				rp.goal.SetSubtaskStatus(st.ID, TaskStatusDone)
 				rp.failCounts[st.ID] = rp.failCounts[st.ID] + 1

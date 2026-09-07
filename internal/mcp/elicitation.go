@@ -11,14 +11,14 @@ type ElicitationHandler struct {
 }
 
 type ElicitationRequest struct {
-	ServerName string         `json:"server_name"`
-	RequestID  any            `json:"request_id"`
-	Params     ElicitParams   `json:"params"`
+	ServerName string       `json:"server_name"`
+	RequestID  any          `json:"request_id"`
+	Params     ElicitParams `json:"params"`
 }
 
 type ElicitParams struct {
-	Message string         `json:"message"`
-	Fields  []ElicitField  `json:"requestedSchema,omitempty"`
+	Message string        `json:"message"`
+	Fields  []ElicitField `json:"requestedSchema,omitempty"`
 }
 
 type ElicitField struct {
@@ -29,8 +29,8 @@ type ElicitField struct {
 }
 
 type ElicitationResponse struct {
-	Action string            `json:"action"`
-	Content map[string]any   `json:"content,omitempty"`
+	Action  string         `json:"action"`
+	Content map[string]any `json:"content,omitempty"`
 }
 
 func NewElicitationHandler() *ElicitationHandler {

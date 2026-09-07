@@ -1,11 +1,12 @@
 package tools
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/auto-code/auto-code/internal/pkg/logger"
 )
 
 func expandPath(path string) string {
@@ -74,7 +75,7 @@ func EnsurePathInProjectDirectory(filePath string, toolCtx *ToolUseContext) stri
 
 	// 超出项目目录 → 打 warning 但不修改（截断文件名会破坏用户意图）
 	if !isPathWithinProject(absPath, projectDir) {
-		log.Printf("[PathSafety] path %q is outside project directory %q; using as-is", absPath, projectDir)
+		logger.NewModule("PathSafety").Info("path %q is outside project directory %q; using as-is", absPath, projectDir)
 	}
 
 	return absPath

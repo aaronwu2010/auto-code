@@ -1,4 +1,4 @@
-﻿package adddir
+package adddir
 
 import (
 	"context"

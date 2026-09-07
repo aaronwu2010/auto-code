@@ -27,11 +27,11 @@ const (
 
 // VerificationResult 单个 tool_call 的验证结果
 type VerificationResult struct {
-	Level       VerifyLevel `json:"level"`
-	ToolName    string      `json:"tool_name"`
-	Summary     string      `json:"summary"`
-	Suggestion  string      `json:"suggestion,omitempty"`
-	ExtractedExitCode *int  `json:"extracted_exit_code,omitempty"`
+	Level             VerifyLevel `json:"level"`
+	ToolName          string      `json:"tool_name"`
+	Summary           string      `json:"summary"`
+	Suggestion        string      `json:"suggestion,omitempty"`
+	ExtractedExitCode *int        `json:"extracted_exit_code,omitempty"`
 }
 
 var (

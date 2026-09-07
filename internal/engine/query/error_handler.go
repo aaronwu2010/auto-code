@@ -3,10 +3,11 @@ package query
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/auto-code/auto-code/internal/pkg/logger"
 )
 
 // ---- 错误分类 ----
@@ -26,10 +27,10 @@ const (
 
 type classifiedError struct {
 	category localErrorCategory
-	message  string   // 原始错误消息
-	suggest  string   // 给模型的建议（渲染到 tool message 里）
-	retry    bool     // 是否可以自动重试
-	maxRetry int      // 最多重试次数（当前固定 1）
+	message  string // 原始错误消息
+	suggest  string // 给模型的建议（渲染到 tool message 里）
+	retry    bool   // 是否可以自动重试
+	maxRetry int    // 最多重试次数（当前固定 1）
 }
 
 // classifyError 从 error 文本启发式识别错误类别 + 生成修复建议
@@ -277,5 +278,5 @@ func shouldAutoRetry(ce classifiedError, retryCount int) bool {
 // ---- 日志 ----
 
 func logErrorFix(category localErrorCategory, toolName string, action string) {
-	log.Printf("[L4-fix] category=%s tool=%s action=%s", category, toolName, action)
+	logger.NewModule("L4-fix").Info("category", "category", category, "tool", toolName, "action", action)
 }

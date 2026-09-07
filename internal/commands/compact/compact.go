@@ -1,4 +1,4 @@
-﻿package compact
+package compact
 
 import (
 	"context"

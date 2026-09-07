@@ -9,14 +9,14 @@ import (
 
 // TokenBudgetConfig token 预算配置
 type TokenBudgetConfig struct {
-	Enabled         bool  // 总开关
-	TotalBudget     int   // 总 token 预算（默认 180000，给 headroom）
-	SystemPct       int   // system prompt 占比（百分比）
-	WorkingMemPct   int   // working memory 占比
-	TaskGuidancePct int   // task guidance 占比
-	RecentToolsPct  int   // 最近工具调用占比
-	HistoryPct      int   // 历史摘要占比
-	CurrentTurnPct  int   // 当前 turn 占比
+	Enabled         bool // 总开关
+	TotalBudget     int  // 总 token 预算（默认 180000，给 headroom）
+	SystemPct       int  // system prompt 占比（百分比）
+	WorkingMemPct   int  // working memory 占比
+	TaskGuidancePct int  // task guidance 占比
+	RecentToolsPct  int  // 最近工具调用占比
+	HistoryPct      int  // 历史摘要占比
+	CurrentTurnPct  int  // 当前 turn 占比
 }
 
 // DefaultTokenBudgetConfig 默认配置（总和 = 100）

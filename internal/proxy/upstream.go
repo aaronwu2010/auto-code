@@ -11,11 +11,11 @@ import (
 )
 
 type UpstreamProxy struct {
-	mu       sync.RWMutex
-	target   *url.URL
-	proxy    *httputil.ReverseProxy
-	client   *http.Client
-	enabled  bool
+	mu      sync.RWMutex
+	target  *url.URL
+	proxy   *httputil.ReverseProxy
+	client  *http.Client
+	enabled bool
 }
 
 func NewUpstreamProxy(targetURL string) (*UpstreamProxy, error) {

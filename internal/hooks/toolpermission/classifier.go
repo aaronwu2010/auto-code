@@ -54,8 +54,8 @@ Rules:
 }
 
 type ToolClassifier struct {
-	config     ClassifierConfig
-	callModel  func(ctx context.Context, prompt string) (string, error)
+	config    ClassifierConfig
+	callModel func(ctx context.Context, prompt string) (string, error)
 }
 
 func NewToolClassifier(config ClassifierConfig, callModel func(ctx context.Context, prompt string) (string, error)) *ToolClassifier {
@@ -161,11 +161,11 @@ func parseClassifierResponse(response string) ClassifierResult {
 }
 
 type ClassifierState struct {
-	Enabled        bool
-	TotalCalls     int
+	Enabled             bool
+	TotalCalls          int
 	AllowedByClassifier int
 	DeniedByClassifier  int
-	SentToUser     int
+	SentToUser          int
 }
 
 func NewClassifierState() *ClassifierState {

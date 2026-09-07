@@ -1,11 +1,12 @@
 package sleep
 
 import (
-	"time"
 	"context"
 	"fmt"
-		"github.com/auto-code/auto-code/internal/tools"
-	)
+	"time"
+
+	"github.com/auto-code/auto-code/internal/tools"
+)
 
 const (
 	toolName        = "Sleep"

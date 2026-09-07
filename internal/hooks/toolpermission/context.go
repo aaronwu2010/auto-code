@@ -3,9 +3,9 @@ package toolpermission
 type PermissionBehavior string
 
 const (
-	PermissionAsk        PermissionBehavior = "ask"
-	PermissionDeny       PermissionBehavior = "deny"
-	PermissionAllow      PermissionBehavior = "allow"
+	PermissionAsk         PermissionBehavior = "ask"
+	PermissionDeny        PermissionBehavior = "deny"
+	PermissionAllow       PermissionBehavior = "allow"
 	PermissionPassthrough PermissionBehavior = "passthrough"
 )
 
@@ -39,8 +39,8 @@ type PermissionContext struct {
 	SessionID       string
 	IsInteractive   bool
 	DefaultBehavior PermissionBehavior
-	Resolved       chan PermissionDecision
-	resolved       bool
+	Resolved        chan PermissionDecision
+	resolved        bool
 }
 
 func NewPermissionContext(toolName string, toolInput map[string]interface{}, sessionID string, isInteractive bool, defaultBehavior PermissionBehavior) *PermissionContext {

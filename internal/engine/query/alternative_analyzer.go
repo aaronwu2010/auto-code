@@ -7,10 +7,10 @@ import (
 
 // AlternativeAnalyzerConfig 多方案比较器配置
 type AlternativeAnalyzerConfig struct {
-	Enabled              bool // 总开关
-	MinCrossValidatorIssues int // CrossValidator 最少问题数才触发（默认 2）
-	AutoSuggestThreshold float64 // 当置信度低于此值时，建议多方案比较（默认 0.7）
-	MaxAlternatives      int  // 建议最多几个备选方案（默认 3）
+	Enabled                 bool    // 总开关
+	MinCrossValidatorIssues int     // CrossValidator 最少问题数才触发（默认 2）
+	AutoSuggestThreshold    float64 // 当置信度低于此值时，建议多方案比较（默认 0.7）
+	MaxAlternatives         int     // 建议最多几个备选方案（默认 3）
 }
 
 // DefaultAlternativeAnalyzerConfig 默认配置
@@ -28,9 +28,9 @@ type AlternativeOption struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
-	RiskLevel   string   `json:"risk_level"`   // "low" | "medium" | "high"
-	Impact      string   `json:"impact"`       // 影响范围描述
-	Effort      string   `json:"effort"`       // 工作量描述
+	RiskLevel   string   `json:"risk_level"` // "low" | "medium" | "high"
+	Impact      string   `json:"impact"`     // 影响范围描述
+	Effort      string   `json:"effort"`     // 工作量描述
 	Pros        []string `json:"pros"`
 	Cons        []string `json:"cons"`
 	Confidence  float64  `json:"confidence"`
@@ -39,11 +39,11 @@ type AlternativeOption struct {
 
 // AlternativeReport 多方案分析报告
 type AlternativeReport struct {
-	ShouldCompare    bool                `json:"should_compare"`
-	TriggerReason    string              `json:"trigger_reason"`
-	Alternatives     []*AlternativeOption `json:"alternatives,omitempty"`
-	SuggestedPrompt  string              `json:"suggested_prompt"` // 给 LLM 的提示
-	Summary          string              `json:"summary"`          // 简短摘要（日志用）
+	ShouldCompare   bool                 `json:"should_compare"`
+	TriggerReason   string               `json:"trigger_reason"`
+	Alternatives    []*AlternativeOption `json:"alternatives,omitempty"`
+	SuggestedPrompt string               `json:"suggested_prompt"` // 给 LLM 的提示
+	Summary         string               `json:"summary"`          // 简短摘要（日志用）
 }
 
 // BuildPromptHint 把分析报告格式化成注入到 messages 的提示文本
@@ -187,7 +187,7 @@ func (aa *AlternativeAnalyzer) generateTemplateOptions() []*AlternativeOption {
 		{
 			ID:          "A",
 			Name:        "最小改动方案",
-			Description:  "尽量少改代码，风险最低",
+			Description: "尽量少改代码，风险最低",
 			RiskLevel:   "low",
 			Impact:      "局部范围",
 			Effort:      "小 (1-3 个文件)",

@@ -6,16 +6,16 @@ import (
 )
 
 type PermissionLogContext struct {
-	ToolName        string
-	ToolInput       map[string]interface{}
-	SessionID       string
-	Decision        PermissionBehavior
-	Source          string
-	Reason          string
-	Duration        time.Duration
-	IsCodeEditing   bool
-	FileName        string
-	EditType        string
+	ToolName      string
+	ToolInput     map[string]interface{}
+	SessionID     string
+	Decision      PermissionBehavior
+	Source        string
+	Reason        string
+	Duration      time.Duration
+	IsCodeEditing bool
+	FileName      string
+	EditType      string
 }
 
 func LogPermissionDecision(logCtx PermissionLogContext) {

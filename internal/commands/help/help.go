@@ -1,4 +1,4 @@
-﻿package help
+package help
 
 import (
 	"context"

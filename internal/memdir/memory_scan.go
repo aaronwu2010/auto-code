@@ -11,16 +11,16 @@ import (
 )
 
 const (
-	MaxMemoryFiles     = 200
+	MaxMemoryFiles      = 200
 	FrontmatterMaxLines = 30
 )
 
 type MemoryHeader struct {
-	Filename    string      `json:"filename"`
-	FilePath    string      `json:"file_path"`
-	MtimeMs     int64       `json:"mtime_ms"`
-	Description string      `json:"description,omitempty"`
-	Type        MemoryType  `json:"type,omitempty"`
+	Filename    string     `json:"filename"`
+	FilePath    string     `json:"file_path"`
+	MtimeMs     int64      `json:"mtime_ms"`
+	Description string     `json:"description,omitempty"`
+	Type        MemoryType `json:"type,omitempty"`
 }
 
 func ScanMemoryFiles(ctx context.Context, memoryDir string) ([]MemoryHeader, error) {

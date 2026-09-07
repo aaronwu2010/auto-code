@@ -1,4 +1,4 @@
-﻿package fileread
+package fileread
 
 import (
 	"context"

@@ -1,4 +1,4 @@
-﻿package planmode
+package planmode
 
 import (
 	"context"

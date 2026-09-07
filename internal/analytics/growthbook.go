@@ -8,25 +8,25 @@ import (
 type GrowthBookFeatureType string
 
 const (
-	FeatureTypeBool       GrowthBookFeatureType = "bool"
-	FeatureTypeString     GrowthBookFeatureType = "string"
-	FeatureTypeNumber     GrowthBookFeatureType = "number"
-	FeatureTypeJSON       GrowthBookFeatureType = "json"
+	FeatureTypeBool   GrowthBookFeatureType = "bool"
+	FeatureTypeString GrowthBookFeatureType = "string"
+	FeatureTypeNumber GrowthBookFeatureType = "number"
+	FeatureTypeJSON   GrowthBookFeatureType = "json"
 )
 
 type GrowthBookFeature struct {
-	ID             string                 `json:"id"`
-	DefaultValue   interface{}            `json:"defaultValue"`
-	CurrentValue   interface{}            `json:"currentValue"`
-	FeatureType    GrowthBookFeatureType  `json:"featureType"`
-	IsOverridden   bool                   `json:"isOverridden"`
+	ID           string                `json:"id"`
+	DefaultValue interface{}           `json:"defaultValue"`
+	CurrentValue interface{}           `json:"currentValue"`
+	FeatureType  GrowthBookFeatureType `json:"featureType"`
+	IsOverridden bool                  `json:"isOverridden"`
 }
 
 type GrowthBookUserAttributes struct {
-	ID             string `json:"id"`
-	Environment    string `json:"environment,omitempty"`
+	ID               string `json:"id"`
+	Environment      string `json:"environment,omitempty"`
 	SubscriptionType string `json:"subscriptionType,omitempty"`
-	OrganizationID string `json:"organizationId,omitempty"`
+	OrganizationID   string `json:"organizationId,omitempty"`
 }
 
 type GrowthBookService struct {

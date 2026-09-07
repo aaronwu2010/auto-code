@@ -13,12 +13,12 @@ import (
 )
 
 type HTTPTransport struct {
-	baseURL  string
-	client   *http.Client
-	mu       sync.Mutex
-	nextID   atomic.Int64
-	onNotif  func(*JSONRPCNotification)
-	headers  map[string]string
+	baseURL string
+	client  *http.Client
+	mu      sync.Mutex
+	nextID  atomic.Int64
+	onNotif func(*JSONRPCNotification)
+	headers map[string]string
 }
 
 func NewHTTPTransport(baseURL string) (*HTTPTransport, error) {

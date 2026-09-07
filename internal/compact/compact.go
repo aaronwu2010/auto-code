@@ -6,9 +6,9 @@ import (
 )
 
 type TimeBasedMCConfig struct {
-	Enabled         bool          `json:"enabled"`
-	MinInterval     time.Duration `json:"minInterval"`
-	MaxIdleTime     time.Duration `json:"maxIdleTime"`
+	Enabled     bool          `json:"enabled"`
+	MinInterval time.Duration `json:"minInterval"`
+	MaxIdleTime time.Duration `json:"maxIdleTime"`
 }
 
 var defaultTimeBasedMCConfig = TimeBasedMCConfig{
@@ -30,17 +30,17 @@ func EvaluateTimeBasedTrigger(lastCompactTime time.Time, config TimeBasedMCConfi
 }
 
 type SessionMemoryCompactConfig struct {
-	Enabled              bool  `json:"enabled"`
-	MaxMessagesToKeep    int   `json:"maxMessagesToKeep"`
+	Enabled                bool `json:"enabled"`
+	MaxMessagesToKeep      int  `json:"maxMessagesToKeep"`
 	PreserveSystemMessages bool `json:"preserveSystemMessages"`
-	PreserveLatestUser   bool  `json:"preserveLatestUser"`
+	PreserveLatestUser     bool `json:"preserveLatestUser"`
 }
 
 var DefaultSMCompactConfig = SessionMemoryCompactConfig{
-	Enabled:              true,
-	MaxMessagesToKeep:    10,
+	Enabled:                true,
+	MaxMessagesToKeep:      10,
 	PreserveSystemMessages: true,
-	PreserveLatestUser:   true,
+	PreserveLatestUser:     true,
 }
 
 var smCompactConfig = DefaultSMCompactConfig

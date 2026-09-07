@@ -1,4 +1,4 @@
-﻿package logout
+package logout
 
 import (
 	"context"

@@ -3,11 +3,11 @@ package engine
 import (
 	"context"
 	"fmt"
-	"log"
 	"sort"
 	"strings"
 
 	"github.com/auto-code/auto-code/internal/memory"
+	"github.com/auto-code/auto-code/internal/pkg/logger"
 	"github.com/auto-code/auto-code/internal/reflection"
 )
 
@@ -21,10 +21,10 @@ import (
 // 这样各层记忆不会彼此覆盖，而是合成一个最优集合。
 
 type MemoryOrchestrator struct {
-	longTerm    *memory.BaseLongTermMemory
-	reflector   *reflection.BaseReflector
-	maxTokens   int // 注入到 messages 的最大 token 预算（估算）
-	maxItems    int // 每层最多取多少条
+	longTerm  *memory.BaseLongTermMemory
+	reflector *reflection.BaseReflector
+	maxTokens int // 注入到 messages 的最大 token 预算（估算）
+	maxItems  int // 每层最多取多少条
 }
 
 // NewMemoryOrchestrator 创建 orchestrator。任一分层为 nil 时该层自动跳过。
@@ -39,10 +39,10 @@ func NewMemoryOrchestrator(ltm *memory.BaseLongTermMemory, reflector *reflection
 
 // memoryRecallItem 统一的召回条目
 type memoryRecallItem struct {
-	source   string // "experience" / "long_term" / "pending_lesson"
-	content  string
+	source    string // "experience" / "long_term" / "pending_lesson"
+	content   string
 	relevance float64 // 0-1 相关性
-	recency  float64 // 0-1 新近性
+	recency   float64 // 0-1 新近性
 }
 
 // Recall 统一召回：从 reflection pendingLessons + longTermMemory + reflector.ApplyExperience 取。
@@ -242,7 +242,7 @@ func alreadyInList(items []memoryRecallItem, id string) bool {
 // ---- 日志 ----
 
 func logOrchestratorRecall(itemCount int, sourceBreakdown map[string]int) {
-	log.Printf("[MemoryOrchestrator] recalled %d items: %v", itemCount, sourceBreakdown)
+	logger.NewModule("MemoryOrchestrator").Info("recalled %d items: %v", itemCount, sourceBreakdown)
 }
 
 // Store 快捷返回底层 ExperienceStore（从 reflector 拿）。

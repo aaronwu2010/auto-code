@@ -172,14 +172,14 @@ func (s *BaseSelfCorrector) Name() string {
 // GetStats 获取修正器统计信息
 func (s *BaseSelfCorrector) GetStats() map[string]interface{} {
 	return map[string]interface{}{
-		"total_suggestions":     s.totalSuggestions,
-		"successful_suggestions": s.successfulSuggCount,
-		"failed_suggestions":    s.failedSuggCount,
-		"total_validations":     s.totalValidations,
-		"validations_passed":    s.validCount,
-		"validations_failed":    s.invalidCount,
+		"total_suggestions":       s.totalSuggestions,
+		"successful_suggestions":  s.successfulSuggCount,
+		"failed_suggestions":      s.failedSuggCount,
+		"total_validations":       s.totalValidations,
+		"validations_passed":      s.validCount,
+		"validations_failed":      s.invalidCount,
 		"suggestion_success_rate": s.suggestionRate(),
-		"validation_pass_rate":  s.validationRate(),
+		"validation_pass_rate":    s.validationRate(),
 	}
 }
 

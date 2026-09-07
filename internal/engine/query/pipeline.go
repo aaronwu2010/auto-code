@@ -1,12 +1,12 @@
-﻿package query
+package query
 
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
+	"github.com/auto-code/auto-code/internal/pkg/logger"
 	"github.com/auto-code/auto-code/internal/tools"
 )
 
@@ -14,7 +14,7 @@ import (
 type OnFailureAction string
 
 const (
-	OnFailureAbort   OnFailureAction = "abort"   // 整个管道中止
+	OnFailureAbort    OnFailureAction = "abort"    // 整个管道中止
 	OnFailureContinue OnFailureAction = "continue" // 继续下一步（失败的结果传空值）
 	OnFailureRetry    OnFailureAction = "retry"    // 重试当前步骤 N 次
 )
@@ -23,55 +23,55 @@ const (
 type SuccessMode string
 
 const (
-	SuccessAllPass   SuccessMode = "all_pass"   // 所有步骤必须 pass
-	SuccessLastPass   SuccessMode = "last_pass"  // 只看最后一个步骤
+	SuccessAllPass  SuccessMode = "all_pass"  // 所有步骤必须 pass
+	SuccessLastPass SuccessMode = "last_pass" // 只看最后一个步骤
 )
 
 // PipelineStep 管道中的一个步骤
 type PipelineStep struct {
-	Name        string         `json:"name"`
-	Tool        string         `json:"tool"`
-	Args        map[string]any `json:"args"`
+	Name string         `json:"name"`
+	Tool string         `json:"tool"`
+	Args map[string]any `json:"args"`
 	// ArgsFrom: 从上一步的结果中抽取参数
 	// key=目标参数名, value=从哪个 step 的哪个字段取（"step_name.field" 或 "step_name" 取整个 output）
-	ArgsFrom    map[string]string `json:"args_from,omitempty"`
-	OnFailure   OnFailureAction    `json:"on_failure,omitempty"`
-	MaxRetries  int               `json:"max_retries,omitempty"`
+	ArgsFrom   map[string]string `json:"args_from,omitempty"`
+	OnFailure  OnFailureAction   `json:"on_failure,omitempty"`
+	MaxRetries int               `json:"max_retries,omitempty"`
 	// 是否允许这一步失败但仍算管道成功（比如 go vet 只是警告）
-	Optional    bool              `json:"optional,omitempty"`
+	Optional bool `json:"optional,omitempty"`
 }
 
 // PipelineSpec LLM 或程序内置的管道规格
 type PipelineSpec struct {
-	ID          string           `json:"id"`
-	Goal        string           `json:"goal"`
-	Steps       []PipelineStep   `json:"steps"`
-	SuccessMode SuccessMode      `json:"success_mode,omitempty"`
+	ID          string         `json:"id"`
+	Goal        string         `json:"goal"`
+	Steps       []PipelineStep `json:"steps"`
+	SuccessMode SuccessMode    `json:"success_mode,omitempty"`
 	// 总超时
-	Timeout     time.Duration    `json:"timeout,omitempty"`
+	Timeout time.Duration `json:"timeout,omitempty"`
 }
 
 // StepResult 单个步骤执行结果
 type StepResult struct {
-	Name       string
-	Tool       string
-	Passed     bool
-	Duration   time.Duration
-	Output     string
-	Error      string
+	Name     string
+	Tool     string
+	Passed   bool
+	Duration time.Duration
+	Output   string
+	Error    string
 	// 完整 tool result（供后续步骤 ArgsFrom 使用）
-	RawResult  *tools.ToolResult
-	Retries    int
+	RawResult *tools.ToolResult
+	Retries   int
 }
 
 // PipelineResult 管道整体结果
 type PipelineResult struct {
-	Pass        bool
-	SpecID      string
-	Steps       []StepResult
-	TotalTime   time.Duration
-	Summary     string // 汇总喂回 LLM
-	AbortedAt   string // 如果被 abort，记录在哪一步
+	Pass      bool
+	SpecID    string
+	Steps     []StepResult
+	TotalTime time.Duration
+	Summary   string // 汇总喂回 LLM
+	AbortedAt string // 如果被 abort，记录在哪一步
 }
 
 // PipelineExecutor 程序化管道执行器
@@ -134,7 +134,7 @@ func (e *PipelineExecutor) Run(ctx context.Context, spec PipelineSpec) PipelineR
 
 		if !sr.Passed && step.Optional {
 			// 可选步骤失败不影响
-			log.Printf("[Pipeline] optional step %q failed: %s", step.Name, sr.Error)
+			logger.NewModule("Pipeline").Info("optional step %q failed: %s", step.Name, sr.Error)
 		}
 
 		prevResults = append(prevResults, sr)
@@ -162,7 +162,7 @@ finalize:
 
 	// 构建 Summary
 	result.Summary = e.buildSummary(result, spec)
-	log.Printf("[Pipeline] %s: pass=%v, %d/%d steps, %.0fms",
+	logger.NewModule("Pipeline").Info("%s: pass=%v, %d/%d steps, %.0fms",
 		spec.ID, result.Pass, len(result.Steps), len(spec.Steps), float64(result.TotalTime)/float64(time.Millisecond))
 
 	return result
@@ -184,7 +184,7 @@ func (e *PipelineExecutor) runStep(ctx context.Context, step PipelineStep, prevR
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			sr.Retries = attempt
-			log.Printf("[Pipeline] retrying step %q (attempt %d/%d)", step.Name, attempt+1, maxAttempts)
+			logger.NewModule("Pipeline").Info("retrying step %q (attempt %d/%d)", step.Name, attempt+1, maxAttempts)
 			time.Sleep(200 * time.Millisecond)
 		}
 

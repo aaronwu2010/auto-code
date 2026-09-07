@@ -8,9 +8,9 @@ import (
 
 // FocusManagerConfig 注意力聚焦配置
 type FocusManagerConfig struct {
-	Enabled          bool // 总开关
-	MaxFocuses       int  // 最多维护几个焦点（默认 3）
-	DecayTurns       int  // 多少轮没推进就降级焦点（默认 3）
+	Enabled           bool // 总开关
+	MaxFocuses        int  // 最多维护几个焦点（默认 3）
+	DecayTurns        int  // 多少轮没推进就降级焦点（默认 3）
 	ReBoostOnProgress bool // 有进展时是否重新激活
 }
 
@@ -26,11 +26,11 @@ func DefaultFocusManagerConfig() FocusManagerConfig {
 
 // FocusItem 一个焦点
 type FocusItem struct {
-	ID          string  `json:"id"`
-	Description string  `json:"description"`
-	Source      string  `json:"source"`       // "goal" | "failure" | "hypothesis" | "custom"
-	Priority    float64 `json:"priority"`     // 0-1，越高越重要
-	TurnsSinceProgress int `json:"turns_since_progress"` // 多少轮没推进
+	ID                 string  `json:"id"`
+	Description        string  `json:"description"`
+	Source             string  `json:"source"`               // "goal" | "failure" | "hypothesis" | "custom"
+	Priority           float64 `json:"priority"`             // 0-1，越高越重要
+	TurnsSinceProgress int     `json:"turns_since_progress"` // 多少轮没推进
 }
 
 // FocusManager 注意力聚焦管理器（方案 D）

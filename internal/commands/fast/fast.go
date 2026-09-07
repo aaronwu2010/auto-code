@@ -1,4 +1,4 @@
-﻿package fast
+package fast
 
 import (
 	"context"

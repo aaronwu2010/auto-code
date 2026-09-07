@@ -1,4 +1,4 @@
-﻿package contextcmd
+package contextcmd
 
 import (
 	"context"

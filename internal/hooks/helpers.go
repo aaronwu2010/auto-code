@@ -7,7 +7,7 @@ import (
 )
 
 type FileChangedWatcher struct {
-	watchPaths map[string]bool
+	watchPaths  map[string]bool
 	envNotifier func(event HookEvent, paths []string)
 }
 

@@ -2,11 +2,11 @@ package state
 
 import (
 	"encoding/json"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
 
+	"github.com/auto-code/auto-code/internal/pkg/logger"
 	"github.com/auto-code/auto-code/internal/types"
 )
 
@@ -452,18 +452,18 @@ func (s *AppState) SetIsProcessing(processing bool) {
 // CompareAndSetIsProcessing 原子地检查当前状态并在匹配时设置新值。
 // 如果当前状态等于 expected，则设置为 new 并返回 true；否则返回 false。
 func (s *AppState) CompareAndSetIsProcessing(expected, new bool) bool {
-	log.Printf("[AppState] CompareAndSetIsProcessing: expected=%v, new=%v", expected, new)
+	logger.NewModule("AppState").Info("CompareAndSetIsProcessing: expected=%v, new=%v", expected, new)
 	s.mu.Lock()
 	if s.IsProcessing != expected {
 		s.mu.Unlock()
-		log.Printf("[AppState] CompareAndSetIsProcessing: mismatch (current=%v), returning false", s.IsProcessing)
+		logger.NewModule("AppState").Info("CompareAndSetIsProcessing: mismatch (current=%v), returning false", s.IsProcessing)
 		return false
 	}
 	s.IsProcessing = new
 	s.mu.Unlock()
-	log.Printf("[AppState] CompareAndSetIsProcessing: set to %v, emitting event", new)
+	logger.NewModule("AppState").Info("CompareAndSetIsProcessing: set to %v, emitting event", new)
 	s.emit(StateChangeEvent{Type: "processing_update", Value: new})
-	log.Printf("[AppState] CompareAndSetIsProcessing: done, returning true")
+	logger.NewModule("AppState").Info("CompareAndSetIsProcessing: done, returning true")
 	return true
 }
 

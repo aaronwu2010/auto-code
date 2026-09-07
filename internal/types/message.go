@@ -54,6 +54,7 @@ type FunctionCall struct {
 //   - OpenAI:    arguments 是 JSON string  "{\"filePath\":\"...\"}"
 //   - Ollama:    arguments 是 JSON object {"filePath":"..."}
 //   - LocalAI:   可能两者都有
+//
 // 用 json.RawMessage 保持原始格式，Marshal 时原样输出，两端兼容。
 func (fc *FunctionCall) UnmarshalJSON(data []byte) error {
 	var a struct {

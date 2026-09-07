@@ -9,14 +9,14 @@ import (
 type ErrorCode string
 
 const (
-	ErrCodeNotFound      ErrorCode = "NOT_FOUND"
-	ErrCodeInvalidInput  ErrorCode = "INVALID_INPUT"
-	ErrCodePermission    ErrorCode = "PERMISSION_DENIED"
-	ErrCodeTimeout       ErrorCode = "TIMEOUT"
-	ErrCodeInternal      ErrorCode = "INTERNAL_ERROR"
+	ErrCodeNotFound       ErrorCode = "NOT_FOUND"
+	ErrCodeInvalidInput   ErrorCode = "INVALID_INPUT"
+	ErrCodePermission     ErrorCode = "PERMISSION_DENIED"
+	ErrCodeTimeout        ErrorCode = "TIMEOUT"
+	ErrCodeInternal       ErrorCode = "INTERNAL_ERROR"
 	ErrCodeNotImplemented ErrorCode = "NOT_IMPLEMENTED"
-	ErrCodeUnavailable   ErrorCode = "SERVICE_UNAVAILABLE"
-	ErrCodeConflict      ErrorCode = "CONFLICT"
+	ErrCodeUnavailable    ErrorCode = "SERVICE_UNAVAILABLE"
+	ErrCodeConflict       ErrorCode = "CONFLICT"
 )
 
 // AppError 是应用程序的标准错误类型

@@ -22,9 +22,9 @@ const (
 
 // ToolSelectorConfig 工具筛选器配置
 type ToolSelectorConfig struct {
-	Enabled        bool   // 总开关
-	MaxTools       int    // 最多传递给 LLM 的工具数（默认 12）
-	MinTools       int    // 最少保证的工具数（默认 5）
+	Enabled            bool   // 总开关
+	MaxTools           int    // 最多传递给 LLM 的工具数（默认 12）
+	MinTools           int    // 最少保证的工具数（默认 5）
 	DefaultProjectLang string // 默认项目语言（可选，自动检测优先）
 }
 
@@ -147,11 +147,11 @@ func (ts *ToolSelector) scoreTool(t tools.Tool, taskType TaskType, projectFileEx
 
 	// 2. 必选工具集（无论什么任务都非常有用）
 	essentialTools := map[string]float64{
-		"read":     50,
-		"edit":     45,
-		"glob":     40,
-		"grep":     45,
-		"bash":     40,
+		"read":       50,
+		"edit":       45,
+		"glob":       40,
+		"grep":       45,
+		"bash":       40,
 		"powershell": 40,
 	}
 	if bonus, ok := essentialTools[name]; ok {
@@ -180,12 +180,12 @@ func (ts *ToolSelector) taskTypeBonus(name string, taskType TaskType) float64 {
 	case TaskTypeDebug:
 		// Debug 更需要：读文件、跑测试、搜日志
 		debugTools := map[string]float64{
-			"read":    25,
-			"grep":    30,
-			"bash":    25,
-			"glob":    15,
-			"edit":    10,
-			"agent":   10, // 可以派 sub-agent 深入探索
+			"read":  25,
+			"grep":  30,
+			"bash":  25,
+			"glob":  15,
+			"edit":  10,
+			"agent": 10, // 可以派 sub-agent 深入探索
 		}
 		if bonus, ok := debugTools[name]; ok {
 			return bonus
@@ -194,11 +194,11 @@ func (ts *ToolSelector) taskTypeBonus(name string, taskType TaskType) float64 {
 	case TaskTypeFeature:
 		// 新功能更需要：理解代码、编辑
 		featureTools := map[string]float64{
-			"read":    20,
-			"edit":    30,
-			"write":   25,
-			"glob":    20,
-			"grep":    15,
+			"read":  20,
+			"edit":  30,
+			"write": 25,
+			"glob":  20,
+			"grep":  15,
 		}
 		if bonus, ok := featureTools[name]; ok {
 			return bonus
@@ -206,11 +206,11 @@ func (ts *ToolSelector) taskTypeBonus(name string, taskType TaskType) float64 {
 
 	case TaskTypeRefactor:
 		refactorTools := map[string]float64{
-			"read":    25,
-			"edit":    30,
-			"grep":    25,
-			"glob":    15,
-			"bash":    15,
+			"read": 25,
+			"edit": 30,
+			"grep": 25,
+			"glob": 15,
+			"bash": 15,
 		}
 		if bonus, ok := refactorTools[name]; ok {
 			return bonus
@@ -218,9 +218,9 @@ func (ts *ToolSelector) taskTypeBonus(name string, taskType TaskType) float64 {
 
 	case TaskTypeExplain:
 		explainTools := map[string]float64{
-			"read":    30,
-			"grep":    25,
-			"glob":    20,
+			"read": 30,
+			"grep": 25,
+			"glob": 20,
 		}
 		if bonus, ok := explainTools[name]; ok {
 			return bonus
@@ -228,10 +228,10 @@ func (ts *ToolSelector) taskTypeBonus(name string, taskType TaskType) float64 {
 
 	case TaskTypeBuild:
 		buildTools := map[string]float64{
-			"bash":    35,
-			"read":    15,
-			"edit":    15,
-			"glob":    10,
+			"bash": 35,
+			"read": 15,
+			"edit": 15,
+			"glob": 10,
 		}
 		if bonus, ok := buildTools[name]; ok {
 			return bonus
@@ -239,10 +239,10 @@ func (ts *ToolSelector) taskTypeBonus(name string, taskType TaskType) float64 {
 
 	case TaskTypePerformance:
 		perfTools := map[string]float64{
-			"bash":    30,
-			"grep":    25,
-			"read":    20,
-			"agent":   15, // sub-agent 可以并行做基准测试
+			"bash":  30,
+			"grep":  25,
+			"read":  20,
+			"agent": 15, // sub-agent 可以并行做基准测试
 		}
 		if bonus, ok := perfTools[name]; ok {
 			return bonus

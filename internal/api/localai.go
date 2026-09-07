@@ -7,11 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/auto-code/auto-code/internal/pkg/logger"
 	"github.com/auto-code/auto-code/internal/types"
 )
 
@@ -71,11 +71,11 @@ func (c *LocalAIClient) SetModel(model string) {
 }
 
 type LocalAIMessage struct {
-	Role      string          `json:"role"`
-	Content   string          `json:"content"`
+	Role      string           `json:"role"`
+	Content   string           `json:"content"`
 	ToolCalls []types.ToolCall `json:"tool_calls,omitempty"`
-	Images    []string        `json:"images,omitempty"`
-	Extra     json.RawMessage `json:"-"`
+	Images    []string         `json:"images,omitempty"`
+	Extra     json.RawMessage  `json:"-"`
 }
 
 type LocalAIToolDef struct {
@@ -190,7 +190,7 @@ func (c *LocalAIClient) ChatWithStreaming(ctx context.Context, req LocalAIChatRe
 				if delay > rc.MaxDelay {
 					delay = rc.MaxDelay
 				}
-				log.Printf("[LocalAI] retry attempt %d after %v delay", attempts, delay)
+				logger.NewModule("LocalAI").Info("retry attempt %d after %v delay", attempts, delay)
 				select {
 				case <-ctx.Done():
 					ch <- StreamMessage{Type: "error", Error: ctx.Err()}
@@ -215,7 +215,7 @@ func (c *LocalAIClient) ChatWithStreaming(ctx context.Context, req LocalAIChatRe
 				return
 			}
 
-			log.Printf("[LocalAI] stream attempt %d failed (will retry): %v", attempts, err)
+			logger.NewModule("LocalAI").Info("stream attempt %d failed (will retry): %v", attempts, err)
 			attempts++
 			if attempts > rc.MaxRetries {
 				ch <- StreamMessage{
@@ -278,7 +278,7 @@ func (c *LocalAIClient) executeChatStream(ctx context.Context, req LocalAIChatRe
 	}
 
 	url := c.config.BaseURL + "/v1/chat/completions"
-	log.Printf("[LocalAI] POST %s, model=%s, msgs=%d, tools=%d, body_len=%d", url, req.Model, len(req.Messages), len(req.Tools), len(body))
+	logger.NewModule("LocalAI").Info("POST %s, model=%s, msgs=%d, tools=%d, body_len=%d", url, req.Model, len(req.Messages), len(req.Tools), len(body))
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -321,7 +321,7 @@ func (c *LocalAIClient) parseSSEStream(reader io.Reader, ch chan<- StreamMessage
 		line := scanner.Text()
 
 		if firstLine {
-			log.Printf("[LocalAI] parseSSEStream: first line received (%d bytes)", len(line))
+			logger.NewModule("LocalAI").Info("parseSSEStream: first line received (%d bytes)", len(line))
 			firstLine = false
 		}
 
@@ -332,7 +332,7 @@ func (c *LocalAIClient) parseSSEStream(reader io.Reader, ch chan<- StreamMessage
 		data := strings.TrimPrefix(line, "data: ")
 
 		if data == "[DONE]" {
-			log.Printf("[LocalAI] stream done: input_tokens=%d, output_tokens=%d, finish_reason=%s", inputTokens, outputTokens, finishReason)
+			logger.NewModule("LocalAI").Info("stream done: input_tokens=%d, output_tokens=%d, finish_reason=%s", inputTokens, outputTokens, finishReason)
 
 			toolCallsAcc := sortedToolCalls(toolCallsMap)
 			if len(toolCallsAcc) > 0 {
@@ -362,7 +362,7 @@ func (c *LocalAIClient) parseSSEStream(reader io.Reader, ch chan<- StreamMessage
 
 		var event LocalAIChatStreamEvent
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
-			log.Printf("[LocalAI] stream: skipping malformed SSE line: %v", err)
+			logger.NewModule("LocalAI").Info("stream: skipping malformed SSE line: %v", err)
 			continue
 		}
 
@@ -399,7 +399,7 @@ func (c *LocalAIClient) parseSSEStream(reader io.Reader, ch chan<- StreamMessage
 	}
 
 	if err := scanner.Err(); err != nil {
-		log.Printf("[LocalAI] stream scanner error: %v", err)
+		logger.NewModule("LocalAI").Info("stream scanner error: %v", err)
 		return &LocalAIClientError{StatusCode: 0, Message: err.Error(), Retryable: true}
 	}
 
@@ -677,8 +677,8 @@ func (c *LocalAIClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	models := make([]ModelInfo, len(result.Data))
 	for i, m := range result.Data {
 		models[i] = ModelInfo{
-			Name:      m.ID,
-			Model:     m.ID,
+			Name:       m.ID,
+			Model:      m.ID,
 			ModifiedAt: time.Unix(m.Created, 0).Format(time.RFC3339),
 		}
 	}

@@ -231,9 +231,9 @@ func (c *AudioCapture) GetBackend() RecordingBackend {
 }
 
 type VoiceDependencies struct {
-	Available     bool
-	Missing       []string
-	InstallCmd    string
+	Available  bool
+	Missing    []string
+	InstallCmd string
 }
 
 func CheckVoiceDependencies() VoiceDependencies {

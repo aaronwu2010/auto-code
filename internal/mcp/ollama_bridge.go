@@ -104,7 +104,7 @@ func (b *OllamaBridge) GatherAllToolDefinitions() []api.ToolFunction {
 			funcs = append(funcs, api.ToolFunction{
 				Name:        fmt.Sprintf("%s__%s", serverName, tool.Name),
 				Description: tool.Description,
-				Parameters:  map[string]any{
+				Parameters: map[string]any{
 					"type":       "object",
 					"properties": params,
 				},

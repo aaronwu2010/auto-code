@@ -31,9 +31,9 @@ import (
 
 // CrossValidator 多角度交叉验证器
 type CrossValidator struct {
-	enabled     bool
-	timeout     time.Duration
-	projectDir  string
+	enabled    bool
+	timeout    time.Duration
+	projectDir string
 
 	// 验证器注册表
 	validators []Validator
@@ -52,7 +52,7 @@ type Validator interface {
 // ValidationTarget 验证目标
 // 可以是文件内容 diff，也可以是 tool 执行轨迹
 type ValidationTarget struct {
-	FilesChanged    []FileChange   // 修改/新增的文件
+	FilesChanged    []FileChange     // 修改/新增的文件
 	ToolTrace       []ToolTraceEntry // 工具执行轨迹（可选）
 	ProjectDir      string
 	PreviousContent map[string]string // 文件修改前内容（可选，key=path）
@@ -61,11 +61,11 @@ type ValidationTarget struct {
 
 // FileChange 文件变更
 type FileChange struct {
-	Path    string
-	IsNew   bool
+	Path     string
+	IsNew    bool
 	IsDelete bool
-	Content string // 当前文件内容（用于快速检查）
-	Ext     string // 文件扩展名（小写）
+	Content  string // 当前文件内容（用于快速检查）
+	Ext      string // 文件扩展名（小写）
 }
 
 // ToolTraceEntry 工具执行记录
@@ -88,13 +88,13 @@ type ValidationReport struct {
 
 // ValidationIssue 单个问题
 type ValidationIssue struct {
-	Severity  IssueSeverity // critical/high/medium/low
-	Category  string        // "logic" / "security" / "performance" / "consequence"
-	File      string        // 关联文件（空=全局）
-	Line      int           // 行号（0=未知）
-	Message   string        // 问题描述
-	Evidence  string        // 代码片段或证据
-	FixHint   string        // 修复建议
+	Severity IssueSeverity // critical/high/medium/low
+	Category string        // "logic" / "security" / "performance" / "consequence"
+	File     string        // 关联文件（空=全局）
+	Line     int           // 行号（0=未知）
+	Message  string        // 问题描述
+	Evidence string        // 代码片段或证据
+	FixHint  string        // 修复建议
 }
 
 // IssueSeverity 问题严重度
@@ -109,17 +109,17 @@ const (
 
 // CrossValidationResult 整体验证结果
 type CrossValidationResult struct {
-	OverallPass        bool                  // 无 critical/high 问题
-	SeverestIssue      IssueSeverity         // 最严重问题级别
-	Reports            []*ValidationReport
-	CriticalCount      int
-	HighCount          int
-	MediumCount        int
-	LowCount           int
-	TotalDuration      time.Duration
-	ProjectDir         string
-	FilesChecked       int
-	SkippedValidators  []string
+	OverallPass       bool          // 无 critical/high 问题
+	SeverestIssue     IssueSeverity // 最严重问题级别
+	Reports           []*ValidationReport
+	CriticalCount     int
+	HighCount         int
+	MediumCount       int
+	LowCount          int
+	TotalDuration     time.Duration
+	ProjectDir        string
+	FilesChecked      int
+	SkippedValidators []string
 }
 
 // NewCrossValidator 创建 CrossValidator

@@ -18,12 +18,12 @@ import (
 )
 
 type RemoteSessionManager struct {
-	mu        sync.RWMutex
-	ctx       context.Context
-	cancel    context.CancelFunc
-	sessions  map[string]*RemoteSession
-	url       string
-	status    ConnectionStatus
+	mu         sync.RWMutex
+	ctx        context.Context
+	cancel     context.CancelFunc
+	sessions   map[string]*RemoteSession
+	url        string
+	status     ConnectionStatus
 	httpClient *http.Client
 }
 
@@ -45,9 +45,9 @@ type RemoteSession struct {
 
 func NewRemoteSessionManager(url string) *RemoteSessionManager {
 	return &RemoteSessionManager{
-		sessions:  make(map[string]*RemoteSession),
-		url:       url,
-		status:    StatusConnecting,
+		sessions:   make(map[string]*RemoteSession),
+		url:        url,
+		status:     StatusConnecting,
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }

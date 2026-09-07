@@ -1,4 +1,4 @@
-﻿package exit
+package exit
 
 import (
 	"context"

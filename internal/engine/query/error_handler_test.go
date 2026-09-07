@@ -7,9 +7,9 @@ import (
 
 func TestClassifyError(t *testing.T) {
 	tests := []struct {
-		name     string
-		errMsg   string
-		wantCat  localErrorCategory
+		name      string
+		errMsg    string
+		wantCat   localErrorCategory
 		wantRetry bool
 	}{
 		// External

@@ -11,10 +11,10 @@ import (
 // BaseInputProcessor 基础输入处理器
 // 提供通用的文本输入处理功能
 type BaseInputProcessor struct {
-	name          string
+	name           string
 	supportedTypes []InputType
-	config        *PerceptionConfig
-	mu            sync.RWMutex
+	config         *PerceptionConfig
+	mu             sync.RWMutex
 
 	// 统计信息
 	totalProcessed int64

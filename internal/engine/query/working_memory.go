@@ -10,22 +10,22 @@ import (
 
 // FileSummary 已读文件的摘要信息
 type FileSummary struct {
-	FilePath    string // 绝对路径
-	SizeBytes   int    // 原始文件大小
-	LineCount   int    // 总行数
-	Ext         string // 文件扩展名（小写）
-	TopSymbols  []string // 顶层符号（函数/类/var 声明，最多 10 个）
-	KeyPatterns []string // 常见模式（import/package/module 声明，go func, ts export 等）
-	ReadCount   int      // 被 Read 的次数
-	LastReadTurn int     // 最后一次 Read 的 turn
+	FilePath     string   // 绝对路径
+	SizeBytes    int      // 原始文件大小
+	LineCount    int      // 总行数
+	Ext          string   // 文件扩展名（小写）
+	TopSymbols   []string // 顶层符号（函数/类/var 声明，最多 10 个）
+	KeyPatterns  []string // 常见模式（import/package/module 声明，go func, ts export 等）
+	ReadCount    int      // 被 Read 的次数
+	LastReadTurn int      // 最后一次 Read 的 turn
 }
 
 // ChangeSummary 最近修改的摘要
 type ChangeSummary struct {
-	FilePath     string
-	ChangeDesc   string // "第42行: x→y" / "新增 Route('/health')" 等
-	ToolName     string // 执行修改的工具（edit/write）
-	TurnNum      int    // 在哪一轮改的
+	FilePath   string
+	ChangeDesc string // "第42行: x→y" / "新增 Route('/health')" 等
+	ToolName   string // 执行修改的工具（edit/write）
+	TurnNum    int    // 在哪一轮改的
 }
 
 // WorkingMemory 工作记忆（优化 2）
@@ -41,11 +41,11 @@ type ChangeSummary struct {
 type WorkingMemory struct {
 	mu sync.Mutex
 
-	files       map[string]*FileSummary // key = 绝对路径
-	changes     []ChangeSummary         // 最近 N 条修改
-	maxChanges  int                     // 最多保留多少条修改
-	maxFiles    int                     // 最多跟踪多少个文件
-	turnCount   int                     // 当前 turn（外部需要 Tick）
+	files      map[string]*FileSummary // key = 绝对路径
+	changes    []ChangeSummary         // 最近 N 条修改
+	maxChanges int                     // 最多保留多少条修改
+	maxFiles   int                     // 最多跟踪多少个文件
+	turnCount  int                     // 当前 turn（外部需要 Tick）
 }
 
 // NewWorkingMemory 创建 WorkingMemory

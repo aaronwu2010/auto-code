@@ -164,50 +164,50 @@ type PerceptionManager interface {
 // PerceptionConfig 感知层配置
 type PerceptionConfig struct {
 	// 基础配置
-	Enabled           bool   `json:"enabled"`            // 是否启用
-	Name              string `json:"name"`               // 感知层名称
+	Enabled bool   `json:"enabled"` // 是否启用
+	Name    string `json:"name"`    // 感知层名称
 
 	// 处理器配置
-	Processors        []string `json:"processors"`        // 处理器列表
-	DefaultProcessor  string   `json:"default_processor"` // 默认处理器
+	Processors       []string `json:"processors"`        // 处理器列表
+	DefaultProcessor string   `json:"default_processor"` // 默认处理器
 
 	// 过滤器配置
-	Filters           []string `json:"filters"`           // 过滤器列表
-	EnableFiltering   bool     `json:"enable_filtering"`  // 是否启用过滤
+	Filters         []string `json:"filters"`          // 过滤器列表
+	EnableFiltering bool     `json:"enable_filtering"` // 是否启用过滤
 
 	// 上下文注入器配置
-	Injectors         []string `json:"injectors"`         // 注入器列表
-	EnableInjection   bool     `json:"enable_injection"`  // 是否启用注入
+	Injectors       []string `json:"injectors"`        // 注入器列表
+	EnableInjection bool     `json:"enable_injection"` // 是否启用注入
 
 	// 多模态配置
 	MultimodalHandlers []string `json:"multimodal_handlers"` // 多模态处理器列表
 	EnableMultimodal   bool     `json:"enable_multimodal"`   // 是否启用多模态
 
 	// 性能配置
-	MaxConcurrency    int      `json:"max_concurrency"`    // 最大并发数
-	Timeout           int      `json:"timeout"`            // 超时时间（秒）
-	BufferSize        int      `json:"buffer_size"`        // 缓冲区大小
+	MaxConcurrency int `json:"max_concurrency"` // 最大并发数
+	Timeout        int `json:"timeout"`         // 超时时间（秒）
+	BufferSize     int `json:"buffer_size"`     // 缓冲区大小
 
 	// 缓存配置
-	EnableCache       bool     `json:"enable_cache"`       // 是否启用缓存
-	CacheSize         int      `json:"cache_size"`         // 缓存大小
-	CacheTTL          int      `json:"cache_ttl"`          // 缓存过期时间（秒）
+	EnableCache bool `json:"enable_cache"` // 是否启用缓存
+	CacheSize   int  `json:"cache_size"`   // 缓存大小
+	CacheTTL    int  `json:"cache_ttl"`    // 缓存过期时间（秒）
 }
 
 // DefaultPerceptionConfig 返回默认配置
 func DefaultPerceptionConfig() *PerceptionConfig {
 	return &PerceptionConfig{
-		Enabled:           true,
-		Name:              "default_perception",
-		EnableFiltering:   true,
-		EnableInjection:   true,
-		EnableMultimodal:  false,
-		MaxConcurrency:    10,
-		Timeout:           30,
-		BufferSize:        1000,
-		EnableCache:       true,
-		CacheSize:         1000,
-		CacheTTL:          300,
+		Enabled:          true,
+		Name:             "default_perception",
+		EnableFiltering:  true,
+		EnableInjection:  true,
+		EnableMultimodal: false,
+		MaxConcurrency:   10,
+		Timeout:          30,
+		BufferSize:       1000,
+		EnableCache:      true,
+		CacheSize:        1000,
+		CacheTTL:         300,
 	}
 }
 

@@ -9,17 +9,17 @@ import (
 
 // PerceptionManagerImpl 感知层管理器实现
 type PerceptionManagerImpl struct {
-	config           *PerceptionConfig
-	processors       map[string]InputProcessor
-	filters          map[string]SignalFilter
-	injectors        map[string]ContextInjector
+	config             *PerceptionConfig
+	processors         map[string]InputProcessor
+	filters            map[string]SignalFilter
+	injectors          map[string]ContextInjector
 	multimodalHandlers map[string]MultimodalHandler
 
 	defaultProcessor string
 	defaultFilter    string
 	defaultInjector  string
 
-	mu       sync.RWMutex
+	mu sync.RWMutex
 
 	// 统计信息
 	metrics *Metrics

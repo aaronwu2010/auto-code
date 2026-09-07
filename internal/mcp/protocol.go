@@ -15,10 +15,10 @@ type JSONRPCRequest struct {
 }
 
 type JSONRPCResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      any             `json:"id,omitempty"`
-	Result  any             `json:"result,omitempty"`
-	Error   *JSONRPCError   `json:"error,omitempty"`
+	JSONRPC string        `json:"jsonrpc"`
+	ID      any           `json:"id,omitempty"`
+	Result  any           `json:"result,omitempty"`
+	Error   *JSONRPCError `json:"error,omitempty"`
 }
 
 type JSONRPCError struct {
@@ -118,11 +118,11 @@ type InitializeResult struct {
 }
 
 type ServerCapabilities struct {
-	Tools       *ToolsCapability       `json:"tools,omitempty"`
-	Resources   *ResourcesCapability   `json:"resources,omitempty"`
-	Prompts     *PromptsCapability     `json:"prompts,omitempty"`
-	Logging     *LoggingCapability     `json:"logging,omitempty"`
-	Experimental map[string]any        `json:"experimental,omitempty"`
+	Tools        *ToolsCapability     `json:"tools,omitempty"`
+	Resources    *ResourcesCapability `json:"resources,omitempty"`
+	Prompts      *PromptsCapability   `json:"prompts,omitempty"`
+	Logging      *LoggingCapability   `json:"logging,omitempty"`
+	Experimental map[string]any       `json:"experimental,omitempty"`
 }
 
 type ToolsCapability struct {
@@ -152,8 +152,8 @@ type ToolDefinition struct {
 }
 
 type ToolsListResult struct {
-	Tools       []ToolDefinition `json:"tools"`
-	NextCursor  string           `json:"nextCursor,omitempty"`
+	Tools      []ToolDefinition `json:"tools"`
+	NextCursor string           `json:"nextCursor,omitempty"`
 }
 
 type ToolCallParams struct {
@@ -167,9 +167,9 @@ type ToolCallResult struct {
 }
 
 type ToolContent struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
-	Data string `json:"data,omitempty"`
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	Data     string `json:"data,omitempty"`
 	MIMEType string `json:"mimeType,omitempty"`
 }
 

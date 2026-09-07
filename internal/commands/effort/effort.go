@@ -1,4 +1,4 @@
-﻿package effort
+package effort
 
 import (
 	"context"

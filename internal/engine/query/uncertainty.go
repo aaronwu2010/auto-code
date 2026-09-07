@@ -17,11 +17,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/auto-code/auto-code/internal/pkg/logger"
 )
 
 // ConfidenceScore 置信度评估结果
@@ -36,26 +37,26 @@ type ConfidenceScore struct {
 type ConfidenceLevel string
 
 const (
-	ConfidenceHigh   ConfidenceLevel = "high"   // >0.7：可以继续
-	ConfidenceMedium ConfidenceLevel = "medium" // 0.4~0.7：轻量验证
-	ConfidenceLow    ConfidenceLevel = "low"    // <0.4：主动搜索
+	ConfidenceHigh   ConfidenceLevel = "high"    // >0.7：可以继续
+	ConfidenceMedium ConfidenceLevel = "medium"  // 0.4~0.7：轻量验证
+	ConfidenceLow    ConfidenceLevel = "low"     // <0.4：主动搜索
 	ConfidenceUnk    ConfidenceLevel = "unknown" // 无法评估
 )
 
 type SuggestedAction string
 
 const (
-	ActionContinue     SuggestedAction = "continue"          // 直接继续
-	ActionLightVerify  SuggestedAction = "light_verify"      // 追加轻量验证
-	ActionProbe        SuggestedAction = "proactive_probe"  // 强制主动探索
-	ActionAskUser      SuggestedAction = "ask_user"         // 需要用户决策
+	ActionContinue    SuggestedAction = "continue"        // 直接继续
+	ActionLightVerify SuggestedAction = "light_verify"    // 追加轻量验证
+	ActionProbe       SuggestedAction = "proactive_probe" // 强制主动探索
+	ActionAskUser     SuggestedAction = "ask_user"        // 需要用户决策
 )
 
 // KnowledgeGap 检测到的知识缺口
 type KnowledgeGap struct {
-	Topic       string // 哪个主题信息不足
-	Evidence    string // 证据（如 tool result 为空、文件找不到）
-	Suggestion  string // 建议如何填补（如 "Grep for 'X'"）
+	Topic      string // 哪个主题信息不足
+	Evidence   string // 证据（如 tool result 为空、文件找不到）
+	Suggestion string // 建议如何填补（如 "Grep for 'X'"）
 }
 
 // UncertaintyEngine 不确定性感知引擎
@@ -73,8 +74,8 @@ type UncertaintyEngine struct {
 func NewUncertaintyEngine(enabled bool, projectDir string) *UncertaintyEngine {
 	return &UncertaintyEngine{
 		enabled:    enabled,
-		minConf:    0.7,  // < 0.7 = 轻量验证
-		probeConf:  0.4,  // < 0.4 = 主动探索
+		minConf:    0.7, // < 0.7 = 轻量验证
+		probeConf:  0.4, // < 0.4 = 主动探索
 		timeout:    3 * time.Second,
 		projectDir: projectDir,
 	}
@@ -206,7 +207,7 @@ func (ue *UncertaintyEngine) ScoreAnswer(answerText string) *ConfidenceScore {
 
 	// 规则 3：有硬编码值但没解释来源
 	hardcodedPatterns := []string{
-		`\b\d{3,}\b`, // 3位以上数字常量
+		`\b\d{3,}\b`,     // 3位以上数字常量
 		`0x[0-9a-f]{6,}`, // 十六进制常量
 	}
 	for _, pat := range hardcodedPatterns {
@@ -396,11 +397,11 @@ func (ue *UncertaintyEngine) LogScore(source string, score *ConfidenceScore) {
 	if score == nil {
 		return
 	}
-	log.Printf("[Uncertainty] %s: score=%.2f level=%s action=%s",
+	logger.NewModule("Uncertainty").Info("%s: score=%.2f level=%s action=%s",
 		source, score.Score, score.Level, score.SuggestedAction)
 	if len(score.Reasons) > 0 {
 		for _, r := range score.Reasons {
-			log.Printf("[Uncertainty]   reason: %s", r)
+			logger.NewModule("Uncertainty").Info("reason: %s", r)
 		}
 	}
 

@@ -7,9 +7,9 @@ import (
 )
 
 type MCPServer struct {
-	mu         sync.RWMutex
-	manager    *ConnectionManager
-	config     ServerConfig
+	mu      sync.RWMutex
+	manager *ConnectionManager
+	config  ServerConfig
 }
 
 func NewMCPServer() (*MCPServer, error) {

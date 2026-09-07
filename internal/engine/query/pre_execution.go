@@ -3,7 +3,6 @@ package query
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,18 +12,20 @@ import (
 	"sync"
 	"time"
 	"unicode"
+
+	"github.com/auto-code/auto-code/internal/pkg/logger"
 )
 
 // LandscaperConfig Landscaper 配置
 type LandscaperConfig struct {
-	Enabled         bool          // 总开关
-	Timeout         time.Duration // 扫描总超时
-	MaxFiles        int           // 最多扫描文件数
-	MaxFileSize     int64         // 单文件最大读取大小（字节）
-	MaxKeywords     int           // 关键词数量上限
-	GrepMaxMatches  int           // grep 最大匹配数
-	MaxReadFiles    int           // 自动读取关键文件数上限
-	MaxFileChars    int           // 单文件最多读多少字符
+	Enabled        bool          // 总开关
+	Timeout        time.Duration // 扫描总超时
+	MaxFiles       int           // 最多扫描文件数
+	MaxFileSize    int64         // 单文件最大读取大小（字节）
+	MaxKeywords    int           // 关键词数量上限
+	GrepMaxMatches int           // grep 最大匹配数
+	MaxReadFiles   int           // 自动读取关键文件数上限
+	MaxFileChars   int           // 单文件最多读多少字符
 }
 
 // DefaultLandscaperConfig 默认配置
@@ -711,7 +712,7 @@ func (l *Landscaper) render(r *LandscapingResult, elapsed time.Duration) string 
 
 	sb.WriteString("</landscaping-context>\n")
 
-	log.Printf("[Landscaper] completed in %v: %d files, %d keywords, %d grep hits, %d key files",
+	logger.NewModule("Landscaper").Info("completed in %v: %d files, %d keywords, %d grep hits, %d key files",
 		elapsed, r.FilesScanned, len(r.Keywords), len(r.GrepHits), len(r.KeyFiles))
 
 	return sb.String()

@@ -1,4 +1,4 @@
-﻿package permissions
+package permissions
 
 import (
 	"context"

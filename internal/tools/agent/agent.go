@@ -3,10 +3,10 @@ package agent
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
+	"github.com/auto-code/auto-code/internal/pkg/logger"
 	"github.com/auto-code/auto-code/internal/tools"
 )
 
@@ -94,7 +94,7 @@ func (t *AgentTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseC
 
 	result, err := t.subAgentRunner(ctx, inp.Prompt, inp.AllowedTools, maxTurns, onProgressFn)
 	if err != nil {
-		log.Printf("[Agent] subAgentRunner failed: %v", err)
+		logger.NewModule("Agent").Info("subAgentRunner failed: %v", err)
 		onProgressFn(fmt.Sprintf("Sub-agent failed: %v", err))
 		return &tools.ToolResult{
 			Data: fmt.Sprintf("Sub-agent failed after %s:\nError: %v\n\nProgress:\n%s",

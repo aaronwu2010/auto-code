@@ -9,9 +9,9 @@ type PolicyLimitsResponse struct {
 }
 
 type PolicyLimitsFetchResult struct {
-	Success      bool                                `json:"success"`
-	Restrictions map[string]PolicyRestriction        `json:"restrictions,omitempty"`
-	ETag         string                              `json:"etag,omitempty"`
-	Error        string                              `json:"error,omitempty"`
-	SkipRetry    bool                                `json:"skipRetry,omitempty"`
+	Success      bool                         `json:"success"`
+	Restrictions map[string]PolicyRestriction `json:"restrictions,omitempty"`
+	ETag         string                       `json:"etag,omitempty"`
+	Error        string                       `json:"error,omitempty"`
+	SkipRetry    bool                         `json:"skipRetry,omitempty"`
 }

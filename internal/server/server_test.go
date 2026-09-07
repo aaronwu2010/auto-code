@@ -83,13 +83,13 @@ func (e *fakeEngine) SetOllamaConfig(baseURL, apiKey, model string) {
 }
 
 func (e *fakeEngine) SetLocalAIConfig(baseURL, apiKey, model string) {}
-func (e *fakeEngine) GetLocalAIClient() *api.LocalAIClient            { return nil }
-func (e *fakeEngine) UseLocalAI() bool                                { return false }
+func (e *fakeEngine) GetLocalAIClient() *api.LocalAIClient           { return nil }
+func (e *fakeEngine) UseLocalAI() bool                               { return false }
 func (e *fakeEngine) SwitchToLocalAI(enable bool)                    {}
 
 func (e *fakeEngine) SetOpenAIConfig(baseURL, apiKey, model string) {}
 func (e *fakeEngine) GetOpenAIClient() *api.OpenAIClient            { return nil }
-func (e *fakeEngine) UseOpenAI() bool                                { return false }
+func (e *fakeEngine) UseOpenAI() bool                               { return false }
 func (e *fakeEngine) SwitchToOpenAI(enable bool)                    {}
 
 func (e *fakeEngine) GetSessionID() types.SessionID {

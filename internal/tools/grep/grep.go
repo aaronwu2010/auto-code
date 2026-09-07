@@ -35,10 +35,10 @@ type GrepMatch struct {
 }
 
 type GrepOutput struct {
-	DurationMs int64        `json:"durationMs"`
-	NumMatches int          `json:"numMatches"`
-	Matches    []GrepMatch  `json:"matches"`
-	Truncated  bool         `json:"truncated"`
+	DurationMs int64       `json:"durationMs"`
+	NumMatches int         `json:"numMatches"`
+	Matches    []GrepMatch `json:"matches"`
+	Truncated  bool        `json:"truncated"`
 }
 
 type GrepTool struct {

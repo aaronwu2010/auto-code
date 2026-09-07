@@ -34,15 +34,15 @@ func (s *OAuthService) StartOAuthFlow(ctx context.Context, openBrowser func(url 
 	authURL := s.client.BuildAuthURL(codeChallenge, state, port, false, AuthURLOptions{
 		LoginWithClaudeAI: opts.LoginWithClaudeAI,
 		InferenceOnly:     opts.InferenceOnly,
-		OrgUUID:          opts.OrgUUID,
-		LoginHint:        opts.LoginHint,
-		LoginMethod:      opts.LoginMethod,
+		OrgUUID:           opts.OrgUUID,
+		LoginHint:         opts.LoginHint,
+		LoginMethod:       opts.LoginMethod,
 	})
 
 	manualAuthURL := s.client.BuildAuthURL(codeChallenge, state, 0, true, AuthURLOptions{
 		LoginWithClaudeAI: opts.LoginWithClaudeAI,
 		InferenceOnly:     opts.InferenceOnly,
-		OrgUUID:          opts.OrgUUID,
+		OrgUUID:           opts.OrgUUID,
 	})
 
 	if openBrowser != nil && !opts.SkipBrowserOpen {
@@ -169,8 +169,8 @@ func (s *OAuthService) formatTokens(resp *OAuthTokenExchangeResponse) *OAuthToke
 type StartOAuthOptions struct {
 	LoginWithClaudeAI bool
 	InferenceOnly     bool
-	OrgUUID          string
-	LoginHint        string
-	LoginMethod      string
-	SkipBrowserOpen  bool
+	OrgUUID           string
+	LoginHint         string
+	LoginMethod       string
+	SkipBrowserOpen   bool
 }

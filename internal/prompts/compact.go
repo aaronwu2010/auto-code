@@ -273,8 +273,8 @@ Please provide your summary following this structure, ensuring precision and tho
 type CompactDirection string
 
 const (
-	CompactFrom   CompactDirection = "from"
-	CompactUpTo   CompactDirection = "up_to"
+	CompactFrom CompactDirection = "from"
+	CompactUpTo CompactDirection = "up_to"
 )
 
 // GetCompactPrompt 获取基础压缩提示词
@@ -324,7 +324,7 @@ func FormatCompactSummary(summary string) string {
 	summaryStart := strings.Index(formattedSummary, "<summary>")
 	summaryEnd := strings.Index(formattedSummary, "</summary>")
 	if summaryStart != -1 && summaryEnd != -1 && summaryEnd > summaryStart {
-		content := formattedSummary[summaryStart+9:summaryEnd]
+		content := formattedSummary[summaryStart+9 : summaryEnd]
 		formattedSummary = formattedSummary[:summaryStart] + "Summary:\n" + strings.TrimSpace(content) + formattedSummary[summaryEnd+10:]
 	}
 

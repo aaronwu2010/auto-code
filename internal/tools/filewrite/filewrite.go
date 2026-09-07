@@ -1,4 +1,4 @@
-﻿package filewrite
+package filewrite
 
 import (
 	"context"

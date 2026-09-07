@@ -9,14 +9,14 @@ import (
 )
 
 const (
-	DefaultContextCollapseTurns = 5
+	DefaultContextCollapseTurns    = 5
 	DefaultContextCollapseMinTurns = 10
 )
 
 type ContextCollapseConfig struct {
-	Enabled    bool
-	MinTurns   int
-	KeepTurns  int
+	Enabled   bool
+	MinTurns  int
+	KeepTurns int
 }
 
 var defaultContextCollapseConfig = ContextCollapseConfig{
@@ -41,22 +41,22 @@ func IsContextCollapseEnabled() bool {
 }
 
 type CollapsedTurn struct {
-	TurnIndex    int      `json:"turn_index"`
-	UserInput    string   `json:"user_input"`
-	UserSummary  string   `json:"user_summary"`
-	ToolCalls    []string `json:"tool_calls"`
+	TurnIndex     int      `json:"turn_index"`
+	UserInput     string   `json:"user_input"`
+	UserSummary   string   `json:"user_summary"`
+	ToolCalls     []string `json:"tool_calls"`
 	ToolSummaries []string `json:"tool_summaries"`
-	Conclusion   string   `json:"conclusion"`
-	TokenEstimate int     `json:"token_estimate"`
+	Conclusion    string   `json:"conclusion"`
+	TokenEstimate int      `json:"token_estimate"`
 }
 
 type ContextCollapseResult struct {
-	TurnsBefore     int
-	TurnsAfter      int
-	TokensSaved     int
-	DidCollapse     bool
-	CollapsedTurns  []CollapsedTurn
-	PreservedTurns  int
+	TurnsBefore    int
+	TurnsAfter     int
+	TokensSaved    int
+	DidCollapse    bool
+	CollapsedTurns []CollapsedTurn
+	PreservedTurns int
 }
 
 func EstimateTurnTokens(turn CollapsedTurn) int {

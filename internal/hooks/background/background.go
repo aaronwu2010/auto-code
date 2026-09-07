@@ -9,7 +9,7 @@ import (
 type TaskNavigationDirection int
 
 const (
-	NavigationUp   TaskNavigationDirection = iota
+	NavigationUp TaskNavigationDirection = iota
 	NavigationDown
 )
 
