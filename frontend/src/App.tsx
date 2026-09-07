@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import Markdown from "./components/Markdown";
 import {
   SendMessage,
   Interrupt,
@@ -689,9 +690,9 @@ function App() {
     switch (block.type) {
       case "text":
         return (
-          <pre key={idx} className="whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-200">
-            {block.text}
-          </pre>
+          <div key={idx} className="mb-1">
+            <Markdown content={block.text || ""} />
+          </div>
         );
       case "tool_use":
         return null;
@@ -740,7 +741,7 @@ function App() {
         )}
         {msg.content_blocks && msg.content_blocks.length > 0
           ? msg.content_blocks.map((block, i) => renderContentBlock(block, i))
-          : <pre className="whitespace-pre-wrap break-words text-sm leading-relaxed">{msg.content}</pre>}
+          : <Markdown content={msg.content || ""} />}
       </div>
     );
   };
@@ -1344,9 +1345,10 @@ function App() {
                 <div className="text-[10px] mb-2 font-semibold uppercase tracking-wider text-slate-500">
                   assistant
                 </div>
-                <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
-                  {streamingMessage.content}
-                  {!streamingMessage.content && (
+                <div className="text-sm leading-relaxed break-words">
+                  {streamingMessage.content ? (
+                    <Markdown content={streamingMessage.content} />
+                  ) : (
                     <span className="inline-block w-2 h-4 bg-sky-400 ml-0.5 align-middle animate-pulse rounded-sm"></span>
                   )}
                 </div>
