@@ -11,6 +11,8 @@ import (
 	"github.com/auto-code/auto-code/internal/tools/config"
 	"github.com/auto-code/auto-code/internal/tools/coordinator"
 	"github.com/auto-code/auto-code/internal/tools/cron"
+	"github.com/auto-code/auto-code/internal/tools/deletefile"
+	"github.com/auto-code/auto-code/internal/tools/experiencerecall"
 	"github.com/auto-code/auto-code/internal/tools/fileedit"
 	"github.com/auto-code/auto-code/internal/tools/fileread"
 	"github.com/auto-code/auto-code/internal/tools/filewrite"
@@ -52,11 +54,11 @@ func NewToolRegistry() *ToolRegistry {
 }
 
 var coreToolNames = map[string]bool{
-	"Read": true, "Edit": true, "Write": true,
+	"Read": true, "Edit": true, "Write": true, "DeleteFile": true,
 	"Glob": true, "Grep": true,
 	"Bash": true, "PowerShell": true,
 	"ToolSearch": true, "Ask": true,
-	"TodoWrite": true,
+	"TodoWrite": true, "ExperienceRecall": true,
 	"WebFetch":  true, "WebSearch": true,
 }
 
@@ -65,6 +67,8 @@ func NewDefaultToolRegistry() *ToolRegistry {
 	r.Register(fileread.NewFileReadTool())
 	r.Register(fileedit.NewFileEditTool())
 	r.Register(filewrite.NewFileWriteTool())
+	r.Register(deletefile.NewDeleteFileTool())
+	r.Register(experiencerecall.NewExperienceRecallTool())
 	r.Register(glob.NewGlobTool())
 	r.Register(grep.NewGrepTool())
 	r.Register(websearch.NewWebSearchTool())

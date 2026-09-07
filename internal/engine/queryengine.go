@@ -212,6 +212,9 @@ func (qe *QueryEngine) Startup(ctx context.Context) {
 	}
 	if refl, err := reflection.NewBaseReflector(reflCfg); err == nil {
 		qe.reflector = refl
+		logger.NewModule("Engine").Info("reflector initialized, storage=%s", reflCfg.StoragePath)
+	} else {
+		logger.NewModule("Engine").Warn("reflector initialization failed, experience storage disabled: %v (path=%s)", err, reflCfg.StoragePath)
 	}
 
 	// L3 记忆统一调度 orchestrator
@@ -1009,15 +1012,19 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 			// === 阶段 5: SessionCloser — session 结束时从 ReActBridge 提取经验 → ExperienceStore ===
 			OnSessionEnd: func(bridge *query.ReActBridge) {
 				if bridge == nil {
+					logger.NewModule("Engine").Info("OnSessionEnd: bridge is nil, skip")
 					return
 				}
 				store := qe.getExperienceStore()
 				if store == nil {
-					logger.NewModule("Engine").Info("OnSessionEnd: no experience store, skip")
+					logger.NewModule("Engine").Warn("OnSessionEnd: experience store is nil — check if reflector initialized correctly")
 					return
 				}
 				gt := bridge.GetGoalTracker()
-				go query.CloseSession(submitCtx, bridge, gt, store)
+				// 用独立 context + 5s timeout — submitCtx 可能已被 cancel
+				closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				query.CloseSession(closeCtx, bridge, gt, store)
 			},
 		}
 

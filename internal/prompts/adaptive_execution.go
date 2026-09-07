@@ -80,6 +80,25 @@ func GetAdaptiveExecutionSection() string {
 
 **好处：** 出问题时知道是哪一步引入的，不用全盘排查。
 
+## 利用经验库（ExperienceRecall）
+
+你可以用 ExperienceRecall 工具主动查询过去的经验：
+
+**什么时候查？**
+- 遇到 build error 或 编译错误 → 查"build failure"、"go vet error"、"nil pointer"
+- 用了不熟悉的技术栈 → 查 "gin"、"grpc"、"kubernetes"、"redis"
+- 之前尝试过失败的方向 → 查"what didn't work"避免重蹈覆辙
+- 要开始一个新项目 → 查类似项目的经验（"websocket server"、"todo api"）
+
+**怎么查？**
+  ExperienceRecall({
+    query: "go build nil pointer dereference",
+    max_results: 5,
+    filter_type: "failure"    // 可选：只看失败经验
+  })
+
+经验库是跨 session 的——之前 session 中自动提取的经验都能搜到。如果返回空，说明这是新场景，正常。
+
 ## 快速判断清单
 
 面对任务时，问自己这 5 个问题：
