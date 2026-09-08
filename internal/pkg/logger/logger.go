@@ -60,7 +60,7 @@ const (
 // Global slog logger + level controller
 var (
 	mu       sync.RWMutex
-	level    = slog.LevelInfo
+	level    = slog.LevelDebug
 	root     *slog.Logger
 	handlers map[string]*ModuleLogger
 )
