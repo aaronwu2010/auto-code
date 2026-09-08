@@ -507,7 +507,9 @@ func (qe *QueryEngine) reflectOnTurn(ctx context.Context, msgs []types.Message) 
 	}()
 
 	rc := &reflection.ReflectionContext{
-		EndTime: time.Now(),
+		TaskID:   fmt.Sprintf("task-%s-%d", qe.sessionID, time.Now().UnixNano()),
+		EndTime:  time.Now(),
+		TaskType: "agent_turn",
 	}
 	for _, m := range msgs {
 		if m.Role == types.RoleUser && !m.IsMeta {
