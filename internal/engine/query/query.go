@@ -170,9 +170,10 @@ type State struct {
 	// 2) 连续停滞 → agent 在打转
 	// 3) 子任务全做完了 → 提前停止，不浪费轮数
 	// 4) token 快用完了 → 主动停止避免硬截断
-	ConsecutiveToolErrors  int      // 连续 N 轮 tool result 都是 error
-	ConsecutiveNoProgress  int      // 连续 N 轮没有实质性进展
-	ConsecutiveToolNotFound int     // 连续 N 次 tool_call 指向不存在的工具名（模型幻觉）
+	ConsecutiveToolErrors   int      // 连续 N 轮 tool result 都是 error
+	ConsecutiveNoProgress    int      // 连续 N 轮没有实质性进展（读操作但无新目标）
+	ConsecutiveNoAnyTool     int      // 连续 N 轮没有任何工具调用（模型空转/返回空响应）
+	ConsecutiveToolNotFound  int      // 连续 N 次 tool_call 指向不存在的工具名（模型幻觉）
 	LastToolNames          []string // 最近 N 个 tool 名，用于检测"读同一个文件"类的停滞
 	RecentReadTargets      []string // 最近读操作的目标指纹（file_path/pattern），用于多样性检测
 	SeenReadTargets        map[string]bool // 已见过的读目标集合，快速查重

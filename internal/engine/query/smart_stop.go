@@ -45,6 +45,11 @@ type SmartStopConfig struct {
 	// 经验值 3：模型反复幻觉调用不存在的工具，继续浪费回合无意义
 	MaxConsecutiveToolNotFound int
 
+	// MaxConsecutiveNoAnyTool 连续 N 轮没有任何工具调用（模型全程空转/返回空响应）
+	// 经验值 5：前几轮模型可能先输出规划/回答，5 轮后还没调用任何工具说明模型状态异常
+	// 典型场景：Ollama gpt-oss:120b 连续返回 content=0, tool_calls=0 的空响应
+	MaxConsecutiveNoAnyTool int
+
 	// TokenWarningRatio token 剩余低于此比例时，主动停止避免硬截断
 	// 经验值 0.30：30% 足够生成一个完整的 final answer + 不触发紧急压缩
 	TokenWarningRatio float64
@@ -56,6 +61,7 @@ func DefaultSmartStopConfig() SmartStopConfig {
 		MaxConsecutiveToolErrors:   3,
 		MaxConsecutiveNoProgress:   10,
 		MaxConsecutiveToolNotFound: 3,
+		MaxConsecutiveNoAnyTool:    5,
 		TokenWarningRatio:          0.30,
 	}
 }
@@ -205,16 +211,21 @@ func UpdateSmartStopState(state *State, cfg SmartStopConfig, toolResults []*tool
 
 	// 停滞计数逻辑（关键改进）：
 	if !hasAnyTool {
-		// 纯对话轮，不改变停滞计数，让下一轮决定
-	} else if hasWriteLike {
-		// 有写/执行操作 → 清零（产生了实质性进展）
-		state.ConsecutiveNoProgress = 0
-	} else if hasNewReadOnlyTarget {
-		// 全是读，但发现了**新目标** → 清零（在有效探索，不算打转）
-		state.ConsecutiveNoProgress = 0
+		// 纯对话轮 / 空响应轮 → 累加无工具计数（模型可能在空转）
+		state.ConsecutiveNoAnyTool++
 	} else {
-		// 全是读 + 没有新目标 → 累加（反复读已看过的东西）
-		state.ConsecutiveNoProgress++
+		// 有任何工具执行 → 清零无工具计数
+		state.ConsecutiveNoAnyTool = 0
+		if hasWriteLike {
+			// 有写/执行操作 → 清零停滞（产生了实质性进展）
+			state.ConsecutiveNoProgress = 0
+		} else if hasNewReadOnlyTarget {
+			// 全是读，但发现了**新目标** → 清零（在有效探索，不算打转）
+			state.ConsecutiveNoProgress = 0
+		} else {
+			// 全是读 + 没有新目标 → 累加（反复读已看过的东西）
+			state.ConsecutiveNoProgress++
+		}
 	}
 
 	// --- 3. 记录最近 tool 名（用于日志展示） ---
@@ -278,6 +289,16 @@ func CheckSmartStopSignals(state *State, cfg SmartStopConfig, params QueryParams
 		logger.NewModule("SmartStop").Warn("连续 %d 次 tool_call 指向不存在的工具名，判定 agent 幻觉（turn=%d）",
 			state.ConsecutiveToolNotFound, state.TurnCount)
 		return SmartStopTooManyErrors // 复用 TooManyErrors 语义：模型无法正常工作
+	}
+
+	// --- 规则 2.6：连续 N 轮无任何工具调用（模型空转/返回空响应）---
+	// 场景：Ollama gpt-oss:120b 连续返回 content=0, tool_calls=0，
+	// 模型明明注册了 13 个工具但就是不调用，空耗回合。
+	// 只有当模型从未成功调用过任何工具时才触发（避免长任务中间正常的对话轮误判）
+	if state.ConsecutiveNoAnyTool >= cfg.MaxConsecutiveNoAnyTool {
+		logger.NewModule("SmartStop").Warn("连续 %d 轮无任何工具调用（模型可能在空转/返回空响应），判定 agent 异常（turn=%d）",
+			state.ConsecutiveNoAnyTool, state.TurnCount)
+		return SmartStopTooStuck
 	}
 
 	// --- 规则 3：连续停滞 ---
