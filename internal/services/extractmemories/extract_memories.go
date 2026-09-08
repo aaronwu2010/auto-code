@@ -29,7 +29,8 @@ func IsForkedAgentAvailable() bool {
 
 func RunForkedAgent(ctx context.Context, prompt string, canUseTool CanUseToolFn, maxTurns int) error {
 	if forkedAgentFn == nil {
-		return fmt.Errorf("forked agent not registered")
+		// 功能未激活，静默跳过
+		return nil
 	}
 	return forkedAgentFn(ctx, prompt, canUseTool, maxTurns)
 }
@@ -177,7 +178,8 @@ func (e *ExtractMemories) ExecuteExtractMemories(ctx context.Context, messages [
 
 func (e *ExtractMemories) runExtraction(ctx context.Context, messages []types.Message, appendSystemMsg string) error {
 	if forkedAgentFn == nil {
-		return fmt.Errorf("forked agent not registered")
+		// 功能未激活，静默跳过
+		return nil
 	}
 
 	memoryDir := e.paths.GetAutoMemPath()

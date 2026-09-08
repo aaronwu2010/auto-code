@@ -16,11 +16,36 @@
 package logger
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 )
+
+// formatRegex matches printf-style format verbs like %s, %v, %+v, %q, %d, %x, etc.
+var formatRegex = regexp.MustCompile(`%[+\-#0-9]*[a-zA-Z]`)
+
+// hasPrintfVerb checks whether msg contains a printf-style format verb (not counting %% escape).
+func hasPrintfVerb(msg string) bool {
+	// Strip %% (escaped percent) first
+	stripped := strings.ReplaceAll(msg, "%%", "")
+	return formatRegex.MatchString(stripped)
+}
+
+// formatIfNeeded returns (formattedMsg, remainingArgs). If msg contains printf verbs
+// and args provides enough values, it formats via fmt.Sprintf and returns empty args.
+// Otherwise it keeps slog's original key-value semantics.
+func formatIfNeeded(msg string, args []any) (string, []any) {
+	if len(args) == 0 {
+		return msg, nil
+	}
+	if hasPrintfVerb(msg) {
+		return fmt.Sprintf(msg, args...), nil
+	}
+	return msg, args
+}
 
 // Level mirrors slog's level constants for convenience.
 type Level = slog.Level
@@ -125,22 +150,27 @@ func NewModule(name string) *ModuleLogger {
 	return h
 }
 
-// Debug logs at DEBUG level.
+// Debug logs at DEBUG level. Supports both printf-style (msg="failed: %v", err)
+// and slog structured (msg="failed", "error", err) call conventions.
 func (m *ModuleLogger) Debug(msg string, args ...any) {
+	msg, args = formatIfNeeded(msg, args)
 	m.log.Debug("["+m.module+"] "+msg, args...)
 }
 
-// Info logs at INFO level.
+// Info logs at INFO level. Supports both printf-style and slog structured conventions.
 func (m *ModuleLogger) Info(msg string, args ...any) {
+	msg, args = formatIfNeeded(msg, args)
 	m.log.Info("["+m.module+"] "+msg, args...)
 }
 
-// Warn logs at WARN level.
+// Warn logs at WARN level. Supports both printf-style and slog structured conventions.
 func (m *ModuleLogger) Warn(msg string, args ...any) {
+	msg, args = formatIfNeeded(msg, args)
 	m.log.Warn("["+m.module+"] "+msg, args...)
 }
 
-// Error logs at ERROR level.
+// Error logs at ERROR level. Supports both printf-style and slog structured conventions.
 func (m *ModuleLogger) Error(msg string, args ...any) {
+	msg, args = formatIfNeeded(msg, args)
 	m.log.Error("["+m.module+"] "+msg, args...)
 }

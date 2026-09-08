@@ -126,7 +126,8 @@ func (s *SessionMemory) ExtractSessionMemory(ctx context.Context, messages []typ
 	s.mu.Unlock()
 
 	if !extractmemories.IsForkedAgentAvailable() {
-		return fmt.Errorf("forked agent not registered")
+		// 功能未激活，静默跳过
+		return nil
 	}
 
 	prompt := s.buildUpdatePrompt(messages)

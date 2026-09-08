@@ -102,7 +102,8 @@ func (d *AutoDream) checkGates(ctx context.Context) (bool, error) {
 
 func (d *AutoDream) runConsolidation(ctx context.Context) error {
 	if !extractmemories.IsForkedAgentAvailable() {
-		return fmt.Errorf("forked agent not registered")
+		// 功能未激活，静默跳过
+		return nil
 	}
 
 	memoryDir := d.paths.GetAutoMemPath()

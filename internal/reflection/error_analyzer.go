@@ -94,49 +94,49 @@ func (a *BaseErrorAnalyzer) Analyze(ctx context.Context, errorInfo *ErrorInfo) (
 func (a *BaseErrorAnalyzer) CategorizeError(errorInfo *ErrorInfo) ErrorCategory {
 	msg := strings.ToLower(errorInfo.Message)
 
-	// 输入错误
-	if strings.Contains(msg, "invalid") ||
-		strings.Contains(msg, "missing") ||
-		strings.Contains(msg, "empty") ||
-		strings.Contains(msg, "format") {
-		return ErrorCategoryInput
-	}
-
-	// 权限错误
-	if strings.Contains(msg, "permission") ||
-		strings.Contains(msg, "unauthorized") ||
-		strings.Contains(msg, "forbidden") ||
-		strings.Contains(msg, "access denied") {
-		return ErrorCategoryPermission
-	}
-
-	// 超时错误
-	if strings.Contains(msg, "timeout") ||
-		strings.Contains(msg, "deadline exceeded") ||
+	// 超时错误（优先检查，因为 timeout 包含 nil 子串）
+	if containsWord(msg, "timeout") ||
+		containsWord(msg, "deadline") ||
 		strings.Contains(msg, "timed out") {
 		return ErrorCategoryTimeout
 	}
 
+	// 输入错误
+	if containsWord(msg, "invalid") ||
+		containsWord(msg, "missing") ||
+		containsWord(msg, "empty") ||
+		containsWord(msg, "format") {
+		return ErrorCategoryInput
+	}
+
+	// 权限错误
+	if containsWord(msg, "permission") ||
+		containsWord(msg, "unauthorized") ||
+		containsWord(msg, "forbidden") ||
+		strings.Contains(msg, "access denied") {
+		return ErrorCategoryPermission
+	}
+
 	// 资源错误
 	if strings.Contains(msg, "out of memory") ||
-		strings.Contains(msg, "disk full") ||
-		strings.Contains(msg, "resource") ||
-		strings.Contains(msg, "limit exceeded") {
+		containsWord(msg, "disk") ||
+		containsWord(msg, "resource") ||
+		containsWord(msg, "limit") {
 		return ErrorCategoryResource
 	}
 
 	// 外部错误
-	if strings.Contains(msg, "network") ||
-		strings.Contains(msg, "connection") ||
-		strings.Contains(msg, "external") ||
-		strings.Contains(msg, "api") {
+	if containsWord(msg, "network") ||
+		containsWord(msg, "connection") ||
+		containsWord(msg, "external") ||
+		containsWord(msg, "api") {
 		return ErrorCategoryExternal
 	}
 
 	// 逻辑错误
-	if strings.Contains(msg, "logic") ||
-		strings.Contains(msg, "assertion") ||
-		strings.Contains(msg, "unexpected") {
+	if containsWord(msg, "logic") ||
+		containsWord(msg, "assertion") ||
+		containsWord(msg, "unexpected") {
 		return ErrorCategoryLogic
 	}
 
@@ -172,6 +172,37 @@ func (a *BaseErrorAnalyzer) AssessSeverity(errorInfo *ErrorInfo) ErrorSeverity {
 	return ErrorSeverityLow
 }
 
+// containsWord checks if msg contains a whole word (surrounded by non-alphanumeric
+// characters or at start/end), avoiding false substring matches like "nil" in "timeout".
+func containsWord(msg, word string) bool {
+	if msg == word {
+		return true
+	}
+	// Check at start
+	if len(msg) > len(word) && msg[:len(word)] == word && !isAlnum(msg[len(word)]) {
+		return true
+	}
+	// Check at end
+	if len(msg) > len(word) && msg[len(msg)-len(word):] == word && !isAlnum(msg[len(msg)-len(word)-1]) {
+		return true
+	}
+	// Check in middle
+	for i := 0; i <= len(msg)-len(word); i++ {
+		if msg[i:i+len(word)] == word {
+			beforeOK := i == 0 || !isAlnum(msg[i-1])
+			afterOK := i+len(word) == len(msg) || !isAlnum(msg[i+len(word)])
+			if beforeOK && afterOK {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isAlnum(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
+}
+
 // identifyRootCause 识别根本原因
 func (a *BaseErrorAnalyzer) identifyRootCause(errorInfo *ErrorInfo) string {
 	if errorInfo.RootCause != "" {
@@ -181,16 +212,29 @@ func (a *BaseErrorAnalyzer) identifyRootCause(errorInfo *ErrorInfo) string {
 	// 简单的根因推断
 	msg := strings.ToLower(errorInfo.Message)
 
-	if strings.Contains(msg, "nil") || strings.Contains(msg, "null") {
-		return "Null or nil value encountered"
-	}
-
-	if strings.Contains(msg, "timeout") {
+	// 注意：必须检查更长的关键词优先（timeout 包含 nil 子串）
+	if containsWord(msg, "timeout") || containsWord(msg, "deadline") {
 		return "Operation exceeded time limit"
 	}
 
-	if strings.Contains(msg, "permission") {
+	if containsWord(msg, "nil") || containsWord(msg, "null") || containsWord(msg, "nilpointer") {
+		return "Null or nil value encountered"
+	}
+
+	if containsWord(msg, "permission") || containsWord(msg, "unauthorized") || containsWord(msg, "forbidden") {
 		return "Insufficient permissions"
+	}
+
+	if containsWord(msg, "panic") || containsWord(msg, "segfault") || containsWord(msg, "crash") {
+		return "Process crash or fatal error"
+	}
+
+	if containsWord(msg, "network") || containsWord(msg, "connection") || containsWord(msg, "eof") {
+		return "Network or connection failure"
+	}
+
+	if containsWord(msg, "memory") || containsWord(msg, "oom") || containsWord(msg, "resource") {
+		return "Resource exhaustion"
 	}
 
 	return "Unknown root cause"
