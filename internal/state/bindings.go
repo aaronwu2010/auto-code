@@ -92,46 +92,46 @@ type SendMessageResponse struct {
 
 func (b *WailsBindings) SendMessage(request SendMessageRequest) SendMessageResponse {
 	logger.NewModule("Bindings").Info("SendMessage: received, prompt_len=%d", len(request.Prompt))
-	logger.NewModule("Bindings").Info("SendMessage: step1 - calling CompareAndSetIsProcessing...")
+	logger.NewModule("Bindings").Debug("SendMessage: step1 - calling CompareAndSetIsProcessing...")
 	if !b.appState.CompareAndSetIsProcessing(false, true) {
 		logger.NewModule("Bindings").Info("SendMessage: rejected, already processing")
 		return SendMessageResponse{Success: false, Error: "a request is already in progress, please wait"}
 	}
-	logger.NewModule("Bindings").Info("SendMessage: step2 - CompareAndSetIsProcessing ok")
+	logger.NewModule("Bindings").Debug("SendMessage: step2 - CompareAndSetIsProcessing ok")
 
-	logger.NewModule("Bindings").Info("SendMessage: step3 - acquiring RLock...")
+	logger.NewModule("Bindings").Debug("SendMessage: step3 - acquiring RLock...")
 	b.mu.RLock()
 	eng := b.engine
 	b.mu.RUnlock()
-	logger.NewModule("Bindings").Info("SendMessage: step4 - engine retrieved, eng=%v", eng != nil)
+	logger.NewModule("Bindings").Debug("SendMessage: step4 - engine retrieved, eng=%v", eng != nil)
 
 	if eng == nil {
-		logger.NewModule("Bindings").Info("SendMessage: engine not initialized")
+		logger.NewModule("Bindings").Warn("SendMessage: engine not initialized")
 		b.appState.SetIsProcessing(false)
 		return SendMessageResponse{Success: false, Error: "engine not initialized"}
 	}
 
 	if b.ctx == nil {
-		logger.NewModule("Bindings").Info("SendMessage: context is nil")
+		logger.NewModule("Bindings").Warn("SendMessage: context is nil")
 		b.appState.SetIsProcessing(false)
 		return SendMessageResponse{Success: false, Error: "context is nil"}
 	}
 
-	logger.NewModule("Bindings").Info("SendMessage: step5 - calling SubmitMessage...")
+	logger.NewModule("Bindings").Debug("SendMessage: step5 - calling SubmitMessage...")
 	outputCh := eng.SubmitMessage(b.ctx, request.Prompt)
-	logger.NewModule("Bindings").Info("SendMessage: step6 - SubmitMessage returned, ch=%v", outputCh != nil)
+	logger.NewModule("Bindings").Debug("SendMessage: step6 - SubmitMessage returned, ch=%v", outputCh != nil)
 
 	go func() {
-		logger.NewModule("Bindings").Info("forwarder goroutine started")
+		logger.NewModule("Bindings").Debug("forwarder goroutine started")
 		defer func() {
-			logger.NewModule("Bindings").Info("forwarder: resetting isProcessing")
+			logger.NewModule("Bindings").Debug("forwarder: resetting isProcessing")
 			b.appState.SetIsProcessing(false)
 		}()
 		msgCount := 0
 		for msg := range outputCh {
 			msgCount++
 			if msgCount <= 5 || msg.Type == "result" || msg.Type == "error" {
-				logger.NewModule("Bindings").Info("forwarder: msg #%d, type=%s", msgCount, msg.Type)
+				logger.NewModule("Bindings").Debug("forwarder: msg #%d, type=%s", msgCount, msg.Type)
 			}
 			data, _ := json.Marshal(msg)
 			wailsRuntime.EventsEmit(b.ctx, "query:message", string(data))
@@ -143,7 +143,7 @@ func (b *WailsBindings) SendMessage(request SendMessageRequest) SendMessageRespo
 				return
 			}
 		}
-		logger.NewModule("Bindings").Info("message stream channel closed without terminal event, count=%d", msgCount)
+		logger.NewModule("Bindings").Warn("message stream channel closed without terminal event, count=%d", msgCount)
 		// 通道异常关闭时也刷新文件列表
 		wailsRuntime.EventsEmit(b.ctx, "files:refresh", "")
 	}()
@@ -164,7 +164,7 @@ func (b *WailsBindings) Interrupt() {
 		logger.NewModule("Bindings").Info("interrupt requested")
 		eng.Interrupt()
 	} else {
-		logger.NewModule("Bindings").Info("interrupt requested but engine is nil")
+		logger.NewModule("Bindings").Warn("interrupt requested but engine is nil")
 	}
 }
 
@@ -464,7 +464,7 @@ func (b *WailsBindings) ListLocalAIModels() ListLocalAIModelsResponse {
 
 	models, err := client.ListModels(b.ctx)
 	if err != nil {
-		logger.NewModule("Bindings").Info("ListLocalAIModels failed: %v", err)
+		logger.NewModule("Bindings").Error("ListLocalAIModels failed: %v", err)
 		return ListLocalAIModelsResponse{
 			Error: err.Error(),
 		}
@@ -488,7 +488,7 @@ func (b *WailsBindings) ListLocalAIMCPServers(model string) ListLocalAIMCPServer
 
 	servers, err := client.ListMCPServers(b.ctx, model)
 	if err != nil {
-		logger.NewModule("Bindings").Info("ListLocalAIMCPServers failed: %v", err)
+		logger.NewModule("Bindings").Error("ListLocalAIMCPServers failed: %v", err)
 		return ListLocalAIMCPServersResponse{
 			Error: err.Error(),
 		}
@@ -666,7 +666,7 @@ func (b *WailsBindings) ListOpenAIModels() ListOpenAIModelsResponse {
 
 	models, err := client.ListModels(b.ctx)
 	if err != nil {
-		logger.NewModule("Bindings").Info("ListOpenAIModels failed: %v", err)
+		logger.NewModule("Bindings").Error("ListOpenAIModels failed: %v", err)
 		return ListOpenAIModelsResponse{Error: err.Error()}
 	}
 
@@ -817,7 +817,7 @@ func (b *WailsBindings) ListAvailableModels() ListModelsResponse {
 
 	models, err := client.ListModels(b.ctx)
 	if err != nil {
-		logger.NewModule("Bindings").Info("ListModels failed: %v", err)
+		logger.NewModule("Bindings").Error("ListModels failed: %v", err)
 		return ListModelsResponse{
 			Error: err.Error(),
 		}

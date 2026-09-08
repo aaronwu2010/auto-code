@@ -397,11 +397,11 @@ func (ue *UncertaintyEngine) LogScore(source string, score *ConfidenceScore) {
 	if score == nil {
 		return
 	}
-	logger.NewModule("Uncertainty").Info("%s: score=%.2f level=%s action=%s",
+	logger.NewModule("Uncertainty").Debug("%s: score=%.2f level=%s action=%s",
 		source, score.Score, score.Level, score.SuggestedAction)
 	if len(score.Reasons) > 0 {
 		for _, r := range score.Reasons {
-			logger.NewModule("Uncertainty").Info("reason: %s", r)
+			logger.NewModule("Uncertainty").Debug("reason: %s", r)
 		}
 	}
 

@@ -452,18 +452,18 @@ func (s *AppState) SetIsProcessing(processing bool) {
 // CompareAndSetIsProcessing 原子地检查当前状态并在匹配时设置新值。
 // 如果当前状态等于 expected，则设置为 new 并返回 true；否则返回 false。
 func (s *AppState) CompareAndSetIsProcessing(expected, new bool) bool {
-	logger.NewModule("AppState").Info("CompareAndSetIsProcessing: expected=%v, new=%v", expected, new)
+	logger.NewModule("AppState").Debug("CompareAndSetIsProcessing: expected=%v, new=%v", expected, new)
 	s.mu.Lock()
 	if s.IsProcessing != expected {
 		s.mu.Unlock()
-		logger.NewModule("AppState").Info("CompareAndSetIsProcessing: mismatch (current=%v), returning false", s.IsProcessing)
+		logger.NewModule("AppState").Debug("CompareAndSetIsProcessing: mismatch (current=%v), returning false", s.IsProcessing)
 		return false
 	}
 	s.IsProcessing = new
 	s.mu.Unlock()
-	logger.NewModule("AppState").Info("CompareAndSetIsProcessing: set to %v, emitting event", new)
+	logger.NewModule("AppState").Debug("CompareAndSetIsProcessing: set to %v, emitting event", new)
 	s.emit(StateChangeEvent{Type: "processing_update", Value: new})
-	logger.NewModule("AppState").Info("CompareAndSetIsProcessing: done, returning true")
+	logger.NewModule("AppState").Debug("CompareAndSetIsProcessing: done, returning true")
 	return true
 }
 

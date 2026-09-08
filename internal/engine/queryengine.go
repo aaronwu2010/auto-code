@@ -243,7 +243,7 @@ func (qe *QueryEngine) Startup(ctx context.Context) {
 		runner := migrations.NewMigrationRunner(filepath.Join(homeDir, ".auto"))
 		runner.RegisterDefaults()
 		if err := runner.RunAll(); err != nil {
-			logger.NewModule("Engine").Info("migrations failed: %v", err)
+			logger.NewModule("Engine").Error("migrations failed: %v", err)
 		}
 	}
 
@@ -311,7 +311,7 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 
 	systemPrompt, err := qe.buildSystemPrompt(runCtx)
 	if err != nil {
-		logger.NewModule("SubAgent").Info("buildSystemPrompt failed: %v", err)
+		logger.NewModule("SubAgent").Error("buildSystemPrompt failed: %v", err)
 		return "", fmt.Errorf("failed to build system prompt: %w", err)
 	}
 
@@ -474,7 +474,7 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 			return assistantAccum, nil
 		case "error":
 			lastError = output.Error
-			logger.NewModule("SubAgent").Info("query output error: %v", output.Error)
+			logger.NewModule("SubAgent").Error("query output error: %v", output.Error)
 			if onProgress != nil {
 				onProgress(fmt.Sprintf("Sub-agent error: %v", output.Error))
 			}
@@ -485,7 +485,7 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 	}
 
 	if lastError != nil {
-		logger.NewModule("SubAgent").Info("ended with error: %v", lastError)
+		logger.NewModule("SubAgent").Error("ended with error: %v", lastError)
 		return assistantAccum, lastError
 	}
 
@@ -502,7 +502,7 @@ func truncateString(s string, maxLen int) string {
 func (qe *QueryEngine) reflectOnTurn(ctx context.Context, msgs []types.Message) {
 	defer func() {
 		if r := recover(); r != nil {
-			logger.NewModule("Engine").Info("reflection panic: %v", r)
+			logger.NewModule("Engine").Error("reflection panic: %v", r)
 		}
 	}()
 
@@ -532,7 +532,7 @@ func (qe *QueryEngine) reflectOnTurn(ctx context.Context, msgs []types.Message) 
 		}
 	}
 	if _, err := qe.reflector.Reflect(ctx, rc); err != nil {
-		logger.NewModule("Engine").Info("reflection failed: %v", err)
+		logger.NewModule("Engine").Warn("reflection failed: %v", err)
 	}
 	// 成功路径也存经验
 	qe.storeLessonsFromReflection(ctx, rc)
@@ -616,7 +616,7 @@ func (qe *QueryEngine) injectPendingLessons() {
 	qe.messages = append(qe.messages, lessonMsg)
 	qe.mu.Unlock()
 
-	logger.NewModule("Engine").Info("injected %d reflection lessons into context", len(lessons))
+	logger.NewModule("Engine").Debug("injected %d reflection lessons into context", len(lessons))
 }
 
 // injectDecomposedPlan 对复杂任务做拆解，把步骤列表以 IsMeta 消息形式注入 messages。
@@ -662,7 +662,7 @@ func (qe *QueryEngine) injectDecomposedPlan(ctx context.Context, prompt string) 
 	qe.messages = append(qe.messages, planMsg)
 	qe.mu.Unlock()
 
-	logger.NewModule("Engine").Info("injected decomposed plan with %d steps for this turn", len(steps))
+	logger.NewModule("Engine").Debug("injected decomposed plan with %d steps for this turn", len(steps))
 }
 
 // safeOrDefault 返回第一个非空字符串；全部为空返回 fallback。
@@ -707,7 +707,7 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 	if ctxLen, err := qe.ShowModel(ctx, string(qe.config.UserSpecifiedModel)); err == nil && ctxLen > 0 {
 		realCtxLen = ctxLen
 		contextWindowSize = compact.GetEffectiveContextWindowSize(ctxLen)
-		logger.NewModule("Engine").Info("ShowModel: context_window=%d (effective=%d)", realCtxLen, contextWindowSize)
+		logger.NewModule("Engine").Debug("ShowModel: context_window=%d (effective=%d)", realCtxLen, contextWindowSize)
 	} else {
 		contextWindowSize = compact.GetEffectiveContextWindowSize(0)
 		logger.NewModule("Engine").Info("ShowModel failed: %v, using default context_window=%d", err, contextWindowSize)
@@ -722,11 +722,11 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 	}
 
 	go func() {
-		logger.NewModule("Engine").Info("SubmitMessage: goroutine started")
+		logger.NewModule("Engine").Debug("SubmitMessage: goroutine started")
 		defer close(ch)
 		defer func() {
 			if r := recover(); r != nil {
-				logger.NewModule("Engine").Info("panic recovered: %v\n%s", r, debug.Stack())
+				logger.NewModule("Engine").Error("panic recovered: %v\n%s", r, debug.Stack())
 			}
 		}()
 
@@ -793,7 +793,7 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 			}()
 		}
 
-		logger.NewModule("Engine").Info("SubmitMessage: building system prompt...")
+		logger.NewModule("Engine").Debug("SubmitMessage: building system prompt...")
 		qe.ensureUserContextMessage(submitCtx)
 
 		// === 方案 P0: Pre-Execution Landscaping ===
@@ -825,7 +825,7 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		// pendingLessons 已由 injectPendingLessons 处理过，这里不再重复
 		if qe.memoryOrchestrator != nil {
 			if recall := qe.memoryOrchestrator.Recall(submitCtx, prompt, nil); recall != "" {
-				logger.NewModule("Engine").Info("memory orchestrator recalled experiences for prompt: %s...", func() string {
+				logger.NewModule("Engine").Debug("memory orchestrator recalled experiences for prompt: %s...", func() string {
 					if len(prompt) > 60 {
 						return prompt[:60]
 					}
@@ -893,21 +893,21 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 
 		systemPrompt, err := qe.buildSystemPrompt(submitCtx)
 		if err != nil {
-			logger.NewModule("Engine").Info("buildSystemPrompt failed: %v", err)
+			logger.NewModule("Engine").Error("buildSystemPrompt failed: %v", err)
 			ch <- SDKMessage{Type: "error", Subtype: "system_prompt_error", Message: api.GetAssistantMessageFromError(err), SessionID: qe.sessionID}
 			return
 		}
-		logger.NewModule("Engine").Info("SubmitMessage: system prompt built, len=%d", len(systemPrompt.Content))
+		logger.NewModule("Engine").Debug("SubmitMessage: system prompt built, len=%d", len(systemPrompt.Content))
 
 		permissionCtx := qe.appState.GetToolPermissionContext()
-		logger.NewModule("Engine").Info("SubmitMessage: assembling tool pool...")
+		logger.NewModule("Engine").Debug("SubmitMessage: assembling tool pool...")
 		allTools := qe.toolReg.AssembleToolPool(permissionCtx, nil)
 		coreTools := qe.toolReg.GetCoreTools(permissionCtx, nil)
 		if qe.coordinatorMode != nil {
 			allTools = qe.coordinatorMode.FilterTools(allTools)
 			coreTools = qe.coordinatorMode.FilterTools(coreTools)
 		}
-		logger.NewModule("Engine").Info("SubmitMessage: tools assembled, all=%d, core=%d", len(allTools), len(coreTools))
+		logger.NewModule("Engine").Debug("SubmitMessage: tools assembled, all=%d, core=%d", len(allTools), len(coreTools))
 
 		canUseTool := qe.config.CanUseTool
 		if canUseTool == nil {
@@ -943,7 +943,7 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		}
 
 		msgsAfterCompact := qe.getMessagesAfterCompactBoundary()
-		logger.NewModule("Engine").Info("SubmitMessage: messages after compact: %d (total: %d)", len(msgsAfterCompact), len(qe.messages))
+		logger.NewModule("Engine").Debug("SubmitMessage: messages after compact: %d (total: %d)", len(msgsAfterCompact), len(qe.messages))
 		queryParams := query.QueryParams{
 			Messages:          msgsAfterCompact,
 			SystemPrompt:      systemPrompt,
@@ -960,7 +960,7 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 		phaseTurnCount := 0
 		deps := query.QueryDeps{
 			CallModel: func(callCtx context.Context, p query.QueryParams) (<-chan query.QueryOutput, error) {
-				logger.NewModule("Engine").Info("CallModel invoked, model=%s, msgs=%d, tools=%d", p.Model, len(p.Messages), len(p.Tools))
+				logger.NewModule("Engine").Debug("CallModel invoked, model=%s, msgs=%d, tools=%d", p.Model, len(p.Messages), len(p.Tools))
 				return qe.callModel(callCtx, p)
 			},
 			Microcompact: qe.microcompact,
@@ -977,7 +977,7 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 				}
 			},
 			OnPhaseChange: func(phase string, toolName string, toolInput any) {
-				logger.NewModule("Engine").Info("PhaseChange: phase=%s, tool=%s", phase, toolName)
+				logger.NewModule("Engine").Debug("PhaseChange: phase=%s, tool=%s", phase, toolName)
 				switch phase {
 				case "call_model":
 					phaseTurnCount++
@@ -1051,7 +1051,7 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 
 		logger.NewModule("Engine").Info("SubmitMessage: starting query.Query...")
 		outputCh := query.Query(submitCtx, queryParams, deps)
-		logger.NewModule("Engine").Info("SubmitMessage: query.Query started, processing outputs")
+		logger.NewModule("Engine").Debug("SubmitMessage: query.Query started, processing outputs")
 
 		// 使用 defer 确保任何退出路径（含 outputCh 异常关闭）都能清理 UI 状态
 		defer func() {
@@ -1403,7 +1403,7 @@ func (qe *QueryEngine) callModel(ctx context.Context, params query.QueryParams) 
 
 func (qe *QueryEngine) callModelOllama(ctx context.Context, params query.QueryParams) (<-chan query.QueryOutput, error) {
 	if qe.apiClient == nil {
-		logger.NewModule("Engine").Info("apiClient not configured")
+		logger.NewModule("Engine").Warn("apiClient not configured")
 		ch := make(chan query.QueryOutput, 1)
 		ch <- query.QueryOutput{Type: "error", Error: fmt.Errorf("Ollama 客户端未配置")}
 		close(ch)
@@ -1429,7 +1429,7 @@ func (qe *QueryEngine) callModelOllama(ctx context.Context, params query.QueryPa
 		if len(contentPreview) > 80 {
 			contentPreview = contentPreview[:80] + "..."
 		}
-		logger.NewModule("Engine").Info("callModel(Ollama): msg[%d] role=%s, content_len=%d%s%s, preview=%q",
+		logger.NewModule("Engine").Debug("callModel(Ollama): msg[%d] role=%s, content_len=%d%s%s, preview=%q",
 			i, m.Role, len(m.Content), toolCallsInfo, toolCallIDInfo, contentPreview)
 	}
 
@@ -1458,13 +1458,13 @@ func (qe *QueryEngine) callModelOllama(ctx context.Context, params query.QueryPa
 		req.Think = true
 	}
 
-	logger.NewModule("Engine").Info("callModel(Ollama): calling ChatWithStreaming...")
+	logger.NewModule("Engine").Debug("callModel(Ollama): calling ChatWithStreaming...")
 	streamCh, err := qe.apiClient.ChatWithStreaming(ctx, req)
 	if err != nil {
-		logger.NewModule("Engine").Info("ChatWithStreaming failed: %v", err)
+		logger.NewModule("Engine").Error("ChatWithStreaming failed: %v", err)
 		return nil, err
 	}
-	logger.NewModule("Engine").Info("callModel(Ollama): ChatWithStreaming returned, starting bridge goroutine")
+	logger.NewModule("Engine").Debug("callModel(Ollama): ChatWithStreaming returned, starting bridge goroutine")
 
 	return qe.bridgeStream(streamCh), nil
 }
@@ -1500,10 +1500,10 @@ func (qe *QueryEngine) callModelLocalAI(ctx context.Context, params query.QueryP
 		req.Tools = api.ConvertToolsToLocalAI(toolDefs)
 	}
 
-	logger.NewModule("Engine").Info("callModel(LocalAI): calling ChatWithStreaming...")
+	logger.NewModule("Engine").Debug("callModel(LocalAI): calling ChatWithStreaming...")
 	streamCh, err := qe.localaiClient.ChatWithStreaming(ctx, req)
 	if err != nil {
-		logger.NewModule("Engine").Info("LocalAI ChatWithStreaming failed: %v", err)
+		logger.NewModule("Engine").Error("LocalAI ChatWithStreaming failed: %v", err)
 		return nil, err
 	}
 
@@ -1541,10 +1541,10 @@ func (qe *QueryEngine) callModelOpenAI(ctx context.Context, params query.QueryPa
 		req.Tools = api.ConvertToolsToOpenAI(toolDefs)
 	}
 
-	logger.NewModule("Engine").Info("callModel(OpenAI): calling ChatWithStreaming...")
+	logger.NewModule("Engine").Debug("callModel(OpenAI): calling ChatWithStreaming...")
 	streamCh, err := qe.openaiClient.ChatWithStreaming(ctx, req)
 	if err != nil {
-		logger.NewModule("Engine").Info("OpenAI ChatWithStreaming failed: %v", err)
+		logger.NewModule("Engine").Error("OpenAI ChatWithStreaming failed: %v", err)
 		return nil, err
 	}
 
@@ -1567,7 +1567,7 @@ func (qe *QueryEngine) bridgeStream(streamCh <-chan api.StreamMessage) <-chan qu
 			case "tool_calls_start":
 				outputCh <- query.QueryOutput{Type: "tool_calls_start"}
 			case "done":
-				logger.NewModule("Engine").Info("callModel: stream done after %d messages", msgCount)
+				logger.NewModule("Engine").Debug("callModel: stream done after %d messages", msgCount)
 				if msg.Usage != nil {
 					qe.mu.Lock()
 					qe.usage = *msg.Usage
@@ -1575,12 +1575,12 @@ func (qe *QueryEngine) bridgeStream(streamCh <-chan api.StreamMessage) <-chan qu
 				}
 				outputCh <- query.QueryOutput{Type: "stream_event", Data: msg}
 			case "error":
-				logger.NewModule("Engine").Info("stream error at msg %d: %v", msgCount, msg.Error)
+				logger.NewModule("Engine").Error("stream error at msg %d: %v", msgCount, msg.Error)
 				outputCh <- query.QueryOutput{Type: "error", Error: msg.Error}
 				return
 			}
 		}
-		logger.NewModule("Engine").Info("callModel: streamCh closed after %d messages", msgCount)
+		logger.NewModule("Engine").Debug("callModel: streamCh closed after %d messages", msgCount)
 	}()
 	return outputCh
 }
@@ -1758,7 +1758,7 @@ func (qe *QueryEngine) processQueryOutput(ctx context.Context, output query.Quer
 		qe.triggerAutoDream(ctx)
 		return []SDKMessage{{Type: "result", Subtype: reason, SessionID: qe.sessionID}}
 	case "error":
-		logger.NewModule("Engine").Info("query error: %v", output.Error)
+		logger.NewModule("Engine").Error("query error: %v", output.Error)
 		qe.mu.Lock()
 		qe.streamContent = ""
 		qe.streamThinking = ""
@@ -2029,7 +2029,7 @@ func (qe *QueryEngine) startTeamMemorySync() {
 	go func() {
 		result, err := teammemorysync.PullTeamMemory(qe.ctx, qe.teamSyncState)
 		if err != nil {
-			logger.NewModule("TeamSync").Info("initial pull failed: %v", err)
+			logger.NewModule("TeamSync").Warn("initial pull failed: %v", err)
 		} else if result != nil && result.Success {
 			logger.NewModule("TeamSync").Info("initial pull success: %d files", result.FilesWritten)
 		}
@@ -2111,12 +2111,12 @@ func (qe *QueryEngine) pushTeamMemoryWithSecretScan() {
 	})
 
 	if len(skipped) > 0 {
-		logger.NewModule("TeamSync").Info("跳过含 secret 的文件: %s", strings.Join(skipped, "; "))
+		logger.NewModule("TeamSync").Warn("跳过含 secret 的文件: %s", strings.Join(skipped, "; "))
 	}
 
 	result, err := teammemorysync.PushTeamMemory(qe.ctx, qe.teamSyncState)
 	if err != nil {
-		logger.NewModule("TeamSync").Info("push failed: %v", err)
+		logger.NewModule("TeamSync").Warn("push failed: %v", err)
 	} else if result != nil && result.Success {
 		logger.NewModule("TeamSync").Info("push success: %d files", result.FilesPushed)
 	}
@@ -2272,7 +2272,7 @@ func (qe *QueryEngine) microcompact(messages []types.Message) []types.Message {
 // 实现 compact.SummarizeFunc 接口，通过 API 客户端调用模型生成结构化摘要
 func (qe *QueryEngine) summarizeWithLLM(ctx any, messages []compact.CompactMessage, prompt string) (string, error) {
 	if len(messages) == 0 {
-		logger.NewModule("Compact").Info("消息为空, 跳过摘要")
+		logger.NewModule("Compact").Debug("消息为空, 跳过摘要")
 		return "", nil
 	}
 
@@ -2311,10 +2311,10 @@ func (qe *QueryEngine) summarizeWithLLM(ctx any, messages []compact.CompactMessa
 		if len(resp.Choices) > 0 && resp.Choices[0].Message != nil {
 			content := strings.TrimSpace(resp.Choices[0].Message.Content)
 			if content == "" {
-				logger.NewModule("Compact").Info("LLM 返回空内容")
+				logger.NewModule("Compact").Warn("LLM 返回空内容")
 				return "", fmt.Errorf("LLM 返回空摘要")
 			}
-			logger.NewModule("Compact").Info("LLM 摘要成功")
+			logger.NewModule("Compact").Debug("LLM 摘要成功")
 			return content, nil
 		}
 		return "", fmt.Errorf("OpenAI empty response")
@@ -2345,10 +2345,10 @@ func (qe *QueryEngine) summarizeWithLLM(ctx any, messages []compact.CompactMessa
 		if len(resp.Choices) > 0 && resp.Choices[0].Message != nil {
 			content := strings.TrimSpace(resp.Choices[0].Message.Content)
 			if content == "" {
-				logger.NewModule("Compact").Info("LLM 返回空内容")
+				logger.NewModule("Compact").Warn("LLM 返回空内容")
 				return "", fmt.Errorf("LLM 返回空摘要")
 			}
-			logger.NewModule("Compact").Info("LLM 摘要成功")
+			logger.NewModule("Compact").Debug("LLM 摘要成功")
 			return content, nil
 		}
 		return "", fmt.Errorf("LocalAI empty response")
@@ -2389,11 +2389,11 @@ func (qe *QueryEngine) summarizeWithLLM(ctx any, messages []compact.CompactMessa
 		}
 
 		if strings.TrimSpace(resp.Content) == "" {
-			logger.NewModule("Compact").Info("LLM 返回空内容")
+			logger.NewModule("Compact").Warn("LLM 返回空内容")
 			return "", fmt.Errorf("LLM 返回空摘要")
 		}
 
-		logger.NewModule("Compact").Info("LLM 摘要成功")
+		logger.NewModule("Compact").Debug("LLM 摘要成功")
 		return resp.Content, nil
 	}
 }
@@ -2416,7 +2416,7 @@ func (qe *QueryEngine) autoCompact(messages []types.Message) (*query.CompactionR
 	autoCompactThreshold := compact.GetAutoCompactThreshold(windowSize)
 
 	if !compact.ShouldAutoCompact(totalTokens, windowSize) {
-		logger.NewModule("Compact").Info("token 未达阈值, 跳过压缩")
+		logger.NewModule("Compact").Debug("token 未达阈值, 跳过压缩")
 		return nil, nil
 	}
 	logger.NewModule("Compact").Info("token 达到阈值, 触发压缩")
@@ -2447,7 +2447,7 @@ func (qe *QueryEngine) autoCompact(messages []types.Message) (*query.CompactionR
 		}, nil
 	}
 
-	logger.NewModule("Compact").Info("回退到微压缩策略")
+	logger.NewModule("Compact").Warn("回退到微压缩策略")
 	result := compact.MicrocompactMessages(compactMessages)
 
 	if result.MessagesAfter < 0 || result.MessagesAfter > len(compactMessages) {
@@ -2532,7 +2532,7 @@ func (qe *QueryEngine) trySessionMemoryCompaction(messages []types.Message, auto
 	}
 
 	if keptTokens < smCompactMinTokens || len(keptMessages) < smCompactMinMessages {
-		logger.NewModule("Compact").Info("SM Compact: 保留消息不足 (%d tokens, %d msgs), 跳过", keptTokens, len(keptMessages))
+		logger.NewModule("Compact").Debug("SM Compact: 保留消息不足 (%d tokens, %d msgs), 跳过", keptTokens, len(keptMessages))
 		return nil, nil
 	}
 
@@ -2540,12 +2540,12 @@ func (qe *QueryEngine) trySessionMemoryCompaction(messages []types.Message, auto
 	totalAfter := summaryTokens + keptTokens
 
 	if totalAfter >= autoCompactThreshold {
-		logger.NewModule("Compact").Info("SM Compact: 压缩后 %d tokens >= 阈值 %d, 降级到 Full Compact", totalAfter, autoCompactThreshold)
+		logger.NewModule("Compact").Debug("SM Compact: 压缩后 %d tokens >= 阈值 %d, 降级到 Full Compact", totalAfter, autoCompactThreshold)
 		return nil, nil
 	}
 
 	if totalAfter > smCompactMaxTokens {
-		logger.NewModule("Compact").Info("SM Compact: 压缩后 %d tokens > 最大 %d, 降级", totalAfter, smCompactMaxTokens)
+		logger.NewModule("Compact").Debug("SM Compact: 压缩后 %d tokens > 最大 %d, 降级", totalAfter, smCompactMaxTokens)
 		return nil, nil
 	}
 

@@ -205,7 +205,7 @@ func (c *Client) ChatWithStreaming(ctx context.Context, req OllamaChatRequest) (
 
 			select {
 			case <-ctx.Done():
-				logger.NewModule("API").Info("stream cancelled before attempt %d: %v", attempt, ctx.Err())
+				logger.NewModule("API").Debug("stream cancelled before attempt %d: %v", attempt, ctx.Err())
 				ch <- StreamMessage{Type: "error", Error: ctx.Err()}
 				return
 			default:
@@ -239,10 +239,10 @@ func (c *Client) ChatWithStreaming(ctx context.Context, req OllamaChatRequest) (
 						delay = rc.MaxDelay
 					}
 				}
-				logger.NewModule("API").Info("retry attempt %d after %v delay", attempt, delay)
+				logger.NewModule("API").Warn("retry attempt %d after %v delay", attempt, delay)
 				select {
 				case <-ctx.Done():
-					logger.NewModule("API").Info("stream cancelled during retry backoff: %v", ctx.Err())
+					logger.NewModule("API").Debug("stream cancelled during retry backoff: %v", ctx.Err())
 					ch <- StreamMessage{Type: "error", Error: ctx.Err()}
 					return
 				case <-time.After(delay):
@@ -256,7 +256,7 @@ func (c *Client) ChatWithStreaming(ctx context.Context, req OllamaChatRequest) (
 
 			// ctx 已取消则直接返回，不重试
 			if ctx.Err() != nil {
-				logger.NewModule("API").Info("stream cancelled after attempt %d: %v", attempt, ctx.Err())
+				logger.NewModule("API").Debug("stream cancelled after attempt %d: %v", attempt, ctx.Err())
 				ch <- StreamMessage{Type: "error", Error: ctx.Err()}
 				return
 			}
@@ -264,12 +264,12 @@ func (c *Client) ChatWithStreaming(ctx context.Context, req OllamaChatRequest) (
 			lastErr = err
 			if apiErr, ok := err.(*APIError); ok {
 				if !apiErr.Retryable {
-					logger.NewModule("API").Info("non-retryable error %d: %s", apiErr.StatusCode, apiErr.Message)
+					logger.NewModule("API").Error("non-retryable error %d: %s", apiErr.StatusCode, apiErr.Message)
 					ch <- StreamMessage{Type: "error", Error: apiErr}
 					return
 				}
 			}
-			logger.NewModule("API").Info("stream attempt %d failed (will retry): %v", attempt, err)
+			logger.NewModule("API").Warn("stream attempt %d failed (will retry): %v", attempt, err)
 
 			isModelLoading := false
 			if apiErr, ok := err.(*APIError); ok && apiErr.Type == "model_loading" {
@@ -282,7 +282,7 @@ func (c *Client) ChatWithStreaming(ctx context.Context, req OllamaChatRequest) (
 						Type:  "error",
 						Error: fmt.Errorf("model is still loading after %d retries: %w", loadingAttempts, lastErr),
 					}
-					logger.NewModule("API").Info("max model-loading retries exceeded (%d): %v", loadingAttempts, lastErr)
+					logger.NewModule("API").Error("max model-loading retries exceeded (%d): %v", loadingAttempts, lastErr)
 					return
 				}
 			} else {
@@ -292,7 +292,7 @@ func (c *Client) ChatWithStreaming(ctx context.Context, req OllamaChatRequest) (
 						Type:  "error",
 						Error: fmt.Errorf("max retries exceeded: %w", lastErr),
 					}
-					logger.NewModule("API").Info("max retries exceeded: %v", lastErr)
+					logger.NewModule("API").Error("max retries exceeded: %v", lastErr)
 					return
 				}
 			}
@@ -352,8 +352,8 @@ func (c *Client) executeChatStream(ctx context.Context, req OllamaChatRequest, c
 	}
 
 	url := c.config.BaseURL + "/chat"
-	logger.NewModule("API").Info("POST %s, model=%s, msgs=%d, tools=%d, body_len=%d", url, req.Model, len(req.Messages), len(req.Tools), len(body))
-	logger.NewModule("API").Info("req params: keep_alive=%q stream=%v think=%v format=%v options=%+v", req.KeepAlive, req.Stream, req.Think, req.Format, req.Options)
+	logger.NewModule("API").Debug("POST %s, model=%s, msgs=%d, tools=%d, body_len=%d", url, req.Model, len(req.Messages), len(req.Tools), len(body))
+	logger.NewModule("API").Debug("req params: keep_alive=%q stream=%v think=%v format=%v options=%+v", req.KeepAlive, req.Stream, req.Think, req.Format, req.Options)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -362,14 +362,14 @@ func (c *Client) executeChatStream(ctx context.Context, req OllamaChatRequest, c
 
 	c.setHeaders(httpReq)
 
-	logger.NewModule("API").Info("sending HTTP request...")
+	logger.NewModule("API").Debug("sending HTTP request...")
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		logger.NewModule("API").Info("HTTP request failed: %v", err)
+		logger.NewModule("API").Error("HTTP request failed: %v", err)
 		return &APIError{StatusCode: 0, Message: err.Error(), Type: "connection_error", Retryable: true}
 	}
 	defer resp.Body.Close()
-	logger.NewModule("API").Info("HTTP response status=%d", resp.StatusCode)
+	logger.NewModule("API").Debug("HTTP response status=%d", resp.StatusCode)
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -378,13 +378,13 @@ func (c *Client) executeChatStream(ctx context.Context, req OllamaChatRequest, c
 			Message:    string(respBody),
 		}
 		apiErr.Retryable, apiErr.Type = CategorizeRetryableError(resp.StatusCode, c.config.IsLocal)
-		logger.NewModule("API").Info("HTTP %d: %s, body=%s", resp.StatusCode, apiErr.Type, truncateStr(string(respBody), 200))
+		logger.NewModule("API").Debug("HTTP %d: %s, body=%s", resp.StatusCode, apiErr.Type, truncateStr(string(respBody), 200))
 		return apiErr
 	}
 
-	logger.NewModule("API").Info("starting NDJSON parse...")
+	logger.NewModule("API").Debug("starting NDJSON parse...")
 	err = c.parseNDJSONStream(resp.Body, ch)
-	logger.NewModule("API").Info("NDJSON parse finished, err=%v", err)
+	logger.NewModule("API").Debug("NDJSON parse finished, err=%v", err)
 	return err
 }
 
@@ -406,7 +406,7 @@ func (c *Client) setHeaders(req *http.Request) {
 func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) error {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
-	logger.NewModule("API").Info("parseNDJSONStream: waiting for first line...")
+	logger.NewModule("API").Debug("parseNDJSONStream: waiting for first line...")
 
 	var (
 		usage            Usage
@@ -420,7 +420,7 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 	for scanner.Scan() {
 		line := scanner.Text()
 		if firstLine {
-			logger.NewModule("API").Info("parseNDJSONStream: first line received (%d bytes): %s", len(line), truncateStr(line, 500))
+			logger.NewModule("API").Debug("parseNDJSONStream: first line received (%d bytes): %s", len(line), truncateStr(line, 500))
 			firstLine = false
 			if line == "" {
 				continue
@@ -430,16 +430,16 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 			if line == "" {
 				continue
 			}
-			logger.NewModule("API").Info("stream event: (skip first line verbose logging for: %d bytes)", len(line))
+			logger.NewModule("API").Debug("stream event: (skip first line verbose logging for: %d bytes)", len(line))
 		}
 
 		var event OllamaChatStreamEvent
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			logger.NewModule("API").Info("stream: skipping malformed NDJSON line (%d bytes): %v", len(line), err)
+			logger.NewModule("API").Debug("stream: skipping malformed NDJSON line (%d bytes): %v", len(line), err)
 			continue
 		}
 
-		logger.NewModule("API").Info("stream event: done=%v, role=%q, content_len=%d, thinking_len=%d, tool_calls=%d, done_reason=%q",
+		logger.NewModule("API").Debug("stream event: done=%v, role=%q, content_len=%d, thinking_len=%d, tool_calls=%d, done_reason=%q",
 			event.Done, event.Message.Role, len(event.Message.Content), len(event.Message.Thinking), len(event.Message.ToolCalls), event.DoneReason)
 
 		if event.Message.Content != "" {
@@ -484,7 +484,7 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 			if stopReason == "load" {
 				logger.NewModule("API").Info("model is loading: load_duration=%d total_duration=%d prompt_eval_count=%d eval_count=%d",
 					event.LoadDuration, event.TotalDuration, event.PromptEvalCount, event.EvalCount)
-				logger.NewModule("API").Info("model is loading, will retry after delay")
+				logger.NewModule("API").Debug("model is loading, will retry after delay")
 				return &APIError{StatusCode: 0, Message: "model is loading", Type: "model_loading", Retryable: true}
 			}
 			if len(event.Message.Content) > 0 {
@@ -527,7 +527,7 @@ func (c *Client) parseNDJSONStream(reader io.Reader, ch chan<- StreamMessage) er
 	}
 
 	if err := scanner.Err(); err != nil {
-		logger.NewModule("API").Info("stream scanner error: %v", err)
+		logger.NewModule("API").Error("stream scanner error: %v", err)
 		return &APIError{StatusCode: 0, Message: err.Error(), Type: "stream_error", Retryable: true}
 	}
 

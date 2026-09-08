@@ -145,7 +145,7 @@ func (rl *ReflectLoop) RecordAction(success bool) bool {
 	// 触发条件 2：出错且配置开启
 	if !success && rl.cfg.ReflectOnError {
 		if rl.actionCount >= rl.cfg.MinActionsForReflect {
-			logger.NewModule("ReflectLoop").Info("action failed after %d actions, triggering error reflect", rl.actionCount)
+			logger.NewModule("ReflectLoop").Warn("action failed after %d actions, triggering error reflect", rl.actionCount)
 			return true
 		}
 	}
@@ -262,7 +262,7 @@ func (rl *ReflectLoop) CompleteReflectCycle(result *ReflectResult) {
 	rl.lastReflect = time.Now()
 
 	if result != nil {
-		logger.NewModule("ReflectLoop").Info("cycle %d completed, assessment=%s, adjustments=%d",
+		logger.NewModule("ReflectLoop").Debug("cycle %d completed, assessment=%s, adjustments=%d",
 			result.CycleID, result.Assessment, len(result.Adjustments))
 	}
 }

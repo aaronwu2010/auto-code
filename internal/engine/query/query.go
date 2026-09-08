@@ -235,13 +235,13 @@ func (e *StreamingToolExecutor) AddTool(ctx context.Context, tool tools.Tool, in
 	e.expected++
 	e.wg.Add(1)
 	e.mu.Unlock()
-	logger.NewModule("Query").Info("AddTool: starting tool '%s' idx=%d", tool.Name(), toolCallIndex)
+	logger.NewModule("Query").Debug("AddTool: starting tool '%s' idx=%d", tool.Name(), toolCallIndex)
 
 	go func() {
 		defer e.wg.Done()
-		logger.NewModule("Query").Info("tool '%s' executing...", tool.Name())
+		logger.NewModule("Query").Debug("tool '%s' executing...", tool.Name())
 		result := e.executeTool(ctx, tool, input, toolUseID, toolCallIndex)
-		logger.NewModule("Query").Info("tool '%s' done, err=%v", tool.Name(), result.Err)
+		logger.NewModule("Query").Debug("tool '%s' done, err=%v", tool.Name(), result.Err)
 		e.mu.Lock()
 		e.results[toolUseID] = result
 		e.doneCount++
@@ -250,7 +250,7 @@ func (e *StreamingToolExecutor) AddTool(ctx context.Context, tool tools.Tool, in
 		case e.resultsCh <- result:
 		default:
 			// 通道缓冲区满时仍保留 results 中的结果，仅丢失实时事件通知
-			logger.NewModule("Query").Info("resultsCh full for tool '%s' (idx=%d, id=%s); result remains in map",
+			logger.NewModule("Query").Debug("resultsCh full for tool '%s' (idx=%d, id=%s); result remains in map",
 				tool.Name(), toolCallIndex, toolUseID)
 		}
 	}()
@@ -267,7 +267,7 @@ func (e *StreamingToolExecutor) IsScheduled(toolUseID string) bool {
 func (e *StreamingToolExecutor) executeTool(ctx context.Context, tool tools.Tool, input any, toolUseID string, toolCallIndex int) *toolExecutionResult {
 	permResult, err := e.canUseTool(tool, input)
 	if err != nil {
-		logger.NewModule("Query").Info("canUseTool error for %s: %v", tool.Name(), err)
+		logger.NewModule("Query").Debug("canUseTool error for %s: %v", tool.Name(), err)
 		return &toolExecutionResult{Err: err, ToolUseID: toolUseID, ToolCallIdx: toolCallIndex}
 	}
 	if permResult.Behavior == types.DecisionDeny {
@@ -286,7 +286,7 @@ func (e *StreamingToolExecutor) executeTool(ctx context.Context, tool tools.Tool
 	if e.toolCtx != nil {
 		innerPerm, innerErr := tool.CheckPermissions(ctx, input, e.toolCtx)
 		if innerErr != nil {
-			logger.NewModule("Query").Info("CheckPermissions error for %s: %v", tool.Name(), innerErr)
+			logger.NewModule("Query").Error("CheckPermissions error for %s: %v", tool.Name(), innerErr)
 			return &toolExecutionResult{Err: innerErr, ToolUseID: toolUseID, ToolCallIdx: toolCallIndex}
 		}
 		if innerPerm.Behavior == types.DecisionDeny {
@@ -324,7 +324,7 @@ func (e *StreamingToolExecutor) executeTool(ctx context.Context, tool tools.Tool
 
 	toolResult, err := tool.Call(ctx, input, e.toolCtx, func(progress any) {})
 	if err != nil {
-		logger.NewModule("Query").Info("tool.Call error for %s: %v", tool.Name(), err)
+		logger.NewModule("Query").Error("tool.Call error for %s: %v", tool.Name(), err)
 		if e.hookExec != nil {
 			e.hookExec.ExecutePostToolUseFailureHooks(ctx, tool.Name(), inputToMap(input), err.Error())
 		}
@@ -364,7 +364,7 @@ func (e *StreamingToolExecutor) WaitForAllResults(timeoutMs int) map[int]*toolEx
 	expected := e.expected
 	doneCnt := e.doneCount
 	e.mu.Unlock()
-	logger.NewModule("Query").Info("WaitForAllResults: expected=%d, done=%d, timeout=%dms", expected, doneCnt, timeoutMs)
+	logger.NewModule("Query").Debug("WaitForAllResults: expected=%d, done=%d, timeout=%dms", expected, doneCnt, timeoutMs)
 
 	done := make(chan struct{})
 	go func() {
@@ -374,13 +374,13 @@ func (e *StreamingToolExecutor) WaitForAllResults(timeoutMs int) map[int]*toolEx
 	if timeoutMs > 0 {
 		select {
 		case <-done:
-			logger.NewModule("Query").Info("WaitForAllResults: all tools completed")
+			logger.NewModule("Query").Debug("WaitForAllResults: all tools completed")
 		case <-time.After(time.Duration(timeoutMs) * time.Millisecond):
-			logger.NewModule("Query").Info("WaitForAllResults: timeout after %dms", timeoutMs)
+			logger.NewModule("Query").Debug("WaitForAllResults: timeout after %dms", timeoutMs)
 		}
 	} else {
 		<-done
-		logger.NewModule("Query").Info("WaitForAllResults: all tools completed (no timeout)")
+		logger.NewModule("Query").Debug("WaitForAllResults: all tools completed (no timeout)")
 	}
 
 	e.mu.Lock()
@@ -397,7 +397,7 @@ func Query(ctx context.Context, params QueryParams, deps QueryDeps) <-chan Query
 	logger.NewModule("Query").Info("Query called, msgs=%d, tools=%d", len(params.Messages), len(params.Tools))
 
 	go func() {
-		logger.NewModule("Query").Info("goroutine started")
+		logger.NewModule("Query").Debug("goroutine started")
 		defer close(ch)
 
 		state := State{
@@ -414,7 +414,7 @@ func Query(ctx context.Context, params QueryParams, deps QueryDeps) <-chan Query
 		// L2 ReAct Bridge：自动启用（nil-safe，不想要 ReAct 设成 nil 即可）
 		// goal 取第一条 user 消息的 content（即用户的原始 prompt）
 		state.ReActBridge = NewReActBridge(extractGoalFromMessages(params.Messages))
-		logger.NewModule("Query").Info("init step 1: ReActBridge created")
+		logger.NewModule("Query").Debug("init step 1: ReActBridge created")
 
 		// P1 增强：初始化 GoalTracker 依赖推断 + 注入验证门
 		if state.ReActBridge != nil {
@@ -426,23 +426,23 @@ func Query(ctx context.Context, params QueryParams, deps QueryDeps) <-chan Query
 				state.ReActBridge.SetVerificationGate(gate, params.ProjectDir)
 			}
 		}
-		logger.NewModule("Query").Info("init step 2: GoalTracker + VerificationGate done")
+		logger.NewModule("Query").Debug("init step 2: GoalTracker + VerificationGate done")
 
 		// --- 智能增强模块初始化 ---
 		// R8 CrossValidator: 多角度交叉验证（编译/lint/安全/性能/影响范围）
 		state.CrossValidator = NewCrossValidator(true, params.ProjectDir)
-		logger.NewModule("Query").Info("init step 3a: CrossValidator done")
+		logger.NewModule("Query").Debug("init step 3a: CrossValidator done")
 		// R9 UncertaintyEngine: 不确定性感知
 		state.UncertaintyEngine = NewUncertaintyEngine(true, params.ProjectDir)
-		logger.NewModule("Query").Info("init step 3b: UncertaintyEngine done")
+		logger.NewModule("Query").Debug("init step 3b: UncertaintyEngine done")
 		// R12 ReflectLoop: 深度执行-反思循环
 		state.ReflectLoop = NewReflectLoop(DefaultReflectCycleConfig())
-		logger.NewModule("Query").Info("init step 3c: ReflectLoop done")
+		logger.NewModule("Query").Debug("init step 3c: ReflectLoop done")
 		// R3 RuntimeReplanner: 执行中动态重规划（依赖 GoalTracker）
 		if gt := state.ReActBridge.GetGoalTracker(); gt != nil {
 			state.RuntimeReplanner = NewRuntimeReplanner(DefaultReplannerConfig(), gt)
 		}
-		logger.NewModule("Query").Info("init step 3d: RuntimeReplanner done")
+		logger.NewModule("Query").Debug("init step 3d: RuntimeReplanner done")
 
 		// --- 高级智能模式初始化 ---
 		state.HypothesisExplorer = NewHypothesisExplorer(DefaultHypothesisExplorerConfig())
@@ -450,7 +450,7 @@ func Query(ctx context.Context, params QueryParams, deps QueryDeps) <-chan Query
 		state.ProactiveProbe = NewProactiveProbe(DefaultProactiveProbeConfig())
 		state.FocusManager = NewFocusManager(DefaultFocusManagerConfig())
 		state.AlternativeAnalyzer = NewAlternativeAnalyzer(DefaultAlternativeAnalyzerConfig())
-		logger.NewModule("Query").Info("init step 4: Advanced modes done")
+		logger.NewModule("Query").Debug("init step 4: Advanced modes done")
 
 		// --- AI 助手优先设计移植初始化 ---
 		state.ToolSelector = NewToolSelector(DefaultToolSelectorConfig())
@@ -470,11 +470,11 @@ func Query(ctx context.Context, params QueryParams, deps QueryDeps) <-chan Query
 		state.SmartToolResultFilter = NewSmartToolResultFilter(true)
 		state.WorkingMemory = NewWorkingMemory()
 		state.PreciseTokenBudget = NewPreciseTokenBudget(DefaultTokenBudgetConfig())
-		logger.NewModule("Query").Info("init step 5: AI-assistant designs done")
+		logger.NewModule("Query").Debug("init step 5: AI-assistant designs done")
 
 		// FocusManager 初始同步 GoalTracker
 		state.FocusManager.SyncFromGoalTracker(state.ReActBridge.GetGoalTracker())
-		logger.NewModule("Query").Info("init step 6: FocusManager synced")
+		logger.NewModule("Query").Debug("init step 6: FocusManager synced")
 
 		if params.MaxTurns <= 0 {
 			params.MaxTurns = DefaultMaxTurns
@@ -508,7 +508,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		}
 
 		messages := state.Messages
-		logger.NewModule("Query").Info("loop turn=%d, msgs=%d, last_role=%s", state.TurnCount, len(messages), func() string {
+		logger.NewModule("Query").Debug("loop turn=%d, msgs=%d, last_role=%s", state.TurnCount, len(messages), func() string {
 			if len(messages) > 0 {
 				return string(messages[len(messages)-1].Role)
 			}
@@ -528,7 +528,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			if userInput != "" {
 				report := state.HypothesisExplorer.Analyze(ctx, userInput, nil, nil)
 				if report != nil && report.Triggered && report.RawContext != "" {
-					logger.NewModule("HypothesisExplorer").Info("triggered (task=%s, hyps=%d)", report.TaskType, len(report.Results))
+					logger.NewModule("HypothesisExplorer").Debug("triggered (task=%s, hyps=%d)", report.TaskType, len(report.Results))
 					hypMsg := types.Message{
 						Role:      types.RoleUser,
 						Content:   report.RawContext,
@@ -587,7 +587,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 					}
 
 					if instr := state.DynamicPromptEngine.BuildTaskInstruction(dynTaskType, lang); instr != "" {
-						logger.NewModule("DynamicPrompt").Info("injected task guidance (task=%s, lang=%s, %d chars)",
+						logger.NewModule("DynamicPrompt").Debug("injected task guidance (task=%s, lang=%s, %d chars)",
 							state.CurrentTaskType, lang, len(instr))
 						dynMsg := types.Message{
 							Role:      types.RoleUser,
@@ -650,7 +650,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 								for _, r := range newRisks {
 									state.InjectedRisks[r] = true
 								}
-								logger.NewModule("ChecklistEngine").Info("injected scenes=%v risks=%v", newScenes, newRisks)
+								logger.NewModule("ChecklistEngine").Debug("injected scenes=%v risks=%v", newScenes, newRisks)
 							}
 						}
 					}
@@ -681,7 +681,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 							messages = append(messages, deliveryMsg)
 							state.Messages = append(state.Messages, deliveryMsg)
 							state.InjectedStackDelivery = true
-							logger.NewModule("StackDelivery").Info("injected for task=%s lang=%s projType=%s", state.CurrentTaskType, state.ProjectLang, projType)
+							logger.NewModule("StackDelivery").Debug("injected for task=%s lang=%s projType=%s", state.CurrentTaskType, state.ProjectLang, projType)
 						}
 					}
 
@@ -698,7 +698,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 						messages = append(messages, migrationMsg)
 						state.Messages = append(state.Messages, migrationMsg)
 						state.InjectedReferenceGuide = true
-						logger.NewModule("ReferenceMigration").Info("injected")
+						logger.NewModule("ReferenceMigration").Debug("injected")
 					}
 				}
 			}
@@ -787,14 +787,14 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 					lastMsg.Role, len(lastMsg.Content), len(lastMsg.ToolCalls), lastMsg.IsMeta)
 				// 额外诊断：如果 LLM 返回了空 assistant（stop 无内容无 tool_calls），记录完整上下文
 				if lastMsg.Role == types.RoleAssistant && len(lastMsg.Content) == 0 && len(lastMsg.ToolCalls) == 0 {
-					logger.NewModule("Query").Info("WARNING: empty assistant response with stop reason!")
+					logger.NewModule("Query").Warn("WARNING: empty assistant response with stop reason!")
 					startIdx := len(messages) - 3
 					if startIdx < 0 {
 						startIdx = 0
 					}
 					for i := startIdx; i < len(messages); i++ {
 						m := messages[i]
-						logger.NewModule("Query").Info("messages[%d]: role=%s content_len=%d tool_calls=%d is_meta=%v",
+						logger.NewModule("Query").Debug("messages[%d]: role=%s content_len=%d tool_calls=%d is_meta=%v",
 							i, m.Role, len(m.Content), len(m.ToolCalls), m.IsMeta)
 					}
 				}
@@ -802,7 +802,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 				return
 			}
 		} else {
-			logger.NewModule("Query").Info("terminal: empty messages")
+			logger.NewModule("Query").Warn("terminal: empty messages")
 			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "empty_messages"}}
 			return
 		}
@@ -824,7 +824,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			// 用缓存的 TaskType（Turn 0 时已检测）
 			selected := state.ToolSelector.Select(currentTools, state.CurrentTaskType, projExt)
 			if len(selected) > 0 && len(selected) < len(currentTools) {
-				logger.NewModule("ToolSelector").Info("filtered tools: %d -> %d (task=%s)",
+				logger.NewModule("ToolSelector").Debug("filtered tools: %d -> %d (task=%s)",
 					len(currentTools), len(selected), state.CurrentTaskType)
 				currentTools = selected
 			}
@@ -837,7 +837,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		// === L2 ReAct Bridge Hook 1: CallModel 前注入防重犯/进度上下文 ===
 		if state.ReActBridge != nil {
 			if reactCtx := state.ReActBridge.BuildPreCallContext(); reactCtx != "" {
-				logger.NewModule("ReAct-Bridge").Info("injecting pre-call context", "chars", len(reactCtx))
+				logger.NewModule("ReAct-Bridge").Debug("injecting pre-call context", "chars", len(reactCtx))
 				reactMsg := types.Message{
 					Role:      types.RoleUser,
 					Content:   reactCtx,
@@ -862,7 +862,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 				gt := state.ReActBridge.GetGoalTracker()
 				reflectCtx = state.ReflectLoop.BuildReflectContext(trace, gt, trigger)
 				if reflectCtx != "" {
-					logger.NewModule("ReflectLoop").Info("injecting reflect context (%d chars)", len(reflectCtx))
+					logger.NewModule("ReflectLoop").Debug("injecting reflect context (%d chars)", len(reflectCtx))
 					reflectMsg := types.Message{
 						Role:      types.RoleUser,
 						Content:   reflectCtx,
@@ -885,7 +885,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		// R3 RuntimeReplanner: 注入重规划上下文（如果有 blocked/failed 子任务）
 		if state.RuntimeReplanner != nil {
 			if replanCtx := state.RuntimeReplanner.BuildReplannerContext(); replanCtx != "" {
-				logger.NewModule("RuntimeReplanner").Info("injecting replanner context (%d chars)", len(replanCtx))
+				logger.NewModule("RuntimeReplanner").Debug("injecting replanner context (%d chars)", len(replanCtx))
 				replanMsg := types.Message{
 					Role:      types.RoleUser,
 					Content:   replanCtx,
@@ -903,7 +903,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			state.FocusManager.SyncFromGoalTracker(state.ReActBridge.GetGoalTracker())
 			state.FocusManager.Tick()
 			if focusCtx := state.FocusManager.BuildFocusContext(); focusCtx != "" {
-				logger.NewModule("FocusManager").Info("injecting focus context (%d chars)", len(focusCtx))
+				logger.NewModule("FocusManager").Debug("injecting focus context (%d chars)", len(focusCtx))
 				focusMsg := types.Message{
 					Role:      types.RoleUser,
 					Content:   focusCtx,
@@ -920,7 +920,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		if state.ProactiveProbe != nil {
 			state.ProactiveProbe.ResetCycle()
 			if probeCtx := state.ProactiveProbe.BuildProbeContext(); probeCtx != "" {
-				logger.NewModule("ProactiveProbe").Info("injecting probe context (%d chars)", len(probeCtx))
+				logger.NewModule("ProactiveProbe").Debug("injecting probe context (%d chars)", len(probeCtx))
 				probeMsg := types.Message{
 					Role:      types.RoleUser,
 					Content:   probeCtx,
@@ -1020,7 +1020,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 						for _, r := range freshRisks {
 							state.InjectedRisks[r] = true
 						}
-						logger.NewModule("ChecklistEngine").Info("dynamically injected", "turn", state.TurnCount, "scenes", freshScenes, "risks", freshRisks)
+						logger.NewModule("ChecklistEngine").Debug("dynamically injected", "turn", state.TurnCount, "scenes", freshScenes, "risks", freshRisks)
 					}
 				}
 			}
@@ -1030,21 +1030,21 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		if state.PreciseTokenBudget != nil {
 			estimated := state.PreciseTokenBudget.EstimateMessages(messages)
 			if estimated > state.PreciseTokenBudget.cfg.TotalBudget {
-				logger.NewModule("PreciseTokenBudget").Info("estimated %d tokens > budget %d, trimming...",
+				logger.NewModule("PreciseTokenBudget").Debug("estimated %d tokens > budget %d, trimming...",
 					estimated, state.PreciseTokenBudget.cfg.TotalBudget)
 				beforeCount := len(messages)
 				messages = state.PreciseTokenBudget.TrimMessages(messages)
-				logger.NewModule("PreciseTokenBudget").Info("trimmed from %d to %d messages, estimated: %d tokens",
+				logger.NewModule("PreciseTokenBudget").Debug("trimmed from %d to %d messages, estimated: %d tokens",
 					beforeCount, len(messages), state.PreciseTokenBudget.EstimateMessages(messages))
 			}
 		}
 
 		logger.NewModule("Query").Info("calling CallModel...")
-		logger.NewModule("Query").Info("CallModel input: messages=%d, tools=%d",
+		logger.NewModule("Query").Debug("CallModel input: messages=%d, tools=%d",
 			len(messages), len(currentTools))
 		if len(messages) > 0 {
 			last := messages[len(messages)-1]
-			logger.NewModule("Query").Info("CallModel last msg: role=%s content_len=%d tool_calls=%d is_meta=%v",
+			logger.NewModule("Query").Debug("CallModel last msg: role=%s content_len=%d tool_calls=%d is_meta=%v",
 				last.Role, len(last.Content), len(last.ToolCalls), last.IsMeta)
 		}
 		streamCh, err := deps.CallModel(ctx, QueryParams{
@@ -1055,11 +1055,11 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			Thinking:     params.Thinking,
 		})
 		if err != nil {
-			logger.NewModule("Query").Info("CallModel failed: %v", err)
+			logger.NewModule("Query").Error("CallModel failed: %v", err)
 			ch <- QueryOutput{Type: "error", Error: err}
 			return
 		}
-		logger.NewModule("Query").Info("CallModel returned, reading stream...")
+		logger.NewModule("Query").Debug("CallModel returned, reading stream...")
 
 		var (
 			needsFollowUp        bool
@@ -1072,7 +1072,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 
 		for msg := range streamCh {
 			if firstStreamMsg {
-				logger.NewModule("Query").Info("first stream msg received, type=%s", msg.Type)
+				logger.NewModule("Query").Debug("first stream msg received, type=%s", msg.Type)
 				firstStreamMsg = false
 			}
 			// 每条 stream event 都打一行摘要（避免 silent 跳过）
@@ -1084,7 +1084,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 					contentLen = len(msg.Message.Content)
 					tcCount = len(msg.Message.ToolCalls)
 				}
-				logger.NewModule("Query").Info("stream event=assistant content_len=%d tool_calls=%d", contentLen, tcCount)
+				logger.NewModule("Query").Debug("stream event=assistant content_len=%d tool_calls=%d", contentLen, tcCount)
 			case "stream_event":
 				// 从 Data 里取 stopReason（API 层已解析过）
 				var sr string
@@ -1101,13 +1101,13 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 						}
 					}
 				}
-				logger.NewModule("Query").Info("stream_event done=%v stopReason=%s", sr == "stop" || sr == "end_turn" || sr == "", sr)
+				logger.NewModule("Query").Debug("stream_event done=%v stopReason=%s", sr == "stop" || sr == "end_turn" || sr == "", sr)
 			case "error":
 				logger.NewModule("Query").Info("stream_event=error err=%v", msg.Error)
 			case "done":
 				logger.NewModule("Query").Info("stream_event=done")
 			default:
-				logger.NewModule("Query").Info("stream_event=%s", msg.Type)
+				logger.NewModule("Query").Debug("stream_event=%s", msg.Type)
 			}
 			select {
 			case <-ctx.Done():
@@ -1170,7 +1170,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 								if state.GuardRailEngine != nil {
 									decision := state.GuardRailEngine.CheckToolGuard(tc.Function.Name, input)
 									if !decision.Passed {
-										logger.NewModule("GuardRail").Info("BLOCKED %s: %s", tc.Function.Name, decision.Reason)
+										logger.NewModule("GuardRail").Warn("BLOCKED %s: %s", tc.Function.Name, decision.Reason)
 										// 不拒绝——给 LLM 一个 "工具返回了提示"，让它自己决定先读再改
 										state.Messages = append(state.Messages, types.Message{
 											Role:       types.RoleTool,
@@ -1218,7 +1218,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 
 			case "error":
 				if msg.Error != nil {
-					logger.NewModule("Query").Info("stream error: %v", msg.Error)
+					logger.NewModule("Query").Error("stream error: %v", msg.Error)
 					ch <- QueryOutput{Type: "error", Error: msg.Error}
 					return
 				}
@@ -1226,11 +1226,11 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		}
 
 		// === 调试: stream 处理完毕后的完整状态 ===
-		logger.NewModule("Query").Info("--- stream done summary ---")
-		logger.NewModule("Query").Info("stopReason=%s, needsFollowUp=%v, assistantBuffer_nil=%v, assistantHasAppended=%v",
+		logger.NewModule("Query").Debug("--- stream done summary ---")
+		logger.NewModule("Query").Debug("stopReason=%s, needsFollowUp=%v, assistantBuffer_nil=%v, assistantHasAppended=%v",
 			stopReason, needsFollowUp, assistantBuffer == nil, assistantHasAppended)
 		if assistantBuffer != nil {
-			logger.NewModule("Query").Info("assistantBuffer: content_len=%d thinking_len=%d tool_calls=%d",
+			logger.NewModule("Query").Debug("assistantBuffer: content_len=%d thinking_len=%d tool_calls=%d",
 				len(assistantBuffer.Content), len(assistantBuffer.Thinking), len(assistantBuffer.ToolCalls))
 			if len(assistantBuffer.Content) > 0 {
 				preview := assistantBuffer.Content
@@ -1240,17 +1240,17 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 				logger.NewModule("Query").Info("assistant content preview: %s", preview)
 			}
 		}
-		logger.NewModule("Query").Info("after-stream state.Messages: count=%d", len(state.Messages))
+		logger.NewModule("Query").Debug("after-stream state.Messages: count=%d", len(state.Messages))
 		if len(state.Messages) > 0 {
 			last := state.Messages[len(state.Messages)-1]
-			logger.NewModule("Query").Info("last state.Messages entry: role=%s content_len=%d tool_calls=%d is_meta=%v",
+			logger.NewModule("Query").Debug("last state.Messages entry: role=%s content_len=%d tool_calls=%d is_meta=%v",
 				last.Role, len(last.Content), len(last.ToolCalls), last.IsMeta)
 		}
 
 		if assistantBuffer != nil && !assistantHasAppended {
 			state.Messages = append(state.Messages, *assistantBuffer)
 			assistantHasAppended = true
-			logger.NewModule("Query").Info("assistantBuffer appended to state.Messages: content_len=%d, thinking_len=%d, tool_calls=%d",
+			logger.NewModule("Query").Debug("assistantBuffer appended to state.Messages: content_len=%d, thinking_len=%d, tool_calls=%d",
 				len(assistantBuffer.Content), len(assistantBuffer.Thinking), len(assistantBuffer.ToolCalls))
 
 			// === L2 ReAct Bridge Hook 2: 记录 Thought + Action ===
@@ -1285,7 +1285,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			// 统计连续空 response 次数，避免无限重试（独立于 MaxOutputTokensRecoveryCount）
 			state.EmptyResponseRetryCount++
 			if state.EmptyResponseRetryCount <= 2 {
-				logger.NewModule("Query").Info("EMPTY RESPONSE detected (count=%d), injecting retry prompt...", state.EmptyResponseRetryCount)
+				logger.NewModule("Query").Warn("EMPTY RESPONSE detected (count=%d), injecting retry prompt...", state.EmptyResponseRetryCount)
 
 				// 注入一个重试 prompt，引导模型继续工作
 				retryMsg := types.Message{
@@ -1304,7 +1304,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 				logger.NewModule("Query").Info("Empty response retry prompt injected, will re-call model")
 			} else {
 				// 连续 3 次空 response，放弃重试
-				logger.NewModule("Query").Info("EMPTY RESPONSE x%d, giving up", state.EmptyResponseRetryCount)
+				logger.NewModule("Query").Error("EMPTY RESPONSE x%d, giving up", state.EmptyResponseRetryCount)
 				if state.ReActBridge != nil {
 					state.ReActBridge.MarkFailed("empty_response_persistent")
 				}
@@ -1319,7 +1319,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 				target := buildValidationTarget(messages, params.ProjectDir)
 				if target != nil && len(target.FilesChanged) > 0 {
 					cvResult := state.CrossValidator.Run(ctx, target)
-					logger.NewModule("CrossValidator").Info("final answer validation: pass=%v, issues=%d",
+					logger.NewModule("CrossValidator").Debug("final answer validation: pass=%v, issues=%d",
 						cvResult.OverallPass, countIssues(cvResult))
 					if !cvResult.OverallPass {
 						// 发现严重问题：不直接结束，注入验证结果让 LLM 修正
@@ -1332,7 +1332,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 						}
 						messages = append(messages, cvMsg)
 						state.Messages = append(state.Messages, cvMsg)
-						logger.NewModule("CrossValidator").Info("injected %d issues, forcing additional turn", countIssues(cvResult))
+						logger.NewModule("CrossValidator").Debug("injected %d issues, forcing additional turn", countIssues(cvResult))
 						// 不 return，让主循环继续走一轮
 						needsFollowUp = true
 					}
@@ -1361,7 +1361,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 						}
 						messages = append(messages, altMsg)
 						state.Messages = append(state.Messages, altMsg)
-						logger.NewModule("AlternativeAnalyzer").Info("injected %s", altReport.Summary)
+						logger.NewModule("AlternativeAnalyzer").Debug("injected %s", altReport.Summary)
 					}
 				}
 			}
@@ -1375,7 +1375,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 				if !shouldComplete {
 					// 验证门失败 → 不发送 terminal，注入失败消息让主循环继续
 					needsFollowUp = true
-					logger.NewModule("Query").Info("Verification gate blocked completion, forcing additional turn")
+					logger.NewModule("Query").Warn("Verification gate blocked completion, forcing additional turn")
 					// 不 return，继续走下面的 tool_calls 检查（会是空，然后继续循环）
 				} else {
 					if stopReason != "" {
@@ -1396,7 +1396,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			if !shouldComplete {
 				// 验证门失败 → 不退出，继续循环
 				needsFollowUp = true
-				logger.NewModule("Query").Info("Verification gate blocked completion (no tool_calls path), forcing additional turn")
+				logger.NewModule("Query").Warn("Verification gate blocked completion (no tool_calls path), forcing additional turn")
 			} else {
 				ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: "completed"}}
 				return
@@ -1448,7 +1448,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 
 			tool := tools.FindToolByName(currentTools, tc.Function.Name)
 			if tool == nil {
-				logger.NewModule("Query").Info("tool not found: %s", tc.Function.Name)
+				logger.NewModule("Query").Error("tool not found: %s", tc.Function.Name)
 				state.Messages = append(state.Messages, types.Message{
 					Role:       types.RoleTool,
 					Content:    fmt.Sprintf("Tool not found: %s", tc.Function.Name),
@@ -1585,7 +1585,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			if state.SmartToolResultFilter != nil && r.Message != nil {
 				filtered, truncated := state.SmartToolResultFilter.Filter(toolName, r.Message.Content)
 				if truncated {
-					logger.NewModule("SmartResultFilter").Info("%s: %d chars → %d chars",
+					logger.NewModule("SmartResultFilter").Debug("%s: %d chars → %d chars",
 						toolName, len(r.Message.Content), len(filtered))
 					r.Message.Content = filtered
 				}
@@ -1672,7 +1672,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 					if failedSt := gt.FindFailedSubtask(); failedSt != nil {
 						analysis := state.RuntimeReplanner.OnSubtaskFailed(failedSt.ID, r.Err.Error())
 						if analysis != nil {
-							logger.NewModule("RuntimeReplanner").Info("tool '%s' failure analysis: strategy=%s",
+							logger.NewModule("RuntimeReplanner").Debug("tool '%s' failure analysis: strategy=%s",
 								toolName, analysis.Strategy)
 							// 也触发 ReflectLoop 的 error 反思
 							if state.ReflectLoop != nil && state.ReflectLoop.ShouldReflectNow(TriggerError, len(state.ReActBridge.Trace().Steps)) {
@@ -1816,11 +1816,11 @@ func getLastToolCalls(messages []types.Message) []types.ToolCall {
 }
 
 func executeToolCall(ctx context.Context, tool tools.Tool, input any, toolUseID string, canUseTool func(tool tools.Tool, input any) (types.PermissionResult, error), toolCtx *tools.ToolUseContext, hookExec *hooks.HookExecutor) *toolExecutionResult {
-	logger.NewModule("Query").Info("executeToolCall: tool='%s'", tool.Name())
+	logger.NewModule("Query").Debug("executeToolCall: tool='%s'", tool.Name())
 	if canUseTool != nil {
 		permResult, err := canUseTool(tool, input)
 		if err != nil {
-			logger.NewModule("Query").Info("executeToolCall canUseTool error for %s: %v", tool.Name(), err)
+			logger.NewModule("Query").Debug("executeToolCall canUseTool error for %s: %v", tool.Name(), err)
 			return &toolExecutionResult{
 				Message: &types.Message{
 					Role:       types.RoleTool,
@@ -1833,7 +1833,7 @@ func executeToolCall(ctx context.Context, tool tools.Tool, input any, toolUseID 
 			}
 		}
 		if permResult.Behavior == types.DecisionDeny {
-			logger.NewModule("Query").Info("executeToolCall: permission denied for %s", tool.Name())
+			logger.NewModule("Query").Warn("executeToolCall: permission denied for %s", tool.Name())
 			return &toolExecutionResult{
 				Message: &types.Message{
 					Role:       types.RoleTool,
@@ -1849,7 +1849,7 @@ func executeToolCall(ctx context.Context, tool tools.Tool, input any, toolUseID 
 	if toolCtx != nil {
 		innerPerm, innerErr := tool.CheckPermissions(ctx, input, toolCtx)
 		if innerErr != nil {
-			logger.NewModule("Query").Info("executeToolCall CheckPermissions error for %s: %v", tool.Name(), innerErr)
+			logger.NewModule("Query").Error("executeToolCall CheckPermissions error for %s: %v", tool.Name(), innerErr)
 			return &toolExecutionResult{
 				Message: &types.Message{
 					Role:       types.RoleTool,
@@ -1866,7 +1866,7 @@ func executeToolCall(ctx context.Context, tool tools.Tool, input any, toolUseID 
 			if msg == "" {
 				msg = "tool permission denied"
 			}
-			logger.NewModule("Query").Info("executeToolCall: CheckPermissions denied for %s", tool.Name())
+			logger.NewModule("Query").Warn("executeToolCall: CheckPermissions denied for %s", tool.Name())
 			return &toolExecutionResult{
 				Message: &types.Message{
 					Role:       types.RoleTool,
@@ -1893,10 +1893,10 @@ func executeToolCall(ctx context.Context, tool tools.Tool, input any, toolUseID 
 		}
 	}
 
-	logger.NewModule("Query").Info("executeToolCall: calling tool.Call for '%s'...", tool.Name())
+	logger.NewModule("Query").Debug("executeToolCall: calling tool.Call for '%s'...", tool.Name())
 	toolResult, err := tool.Call(ctx, input, toolCtx, func(progress any) {})
 	if err != nil {
-		logger.NewModule("Query").Info("executeToolCall tool.Call error for %s: %v", tool.Name(), err)
+		logger.NewModule("Query").Error("executeToolCall tool.Call error for %s: %v", tool.Name(), err)
 		if hookExec != nil {
 			hookExec.ExecutePostToolUseFailureHooks(ctx, tool.Name(), inputToMap(input), err.Error())
 		}

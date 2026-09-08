@@ -115,7 +115,7 @@ func (b *ReActBridge) RecordThoughtAction(thoughtContent string, toolCalls []typ
 		b.trace.ActionCount++
 	}
 
-	logger.NewModule("ReAct-Bridge").Info("recorded thought", "thought_len", len(thoughtContent), "actions", len(toolCalls), "steps", len(b.trace.Steps))
+	logger.NewModule("ReAct-Bridge").Debug("recorded thought", "thought_len", len(thoughtContent), "actions", len(toolCalls), "steps", len(b.trace.Steps))
 }
 
 // RecordObservation 在所有 tool 执行完毕后调用。
@@ -202,7 +202,7 @@ func (b *ReActBridge) RecordObservation(toolResults map[int]*toolExecutionResult
 		}
 	}
 
-	logger.NewModule("ReAct-Bridge").Info("recorded observations",
+	logger.NewModule("ReAct-Bridge").Debug("recorded observations",
 		"observations", len(toolResults), "steps", len(b.trace.Steps), "goalTracker", b.goalTracker.Summary())
 }
 
@@ -240,7 +240,7 @@ func (b *ReActBridge) MarkFinalAnswer(answer string) bool {
 	defer b.mu.Unlock()
 
 	b.trace.Complete(truncateForReAct(answer, 500))
-	logger.NewModule("ReAct-Bridge").Info("trace completed", "total_steps", len(b.trace.Steps))
+	logger.NewModule("ReAct-Bridge").Debug("trace completed", "total_steps", len(b.trace.Steps))
 	return true
 }
 
@@ -300,7 +300,7 @@ func (b *ReActBridge) MarkComplete(reason string) {
 	defer b.mu.Unlock()
 
 	b.trace.Complete(reason)
-	logger.NewModule("ReAct-Bridge").Info("trace completed successfully", "reason", reason, "steps", len(b.trace.Steps))
+	logger.NewModule("ReAct-Bridge").Debug("trace completed successfully", "reason", reason, "steps", len(b.trace.Steps))
 }
 
 // BuildPreCallContext 在下一轮 CallModel 之前调用。

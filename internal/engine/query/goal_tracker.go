@@ -186,7 +186,7 @@ func (gt *GoalTracker) OnToolCall(toolName string, success bool, resultHint stri
 				now := time.Now()
 				st.Status = TaskStatusRunning
 				st.StartedAt = &now
-				logger.NewModule("GoalTracker").Info("subtask %s marked running (tool=%s)", st.ID, toolName)
+				logger.NewModule("GoalTracker").Debug("subtask %s marked running (tool=%s)", st.ID, toolName)
 				goto moved
 			}
 		}
@@ -200,7 +200,7 @@ func (gt *GoalTracker) OnToolCall(toolName string, success bool, resultHint stri
 				now := time.Now()
 				st.Status = TaskStatusDone
 				st.CompletedAt = &now
-				logger.NewModule("GoalTracker").Info("subtask %s marked done", st.ID)
+				logger.NewModule("GoalTracker").Debug("subtask %s marked done", st.ID)
 				break // 一次只完成一个
 			}
 		}
@@ -211,7 +211,7 @@ func (gt *GoalTracker) OnToolCall(toolName string, success bool, resultHint stri
 				now := time.Now()
 				gt.subtasks[i].Status = TaskStatusFailed
 				gt.subtasks[i].CompletedAt = &now
-				logger.NewModule("GoalTracker").Info("subtask %s marked failed (tool=%s)", gt.subtasks[i].ID, toolName)
+				logger.NewModule("GoalTracker").Debug("subtask %s marked failed (tool=%s)", gt.subtasks[i].ID, toolName)
 				break
 			}
 		}

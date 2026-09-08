@@ -190,7 +190,7 @@ func (c *LocalAIClient) ChatWithStreaming(ctx context.Context, req LocalAIChatRe
 				if delay > rc.MaxDelay {
 					delay = rc.MaxDelay
 				}
-				logger.NewModule("LocalAI").Info("retry attempt %d after %v delay", attempts, delay)
+				logger.NewModule("LocalAI").Warn("retry attempt %d after %v delay", attempts, delay)
 				select {
 				case <-ctx.Done():
 					ch <- StreamMessage{Type: "error", Error: ctx.Err()}
@@ -215,7 +215,7 @@ func (c *LocalAIClient) ChatWithStreaming(ctx context.Context, req LocalAIChatRe
 				return
 			}
 
-			logger.NewModule("LocalAI").Info("stream attempt %d failed (will retry): %v", attempts, err)
+			logger.NewModule("LocalAI").Warn("stream attempt %d failed (will retry): %v", attempts, err)
 			attempts++
 			if attempts > rc.MaxRetries {
 				ch <- StreamMessage{
@@ -278,7 +278,7 @@ func (c *LocalAIClient) executeChatStream(ctx context.Context, req LocalAIChatRe
 	}
 
 	url := c.config.BaseURL + "/v1/chat/completions"
-	logger.NewModule("LocalAI").Info("POST %s, model=%s, msgs=%d, tools=%d, body_len=%d", url, req.Model, len(req.Messages), len(req.Tools), len(body))
+	logger.NewModule("LocalAI").Debug("POST %s, model=%s, msgs=%d, tools=%d, body_len=%d", url, req.Model, len(req.Messages), len(req.Tools), len(body))
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -321,7 +321,7 @@ func (c *LocalAIClient) parseSSEStream(reader io.Reader, ch chan<- StreamMessage
 		line := scanner.Text()
 
 		if firstLine {
-			logger.NewModule("LocalAI").Info("parseSSEStream: first line received (%d bytes)", len(line))
+			logger.NewModule("LocalAI").Debug("parseSSEStream: first line received (%d bytes)", len(line))
 			firstLine = false
 		}
 
@@ -332,7 +332,7 @@ func (c *LocalAIClient) parseSSEStream(reader io.Reader, ch chan<- StreamMessage
 		data := strings.TrimPrefix(line, "data: ")
 
 		if data == "[DONE]" {
-			logger.NewModule("LocalAI").Info("stream done: input_tokens=%d, output_tokens=%d, finish_reason=%s", inputTokens, outputTokens, finishReason)
+			logger.NewModule("LocalAI").Debug("stream done: input_tokens=%d, output_tokens=%d, finish_reason=%s", inputTokens, outputTokens, finishReason)
 
 			toolCallsAcc := sortedToolCalls(toolCallsMap)
 			if len(toolCallsAcc) > 0 {
@@ -362,7 +362,7 @@ func (c *LocalAIClient) parseSSEStream(reader io.Reader, ch chan<- StreamMessage
 
 		var event LocalAIChatStreamEvent
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
-			logger.NewModule("LocalAI").Info("stream: skipping malformed SSE line: %v", err)
+			logger.NewModule("LocalAI").Debug("stream: skipping malformed SSE line: %v", err)
 			continue
 		}
 
@@ -399,7 +399,7 @@ func (c *LocalAIClient) parseSSEStream(reader io.Reader, ch chan<- StreamMessage
 	}
 
 	if err := scanner.Err(); err != nil {
-		logger.NewModule("LocalAI").Info("stream scanner error: %v", err)
+		logger.NewModule("LocalAI").Error("stream scanner error: %v", err)
 		return &LocalAIClientError{StatusCode: 0, Message: err.Error(), Retryable: true}
 	}
 

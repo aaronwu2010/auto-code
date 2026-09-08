@@ -96,7 +96,7 @@ func (rp *RuntimeReplanner) OnSubtaskFailed(subtaskID string, errorMsg string) *
 	rp.failCounts[subtaskID]++
 	failCount := rp.failCounts[subtaskID]
 
-	logger.NewModule("Replanner").Info("subtask '%s' failed (%d times), analyzing...", subtaskID, failCount)
+	logger.NewModule("Replanner").Warn("subtask '%s' failed (%d times), analyzing...", subtaskID, failCount)
 
 	subtask := rp.goal.FindSubtask(subtaskID)
 	if subtask == nil {
@@ -108,7 +108,7 @@ func (rp *RuntimeReplanner) OnSubtaskFailed(subtaskID string, errorMsg string) *
 	switch analysis.Strategy {
 	case StrategyRecoverable:
 		// 通知 ErrorHandler 自动重试（不修改子任务状态）
-		logger.NewModule("Replanner").Info("'%s': recoverable, will auto-retry", subtaskID)
+		logger.NewModule("Replanner").Debug("'%s': recoverable, will auto-retry", subtaskID)
 
 	case StrategyRedirectable:
 		// 修改子任务描述，换个方案
@@ -121,7 +121,7 @@ func (rp *RuntimeReplanner) OnSubtaskFailed(subtaskID string, errorMsg string) *
 
 	case StrategyBlocked:
 		// 标记为 blocked，自动跳过依赖它的后续任务
-		logger.NewModule("Replanner").Info("'%s': blocked after %d failures", subtaskID, failCount)
+		logger.NewModule("Replanner").Warn("'%s': blocked after %d failures", subtaskID, failCount)
 		rp.goal.SetSubtaskStatus(subtaskID, TaskStatusBlocked)
 		if rp.cfg.AutoSkipDependents {
 			rp.skipDependents(subtaskID)
@@ -129,7 +129,7 @@ func (rp *RuntimeReplanner) OnSubtaskFailed(subtaskID string, errorMsg string) *
 
 	case StrategySkip:
 		// 直接标记 done（相当于跳过）
-		logger.NewModule("Replanner").Info("'%s': skipping (blocked or non-critical)", subtaskID)
+		logger.NewModule("Replanner").Debug("'%s': skipping (blocked or non-critical)", subtaskID)
 		rp.goal.SetSubtaskStatus(subtaskID, TaskStatusDone)
 		analysis.Skipped = true
 	}
@@ -335,7 +335,7 @@ func (rp *RuntimeReplanner) skipDependents(blockedID string) {
 		}
 		for _, dep := range st.DependsOn {
 			if dep == blockedID {
-				logger.NewModule("Replanner").Info("skipping dependent subtask '%s' (depends on blocked '%s')",
+				logger.NewModule("Replanner").Debug("skipping dependent subtask '%s' (depends on blocked '%s')",
 					st.Description, blockedID)
 				rp.goal.SetSubtaskStatus(st.ID, TaskStatusDone)
 				rp.failCounts[st.ID] = rp.failCounts[st.ID] + 1

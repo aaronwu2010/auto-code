@@ -134,7 +134,7 @@ func (e *PipelineExecutor) Run(ctx context.Context, spec PipelineSpec) PipelineR
 
 		if !sr.Passed && step.Optional {
 			// 可选步骤失败不影响
-			logger.NewModule("Pipeline").Info("optional step %q failed: %s", step.Name, sr.Error)
+			logger.NewModule("Pipeline").Warn("optional step %q failed: %s", step.Name, sr.Error)
 		}
 
 		prevResults = append(prevResults, sr)
@@ -162,7 +162,7 @@ finalize:
 
 	// 构建 Summary
 	result.Summary = e.buildSummary(result, spec)
-	logger.NewModule("Pipeline").Info("%s: pass=%v, %d/%d steps, %.0fms",
+	logger.NewModule("Pipeline").Debug("%s: pass=%v, %d/%d steps, %.0fms",
 		spec.ID, result.Pass, len(result.Steps), len(spec.Steps), float64(result.TotalTime)/float64(time.Millisecond))
 
 	return result
@@ -184,7 +184,7 @@ func (e *PipelineExecutor) runStep(ctx context.Context, step PipelineStep, prevR
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			sr.Retries = attempt
-			logger.NewModule("Pipeline").Info("retrying step %q (attempt %d/%d)", step.Name, attempt+1, maxAttempts)
+			logger.NewModule("Pipeline").Warn("retrying step %q (attempt %d/%d)", step.Name, attempt+1, maxAttempts)
 			time.Sleep(200 * time.Millisecond)
 		}
 

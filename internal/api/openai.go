@@ -218,7 +218,7 @@ func (c *OpenAIClient) ChatWithStreaming(ctx context.Context, req OpenAIChatRequ
 				if delay > rc.MaxDelay {
 					delay = rc.MaxDelay
 				}
-				logger.NewModule("OpenAI").Info("retry attempt %d after %v delay", attempts, delay)
+				logger.NewModule("OpenAI").Warn("retry attempt %d after %v delay", attempts, delay)
 				select {
 				case <-ctx.Done():
 					ch <- StreamMessage{Type: "error", Error: ctx.Err()}
@@ -240,13 +240,13 @@ func (c *OpenAIClient) ChatWithStreaming(ctx context.Context, req OpenAIChatRequ
 			lastErr = err
 			if apiErr, ok := err.(*OpenAIClientError); ok {
 				if !apiErr.Retryable {
-					logger.NewModule("OpenAI").Info("non-retryable error %d (%s): %s", apiErr.StatusCode, apiErr.Type, apiErr.Message)
+					logger.NewModule("OpenAI").Error("non-retryable error %d (%s): %s", apiErr.StatusCode, apiErr.Type, apiErr.Message)
 					ch <- StreamMessage{Type: "error", Error: apiErr}
 					return
 				}
 			}
 
-			logger.NewModule("OpenAI").Info("stream attempt %d failed (will retry): %v", attempts, err)
+			logger.NewModule("OpenAI").Warn("stream attempt %d failed (will retry): %v", attempts, err)
 			attempts++
 			if attempts > rc.MaxRetries {
 				ch <- StreamMessage{
@@ -310,7 +310,7 @@ func (c *OpenAIClient) executeChatStream(ctx context.Context, req OpenAIChatRequ
 	}
 
 	url := strings.TrimRight(c.config.BaseURL, "/") + "/chat/completions"
-	logger.NewModule("OpenAI").Info("POST %s, model=%s, msgs=%d, tools=%d, body_len=%d", url, req.Model, len(req.Messages), len(req.Tools), len(body))
+	logger.NewModule("OpenAI").Debug("POST %s, model=%s, msgs=%d, tools=%d, body_len=%d", url, req.Model, len(req.Messages), len(req.Tools), len(body))
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -353,7 +353,7 @@ func (c *OpenAIClient) parseSSEStream(reader io.Reader, ch chan<- StreamMessage)
 		line := scanner.Text()
 
 		if firstLine {
-			logger.NewModule("OpenAI").Info("parseSSEStream: first line received (%d bytes)", len(line))
+			logger.NewModule("OpenAI").Debug("parseSSEStream: first line received (%d bytes)", len(line))
 			firstLine = false
 		}
 
@@ -364,7 +364,7 @@ func (c *OpenAIClient) parseSSEStream(reader io.Reader, ch chan<- StreamMessage)
 		data := strings.TrimPrefix(line, "data: ")
 
 		if data == "[DONE]" {
-			logger.NewModule("OpenAI").Info("stream done: input_tokens=%d, output_tokens=%d, finish_reason=%s", inputTokens, outputTokens, finishReason)
+			logger.NewModule("OpenAI").Debug("stream done: input_tokens=%d, output_tokens=%d, finish_reason=%s", inputTokens, outputTokens, finishReason)
 
 			// 把 map 按 index 排序转为 slice
 			toolCallsAcc := sortedToolCalls(toolCallsMap)
@@ -396,7 +396,7 @@ func (c *OpenAIClient) parseSSEStream(reader io.Reader, ch chan<- StreamMessage)
 
 		var event OpenAIChatStreamEvent
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
-			logger.NewModule("OpenAI").Info("stream: skipping malformed SSE line: %v", err)
+			logger.NewModule("OpenAI").Debug("stream: skipping malformed SSE line: %v", err)
 			continue
 		}
 
@@ -449,7 +449,7 @@ func (c *OpenAIClient) parseSSEStream(reader io.Reader, ch chan<- StreamMessage)
 	}
 
 	if err := scanner.Err(); err != nil {
-		logger.NewModule("OpenAI").Info("stream scanner error: %v", err)
+		logger.NewModule("OpenAI").Error("stream scanner error: %v", err)
 		return &OpenAIClientError{StatusCode: 0, Message: err.Error(), Retryable: true, Type: "stream_error"}
 	}
 
