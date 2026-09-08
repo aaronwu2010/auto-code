@@ -63,7 +63,7 @@ func DefaultSmartStopConfig() SmartStopConfig {
 		MaxConsecutiveNoProgress:   300, // 禁用规则 3（too_stuck）：10 轮在探索阶段会误伤
 		MaxConsecutiveToolNotFound: 3,
 		MaxConsecutiveNoAnyTool:    5,
-		TokenWarningRatio:          0.30,
+		TokenWarningRatio:          0, // 禁用规则 4（token 预警）：0.30 经常在任务中途误杀
 	}
 }
 
@@ -255,6 +255,13 @@ const (
 // 返回空字符串 = 继续循环
 func CheckSmartStopSignals(state *State, cfg SmartStopConfig, params QueryParams) SmartStopReason {
 	if state == nil {
+		return SmartStopNone
+	}
+
+	// ⚠️ SmartStop 总开关：当前禁用（所有规则都会导致任务中途被误杀）
+	// 需要彻底排查后再启用。
+	const smartStopEnabled = false
+	if !smartStopEnabled {
 		return SmartStopNone
 	}
 
