@@ -702,14 +702,23 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 	// 获取模型的真实上下文窗口大小，用于 compact 链路
 	// 之前硬编码 200000 导致小窗口模型（如 gemma4:31b 的 32768）永远不会触发压缩
 	contextWindowSize := 0
+	realCtxLen := 0
 	if ctxLen, err := qe.ShowModel(ctx, string(qe.config.UserSpecifiedModel)); err == nil && ctxLen > 0 {
+		realCtxLen = ctxLen
 		contextWindowSize = compact.GetEffectiveContextWindowSize(ctxLen)
-		logger.NewModule("Engine").Info("ShowModel: context_window=%d", contextWindowSize)
+		logger.NewModule("Engine").Info("ShowModel: context_window=%d (effective=%d)", realCtxLen, contextWindowSize)
 	} else {
 		contextWindowSize = compact.GetEffectiveContextWindowSize(0)
 		logger.NewModule("Engine").Info("ShowModel failed: %v, using default context_window=%d", err, contextWindowSize)
 	}
 	qe.contextWindowSize = contextWindowSize
+
+	// 模型窗口过小告警：真实窗口 < 128K 时，记录日志 + 后续向 UI 发 warning
+	modelTooSmall := realCtxLen > 0 && realCtxLen < compact.MinContextWindowSize
+	if modelTooSmall {
+		logger.NewModule("Engine").Warn("WARNING: model context window %d is below recommended minimum %d, auto-code will still work but may run into token limits in long sessions",
+			realCtxLen, compact.MinContextWindowSize)
+	}
 
 	go func() {
 		logger.NewModule("Engine").Info("SubmitMessage: goroutine started")
@@ -719,6 +728,17 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 				logger.NewModule("Engine").Info("panic recovered: %v\n%s", r, debug.Stack())
 			}
 		}()
+
+		// 如果模型窗口过小，发一条 warning 给 UI（作为 assistant system 消息）
+		if modelTooSmall {
+			warnMsg := types.Message{
+				Role:      types.RoleAssistant,
+				Content:   fmt.Sprintf("⚠️ **模型上下文窗口较小** (%d tokens)\n\n当前模型的上下文窗口只有 %d tokens，低于推荐的最小 128K。auto-code 已自动按 128K 计算压缩阈值，但实际能处理的 token 上限仍受模型限制。建议切换到更大窗口的模型（如 gpt-oss:120b、qwen3.5:110b 等）。", realCtxLen, realCtxLen),
+				Timestamp: time.Now().Unix(),
+				IsMeta:    true,
+			}
+			ch <- state.SDKMessage{Type: "system", Subtype: "context_warning", Message: &warnMsg, SessionID: qe.sessionID}
+		}
 
 		qe.mu.Lock()
 		if qe.streamMsgID != "" || qe.streamContent != "" {
