@@ -3,15 +3,16 @@ package compact
 import "github.com/auto-code/auto-code/internal/ablation"
 
 const (
-	AutoCompactBufferTokens = 10000
-	// WarningThresholdBufferTokens = 30000  ->  剩余 <30k 时触发轻度压缩
-	WarningThresholdBufferTokens = 30000
-	// ErrorThresholdBufferTokens = 15000  ->  剩余 <15k 时触发强制压缩（必须小于 Warning 阈值）
-	ErrorThresholdBufferTokens   = 15000
-	ManualCompactBufferTokens    = 10000
-	PostCompactMaxFilesToRestore = 10
-	PostCompactTokenBudget       = 5000
-	PostCompactMaxTokensPerFile  = 500
+	// MinContextWindowSize 模型上下文窗口最小值，低于此值按此值处理
+	MinContextWindowSize = 128 * 1024 // 128K tokens
+
+	// AutoCompactTriggerRatio 自动压缩触发阈值：tokens >= windowSize * 此比例时触发压缩
+	// 设为 60% 以便提前压缩避免过载（之前 92% 才触发，导致 113% 才发现过载）
+	AutoCompactTriggerRatio = 0.60
+
+	// PostCompactMaxFilesToRestore = 10
+	PostCompactTokenBudget      = 5000
+	PostCompactMaxTokensPerFile = 500
 	PostCompactMaxTokensPerSkill = 500
 	PostCompactSkillsTokenBudget = 1000
 )
@@ -42,22 +43,33 @@ type CompactionResult struct {
 
 func GetEffectiveContextWindowSize(configuredWindowSize int) int {
 	if configuredWindowSize > 0 {
+		// 不低于最小值 128K
+		if configuredWindowSize < MinContextWindowSize {
+			return MinContextWindowSize
+		}
 		return configuredWindowSize
 	}
-	// 保守默认值 32768：gemma4:31b 通过 ollama.com API 的实际窗口大小
-	// 之前硬编码 200000 导致小窗口模型永远不会触发压缩
-	return 32768
+	// ShowModel 失败时的保守默认值，用最小要求 128K
+	return MinContextWindowSize
 }
 
+// GetAutoCompactThreshold 返回触发自动压缩的 token 阈值
+// 即 windowSize * AutoCompactTriggerRatio（60%）
 func GetAutoCompactThreshold(windowSize int) int {
-	return windowSize - AutoCompactBufferTokens
+	if windowSize <= 0 {
+		windowSize = MinContextWindowSize
+	}
+	return int(float64(windowSize) * AutoCompactTriggerRatio)
 }
 
 func CalculateTokenWarningState(currentTokens, windowSize int) TokenWarningState {
-	threshold := GetAutoCompactThreshold(windowSize)
-	warningThreshold := windowSize - WarningThresholdBufferTokens
+	if windowSize <= 0 {
+		windowSize = MinContextWindowSize
+	}
+	warningThreshold := int(float64(windowSize) * 0.45)  // 45% 时开始警告
+	criticalThreshold := int(float64(windowSize) * 0.75) // 75% 时严重警告
 
-	if currentTokens >= threshold {
+	if currentTokens >= criticalThreshold {
 		return WarningCritical
 	}
 	if currentTokens >= warningThreshold {

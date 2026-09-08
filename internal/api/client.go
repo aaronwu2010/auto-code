@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -144,11 +145,31 @@ type Client struct {
 }
 
 func NewClient(config OllamaConfig) *Client {
+	// streaming API 不能用 http.Client 全局 Timeout——它会截断整个请求生命周期（连接+发送+读完所有响应体），
+	// 大模型推理可能超过 5 分钟。改用 Transport 细分超时：连接 30s + 等首个 header 2min，
+	// body 读取不限制，整体取消由上层 context 控制（用户 interrupt 自动级联）。
+	transport := &http.Transport{
+		DialContext:         timeoutDialer(30 * time.Second),
+		TLSHandshakeTimeout: 30 * time.Second,
+		ResponseHeaderTimeout: 2 * time.Minute,
+		IdleConnTimeout:     90 * time.Second,
+		ForceAttemptHTTP2:   true,
+	}
 	return &Client{
 		config: config,
 		httpClient: &http.Client{
-			Timeout: config.Timeout,
+			Timeout:   0, // 不限制总时间，由 context 控制
+			Transport: transport,
 		},
+	}
+}
+
+// timeoutDialer 返回一个带有连接超时的 DialContext
+func timeoutDialer(timeout time.Duration) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		var d net.Dialer
+		d.Timeout = timeout
+		return d.DialContext(ctx, network, addr)
 	}
 }
 

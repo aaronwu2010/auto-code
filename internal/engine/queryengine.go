@@ -272,9 +272,9 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 	// Lazy init contextWindowSize（如果 SubmitMessage 还没调过）
 	if qe.contextWindowSize == 0 {
 		if ctxLen, err := qe.ShowModel(ctx, string(qe.config.UserSpecifiedModel)); err == nil && ctxLen > 0 {
-			qe.contextWindowSize = ctxLen
+			qe.contextWindowSize = compact.GetEffectiveContextWindowSize(ctxLen)
 		} else {
-			qe.contextWindowSize = 32768
+			qe.contextWindowSize = compact.GetEffectiveContextWindowSize(0)
 		}
 	}
 
@@ -703,10 +703,10 @@ func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan 
 	// 之前硬编码 200000 导致小窗口模型（如 gemma4:31b 的 32768）永远不会触发压缩
 	contextWindowSize := 0
 	if ctxLen, err := qe.ShowModel(ctx, string(qe.config.UserSpecifiedModel)); err == nil && ctxLen > 0 {
-		contextWindowSize = ctxLen
+		contextWindowSize = compact.GetEffectiveContextWindowSize(ctxLen)
 		logger.NewModule("Engine").Info("ShowModel: context_window=%d", contextWindowSize)
 	} else {
-		contextWindowSize = 32768 // 保守默认值
+		contextWindowSize = compact.GetEffectiveContextWindowSize(0)
 		logger.NewModule("Engine").Info("ShowModel failed: %v, using default context_window=%d", err, contextWindowSize)
 	}
 	qe.contextWindowSize = contextWindowSize
@@ -1306,7 +1306,7 @@ func (qe *QueryEngine) GetContextUsage(ctx context.Context) (*types.ContextUsage
 
 	ctxLen, err := qe.ShowModel(ctx, modelName)
 	if err != nil || ctxLen <= 0 {
-		ctxLen = 8192 // 默认回退值
+		ctxLen = compact.GetEffectiveContextWindowSize(0) // 默认回退值（128K 最小）
 	}
 
 	// 估算 system prompt token 数
@@ -2390,7 +2390,7 @@ func (qe *QueryEngine) autoCompact(messages []types.Message) (*query.CompactionR
 
 	windowSize := qe.contextWindowSize
 	if windowSize <= 0 {
-		windowSize = 32768 // 保守默认值
+		windowSize = compact.GetEffectiveContextWindowSize(0) // 保守默认值（128K 最小）
 	}
 	autoCompactThreshold := compact.GetAutoCompactThreshold(windowSize)
 
