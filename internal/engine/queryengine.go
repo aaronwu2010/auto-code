@@ -351,7 +351,8 @@ func (qe *QueryEngine) runSubAgent(ctx context.Context, prompt string, allowedTo
 	}
 
 	if maxTurns <= 0 {
-		maxTurns = 15
+		// 子 agent 只做一件事，20 轮足够。主 agent 是 300。
+		maxTurns = 20
 	}
 
 	queryParams := query.QueryParams{
@@ -2200,10 +2201,10 @@ func (qe *QueryEngine) getMessagesAfterCompactBoundary() []types.Message {
 
 func (qe *QueryEngine) getConfig() *QueryEngineConfig {
 	if qe.config == nil {
-		return &QueryEngineConfig{MaxTurns: 100}
+		return &QueryEngineConfig{MaxTurns: query.DefaultMaxTurns}
 	}
 	if qe.config.MaxTurns <= 0 {
-		qe.config.MaxTurns = 100
+		qe.config.MaxTurns = query.DefaultMaxTurns
 	}
 	return qe.config
 }

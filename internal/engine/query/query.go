@@ -23,7 +23,17 @@ const (
 	MaxOutputTokensDefault       = 8192
 	MaxOutputTokensEscalated     = 65536
 	MaxOutputTokensRecoveryLimit = 3
-	DefaultMaxTurns              = 100
+
+	// DefaultMaxTurns 主 agent 默认最大 ReAct 轮数。
+	// 1 turn = 1 次 LLM call + 0~N 次 tool call。
+	// 100 轮被截断（日志 steps=200 = 100 个 thought+action），说明复杂开发任务远超 100。
+	// 300 覆盖：多文件重构 → 完整测试 → 反思 → 修复 → 再验证。
+	DefaultMaxTurns = 300
+
+	// DefaultSubAgentMaxTurns 子 agent 默认最大轮数。
+	// 子 agent 只负责一件事（如"分析 X"、"修复 Y"、"实现 Z"），20 轮足够。
+	// 之前 30 太松容易失控，之前 15 太紧做不完。
+	DefaultSubAgentMaxTurns = 20
 )
 
 type QueryOutput struct {
@@ -153,6 +163,16 @@ type State struct {
 	SmartToolResultFilter *SmartToolResultFilter // 优化 1: 工具结果智能截断
 	WorkingMemory         *WorkingMemory         // 优化 2: 工作记忆（已读文件摘要 + 修改历史）
 	PreciseTokenBudget    *PreciseTokenBudget    // 优化 3: 精确 token 预算分配
+
+	// --- 聪明循环：智能停止信号 ---
+	// 我的循环经验：不应该傻跑到 MaxTurns 才停，要主动感知"该停了"的信号
+	// 1) 连续失败 → agent 卡住了
+	// 2) 连续停滞 → agent 在打转
+	// 3) 子任务全做完了 → 提前停止，不浪费轮数
+	// 4) token 快用完了 → 主动停止避免硬截断
+	ConsecutiveToolErrors  int    // 连续 N 轮 tool result 都是 error
+	ConsecutiveNoProgress  int    // 连续 N 轮没有实质性进展
+	LastToolNames          []string // 最近 N 个 tool 名，用于检测"读同一个文件"类的停滞
 }
 
 type HistorySnipTrackingState struct {
@@ -1668,6 +1688,38 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 
 		if deps.OnTurnComplete != nil {
 			deps.OnTurnComplete(ctx, state.Messages)
+		}
+
+		// === 聪明循环：在硬上限检查之前，先做动态信号检查 ===
+		// 我作为 AI agent 的经验：不应该傻跑到 MaxTurns 才停
+		// 要主动感知"任务完成了"、"卡住了"、"token 快用完了"这些信号
+		smartStopCfg := DefaultSmartStopConfig()
+
+		// 1. 累积聪明循环信号（连续失败/停滞计数）
+		hasToolError := false
+		var toolNames []string
+		for _, r := range allResults {
+			if r != nil {
+				if r.Err != nil {
+					hasToolError = true
+				}
+				toolNames = append(toolNames, toolNameFromResult(r))
+			}
+		}
+		UpdateSmartStopState(&state, smartStopCfg, hasToolError, toolNames)
+
+		// 2. 检查是否有聪明停止信号
+		if reason := CheckSmartStopSignals(&state, smartStopCfg, params); reason != SmartStopNone {
+			terminalReason := string(reason)
+			if state.ReActBridge != nil {
+				if reason == SmartStopGoalComplete {
+					state.ReActBridge.MarkComplete("goal_achieved")
+				} else {
+					state.ReActBridge.MarkFailed(terminalReason)
+				}
+			}
+			ch <- QueryOutput{Type: "terminal", Data: &Terminal{Reason: terminalReason}}
+			return
 		}
 
 		if params.MaxBudgetUsd > 0 && deps.GetCostUSD != nil && deps.GetCostUSD() >= params.MaxBudgetUsd {

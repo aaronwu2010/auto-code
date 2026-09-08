@@ -152,7 +152,8 @@ func (t *CoordinatorTool) Call(ctx context.Context, input any, toolCtx *tools.To
 
 	maxTurns := inp.MaxTurns
 	if maxTurns <= 0 {
-		maxTurns = 10
+		// 子 agent 只做一件事，20 轮足够。主 agent 是 300。
+		maxTurns = 20
 	}
 
 	startTime := time.Now()

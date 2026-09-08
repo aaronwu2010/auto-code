@@ -1,4 +1,4 @@
-package agent
+﻿package agent
 
 import (
 	"context"
@@ -76,7 +76,8 @@ func (t *AgentTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseC
 
 	maxTurns := inp.MaxTurns
 	if maxTurns <= 0 {
-		maxTurns = 15
+		// 子 agent 只做一件事（如"分析X文件"/"修复Y bug"），20 轮足够。主 agent 是 300。
+		maxTurns = 20
 	}
 
 	startTime := time.Now()

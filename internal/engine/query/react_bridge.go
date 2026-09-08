@@ -288,6 +288,21 @@ func (b *ReActBridge) MarkFailed(reason string) {
 	logger.NewModule("ReAct-Bridge").Warn("trace failed", "reason", reason, "steps", len(b.trace.Steps))
 }
 
+// MarkComplete 标记 trace 成功完成（任务达成）
+// 和 MarkFinalAnswer 不同：MarkComplete 是聪明循环主动触发的（GoalTracker 所有子任务 done），
+// MarkFinalAnswer 是 LLM 输出 final answer 时的验证门
+func (b *ReActBridge) MarkComplete(reason string) {
+	if b == nil {
+		return
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.trace.Complete(reason)
+	logger.NewModule("ReAct-Bridge").Info("trace completed successfully", "reason", reason, "steps", len(b.trace.Steps))
+}
+
 // BuildPreCallContext 在下一轮 CallModel 之前调用。
 // 返回一个 string，作为 meta message 注入到 messages 里。
 // 如果没有有用的上下文，返回空串。
