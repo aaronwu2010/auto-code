@@ -7,8 +7,8 @@ const (
 	MinContextWindowSize = 128 * 1024 // 128K tokens
 
 	// AutoCompactTriggerRatio 自动压缩触发阈值：tokens >= windowSize * 此比例时触发压缩
-	// 设为 60% 以便提前压缩避免过载（之前 92% 才触发，导致 113% 才发现过载）
-	AutoCompactTriggerRatio = 0.60
+	// 设为 75%（之前 60% 过早触发，压缩太频繁影响 agent 正常工作）
+	AutoCompactTriggerRatio = 0.75
 
 	// PostCompactMaxFilesToRestore = 10
 	PostCompactTokenBudget      = 5000

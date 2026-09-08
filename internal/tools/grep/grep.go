@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/auto-code/auto-code/internal/pkg/logger"
 	"github.com/auto-code/auto-code/internal/tools"
 	"github.com/auto-code/auto-code/internal/types"
 )
@@ -128,7 +129,13 @@ func (t *GrepTool) Call(ctx context.Context, input any, toolCtx *tools.ToolUseCo
 
 	re, err := regexp.Compile(inp.Pattern)
 	if err != nil {
-		return nil, fmt.Errorf("invalid regex pattern %q: %w", inp.Pattern, err)
+		// 兜底：模型常把 glob 通配符（* ?）当正则传进来，直接编译会报错。
+		// 降级为 literal 模式，把整个 pattern 当普通字符串搜。
+		logger.NewModule("Grep").Warn("invalid regex pattern %q (%v), falling back to literal search", inp.Pattern, err)
+		re, err = regexp.Compile(regexp.QuoteMeta(inp.Pattern))
+		if err != nil {
+			return nil, fmt.Errorf("invalid regex pattern %q: %w", inp.Pattern, err)
+		}
 	}
 
 	searchDir := inp.Path
