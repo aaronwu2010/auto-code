@@ -28,7 +28,7 @@ const (
 	// 1 turn = 1 次 LLM call + 0~N 次 tool call。
 	// 100 轮被截断（日志 steps=200 = 100 个 thought+action），说明复杂开发任务远超 100。
 	// 300 覆盖：多文件重构 → 完整测试 → 反思 → 修复 → 再验证。
-	DefaultMaxTurns = 300
+	DefaultMaxTurns = 1000
 
 	// DefaultSubAgentMaxTurns 子 agent 默认最大轮数。
 	// 子 agent 只负责一件事（如"分析 X"、"修复 Y"、"实现 Z"），20 轮足够。
@@ -1720,7 +1720,23 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			}
 		}
 
-		state.TurnCount++
+		// TurnCount 只对"有实际模型输出"的回合计数：
+		//   - content / thinking / tool_calls 三者至少一个非空才算一次
+		//   - 空响应（模型啥都没说）不消耗 MaxTurn 配额
+		//   - 不管执行了多少个 tool call，都只算一次（tool 是模型输出的后续动作，不算独立回合）
+		hasRealOutput := assistantBuffer != nil &&
+			(len(assistantBuffer.Content) > 0 ||
+				len(assistantBuffer.ToolCalls) > 0 ||
+				len(assistantBuffer.Thinking) > 0)
+		if hasRealOutput {
+			state.TurnCount++
+		} else {
+			c, t, th := 0, 0, 0
+			if assistantBuffer != nil {
+				c, t, th = len(assistantBuffer.Content), len(assistantBuffer.ToolCalls), len(assistantBuffer.Thinking)
+			}
+			logger.NewModule("Query").Debug("SKIP TurnCount++ (empty response: content=%d tool_calls=%d thinking=%d)", c, t, th)
+		}
 
 		if deps.OnTurnComplete != nil {
 			deps.OnTurnComplete(ctx, state.Messages)
