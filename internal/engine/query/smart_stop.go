@@ -37,8 +37,9 @@ type SmartStopConfig struct {
 	MaxConsecutiveToolErrors int
 
 	// MaxConsecutiveNoProgress 连续 N 轮没有任何实质性进展就判定为停滞
-	// 经验值 10：大型任务需要多轮探索（读很多不同文件），10 轮足够 agent 扫描完一个中型项目的关键文件。
-	// 即使全是读操作，只要有新目标就不算停滞。
+	// ⚠️ 当前设为 300（禁用效果）：实际项目中 agent 需要大量读操作来理解代码结构，
+	// 之前 10 轮经常在探索阶段被误判为"打转"，导致任务中途被错误中止。
+	// 如需重新启用，请调低此值（建议 ≥ 30，给 agent 足够的探索空间）。
 	MaxConsecutiveNoProgress int
 
 	// MaxConsecutiveToolNotFound 连续 N 次 tool_call 指向不存在的工具名
@@ -59,7 +60,7 @@ type SmartStopConfig struct {
 func DefaultSmartStopConfig() SmartStopConfig {
 	return SmartStopConfig{
 		MaxConsecutiveToolErrors:   3,
-		MaxConsecutiveNoProgress:   10,
+		MaxConsecutiveNoProgress:   300, // 禁用规则 3（too_stuck）：10 轮在探索阶段会误伤
 		MaxConsecutiveToolNotFound: 3,
 		MaxConsecutiveNoAnyTool:    5,
 		TokenWarningRatio:          0.30,
