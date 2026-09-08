@@ -119,7 +119,7 @@ function App() {
     status: string;
   } | null>(null);
 
-  type ActivityPhase = "call_model" | "tool_start" | "tool_done" | "thinking";
+  type ActivityPhase = "call_model" | "tool_start" | "tool_done" | "thinking" | "session_end";
   interface ActivityEntry {
     id: string;
     timestamp: number;
@@ -496,6 +496,38 @@ function App() {
           setIsToolCalling(false);
           setCurrentToolUse(null);
           setStatusText("");
+
+          // 根据 reason 显示中止原因到 activityLog
+          const reasonMap: Record<string, { icon: string; label: string; color: string }> = {
+            completed:           { icon: "✅", label: "任务完成",                    color: "text-emerald-300" },
+            goal_complete:       { icon: "✅", label: "子任务全部完成，自动停止",      color: "text-emerald-300" },
+            max_turns_reached:   { icon: "⏹️", label: "达到最大轮数上限 (MaxTurns)，强制中止", color: "text-amber-300" },
+            max_turns:           { icon: "⏹️", label: "达到最大轮数上限 (MaxTurns)，强制中止", color: "text-amber-300" },
+            too_many_errors:     { icon: "⚠️", label: "连续失败次数过多，主动停止",      color: "text-red-300" },
+            too_stuck:           { icon: "🔄", label: "检测到模型在打转/空转，主动停止",  color: "text-amber-300" },
+            max_consecutive_errors: { icon: "⚠️", label: "连续失败次数过多，主动停止", color: "text-red-300" },
+            max_consecutive_tool_not_found: { icon: "🧠", label: "模型幻觉调用不存在的工具，主动停止", color: "text-amber-300" },
+            max_consecutive_no_any_tool: { icon: "🕳️", label: "连续多轮未调用任何工具（模型空转），主动停止", color: "text-amber-300" },
+            empty_response_persistent: { icon: "🕳️", label: "模型持续返回空响应，放弃重试", color: "text-red-300" },
+            max_output_tokens:   { icon: "📏", label: "模型输出达到上限，被截断",        color: "text-amber-300" },
+            max_budget_usd:      { icon: "💰", label: "超出预算限制，强制中止",          color: "text-amber-300" },
+            no_follow_up_needed: { icon: "⏹️", label: "无需继续跟进，对话正常结束",      color: "text-slate-400" },
+            interrupted:         { icon: "✋", label: "被用户手动中断",                  color: "text-slate-400" },
+          };
+          const rawReason = (msg.type === "result" ? msg.subtype : "error") || "unknown";
+          const info = reasonMap[rawReason] || { icon: "❓", label: `会话结束 (${rawReason})`, color: "text-slate-400" };
+          appendActivity({
+            phase: "session_end",
+            status: rawReason === "completed" || rawReason === "goal_complete" ? "done" : "info",
+            detail: rawReason,
+          });
+          // 在 activityLog 里单独追加一条带中文原因的"停止"条目
+          appendActivity({
+            phase: "session_end",
+            toolName: info.label,
+            status: info.color.includes("emerald") ? "done" : "stopped",
+          });
+
           // 对话结束后刷新 token 占用
           GetContextUsage().then(setContextUsage).catch(() => {});
         }
@@ -622,11 +654,18 @@ function App() {
         {entries.slice(-12).map((e) => {
           const isRunning = e.status === "running" && e.phase !== "tool_done";
           const isError = e.status === "error";
+          // session_end 特殊颜色：done=绿(完成)，stopped/info=琥珀(异常中止)
+          const isSessionEnd = e.phase === "session_end";
+          const isSessionDone = isSessionEnd && e.status === "done";
+          const isSessionStopped = isSessionEnd && (e.status === "stopped" || e.status === "info");
           return (
             <div
               key={e.id}
               className={`flex items-start gap-2 text-xs py-0.5 ${
-                isRunning ? "text-sky-300" : isError ? "text-red-300" : "text-slate-400"
+                isRunning ? "text-sky-300" :
+                isSessionDone ? "text-emerald-300 font-semibold" :
+                isSessionStopped ? "text-amber-300 font-semibold" :
+                isError ? "text-red-300" : "text-slate-400"
               }`}
             >
               <span className="mt-0.5 shrink-0">
@@ -648,6 +687,8 @@ function App() {
                   )
                 ) : e.phase === "tool_done" ? (
                   isError ? "❌" : "✅"
+                ) : e.phase === "session_end" ? (
+                  isSessionDone ? "🏁" : isSessionStopped ? "⏹️" : "•"
                 ) : "•"}
               </span>
               <span className="flex-1 break-all">
@@ -673,6 +714,12 @@ function App() {
                   <span className="text-slate-500">
                     {getToolIcon(e.toolName || "")} {e.toolName}{" "}
                     {isError ? "失败" : "完成"}
+                  </span>
+                )}
+                {e.phase === "session_end" && (
+                  <span className={isSessionDone ? "text-emerald-300" : "text-amber-300"}>
+                    <span className="font-semibold">{e.toolName || (isSessionDone ? "任务完成" : "会话中止")}</span>
+                    {e.detail && <span className="ml-1 text-slate-500 text-[10px]">({e.detail})</span>}
                   </span>
                 )}
               </span>
