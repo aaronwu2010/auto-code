@@ -172,6 +172,7 @@ type State struct {
 	// 4) token 快用完了 → 主动停止避免硬截断
 	ConsecutiveToolErrors  int      // 连续 N 轮 tool result 都是 error
 	ConsecutiveNoProgress  int      // 连续 N 轮没有实质性进展
+	ConsecutiveToolNotFound int     // 连续 N 次 tool_call 指向不存在的工具名（模型幻觉）
 	LastToolNames          []string // 最近 N 个 tool 名，用于检测"读同一个文件"类的停滞
 	RecentReadTargets      []string // 最近读操作的目标指纹（file_path/pattern），用于多样性检测
 	SeenReadTargets        map[string]bool // 已见过的读目标集合，快速查重
@@ -1151,53 +1152,65 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 								continue
 							}
 							tool := tools.FindToolByName(currentTools, tc.Function.Name)
-							if tool != nil {
-								var input any
-								var parseErr error
-								argsStr := tc.Function.ArgumentsString()
-								if argsStr != "" {
-									parseErr = json.Unmarshal([]byte(argsStr), &input)
-									if parseErr != nil {
-										// L4 自动修复：尝试从干扰文本中提取 JSON
-										if extracted, ok := tryExtractJSON(argsStr); ok && extracted != argsStr {
-											logger.NewModule("L4-fix").Info("extracted JSON from args", "tool", tc.Function.Name)
-											parseErr = json.Unmarshal([]byte(extracted), &input)
-										}
+							if tool == nil {
+								// 模型调用了不存在的工具 → 幻觉，记录并注入错误消息
+								logger.NewModule("Query").Error("tool not found (stream phase): %s (available=%d)",
+									tc.Function.Name, len(currentTools))
+								state.ConsecutiveToolNotFound++
+								state.Messages = append(state.Messages, types.Message{
+									Role:       types.RoleTool,
+									Content:    fmt.Sprintf("Tool not found: %s. Available tools: %s", tc.Function.Name, toolNamesList(currentTools)),
+									ToolCallID: toolUseID,
+									Timestamp:  time.Now().Unix(),
+								})
+								ch <- QueryOutput{Type: "user", Message: &state.Messages[len(state.Messages)-1]}
+								continue
+							}
+							var input any
+							var parseErr error
+							argsStr := tc.Function.ArgumentsString()
+							if argsStr != "" {
+								parseErr = json.Unmarshal([]byte(argsStr), &input)
+								if parseErr != nil {
+									// L4 自动修复：尝试从干扰文本中提取 JSON
+									if extracted, ok := tryExtractJSON(argsStr); ok && extracted != argsStr {
+										logger.NewModule("L4-fix").Info("extracted JSON from args", "tool", tc.Function.Name)
+										parseErr = json.Unmarshal([]byte(extracted), &input)
 									}
 								}
-								if parseErr != nil {
-									ce := classifyError(parseErr, tc.Function.Name)
-									logErrorFix(ce.category, tc.Function.Name, "args_parse_failed")
+							}
+							if parseErr != nil {
+								ce := classifyError(parseErr, tc.Function.Name)
+								logErrorFix(ce.category, tc.Function.Name, "args_parse_failed")
+								state.Messages = append(state.Messages, types.Message{
+									Role:       types.RoleTool,
+									Content:    renderStructuredError(tc.Function.Name, parseErr, ce, ""),
+									ToolCallID: toolUseID,
+									Timestamp:  time.Now().Unix(),
+								})
+								ch <- QueryOutput{Type: "user", Message: &state.Messages[len(state.Messages)-1]}
+								continue
+							}
+
+							// === Hook 1: GuardRailEngine 硬约束检查 ===
+							if state.GuardRailEngine != nil {
+								decision := state.GuardRailEngine.CheckToolGuard(tc.Function.Name, input)
+								if !decision.Passed {
+									logger.NewModule("GuardRail").Warn("BLOCKED %s: %s", tc.Function.Name, decision.Reason)
+									// 不拒绝——给 LLM 一个 "工具返回了提示"，让它自己决定先读再改
 									state.Messages = append(state.Messages, types.Message{
 										Role:       types.RoleTool,
-										Content:    renderStructuredError(tc.Function.Name, parseErr, ce, ""),
+										Content:    "[GuardRail] " + decision.Suggestion,
 										ToolCallID: toolUseID,
 										Timestamp:  time.Now().Unix(),
 									})
 									ch <- QueryOutput{Type: "user", Message: &state.Messages[len(state.Messages)-1]}
 									continue
 								}
+							}
 
-								// === Hook 1: GuardRailEngine 硬约束检查 ===
-								if state.GuardRailEngine != nil {
-									decision := state.GuardRailEngine.CheckToolGuard(tc.Function.Name, input)
-									if !decision.Passed {
-										logger.NewModule("GuardRail").Warn("BLOCKED %s: %s", tc.Function.Name, decision.Reason)
-										// 不拒绝——给 LLM 一个 "工具返回了提示"，让它自己决定先读再改
-										state.Messages = append(state.Messages, types.Message{
-											Role:       types.RoleTool,
-											Content:    "[GuardRail] " + decision.Suggestion,
-											ToolCallID: toolUseID,
-											Timestamp:  time.Now().Unix(),
-										})
-										ch <- QueryOutput{Type: "user", Message: &state.Messages[len(state.Messages)-1]}
-										continue
-									}
-								}
-
-								if tool.IsConcurrencySafe(input) {
-									streamingExecutor.AddTool(ctx, tool, input, toolUseID, i)
-								}
+							if tool.IsConcurrencySafe(input) {
+								streamingExecutor.AddTool(ctx, tool, input, toolUseID, i)
 							}
 						}
 					}
@@ -1460,10 +1473,12 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 
 			tool := tools.FindToolByName(currentTools, tc.Function.Name)
 			if tool == nil {
-				logger.NewModule("Query").Error("tool not found: %s", tc.Function.Name)
+				logger.NewModule("Query").Error("tool not found: %s (fallback phase, available=%d)",
+					tc.Function.Name, len(currentTools))
+				state.ConsecutiveToolNotFound++
 				state.Messages = append(state.Messages, types.Message{
 					Role:       types.RoleTool,
-					Content:    fmt.Sprintf("Tool not found: %s", tc.Function.Name),
+					Content:    fmt.Sprintf("Tool not found: %s. Available tools: %s", tc.Function.Name, toolNamesList(currentTools)),
 					ToolCallID: toolUseID,
 					Timestamp:  time.Now().Unix(),
 				})
@@ -2100,6 +2115,15 @@ func toolNameFromResult(r *toolExecutionResult) string {
 		return r.ToolUseID
 	}
 	return ""
+}
+
+// toolNamesList 把工具列表的名字拼成逗号分隔的字符串
+func toolNamesList(toolList []tools.Tool) string {
+	names := make([]string, 0, len(toolList))
+	for _, t := range toolList {
+		names = append(names, t.Name())
+	}
+	return strings.Join(names, ", ")
 }
 
 // detectProjectExtFromDir scans a project directory and returns the most common file extension.

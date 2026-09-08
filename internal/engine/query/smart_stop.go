@@ -41,6 +41,10 @@ type SmartStopConfig struct {
 	// 即使全是读操作，只要有新目标就不算停滞。
 	MaxConsecutiveNoProgress int
 
+	// MaxConsecutiveToolNotFound 连续 N 次 tool_call 指向不存在的工具名
+	// 经验值 3：模型反复幻觉调用不存在的工具，继续浪费回合无意义
+	MaxConsecutiveToolNotFound int
+
 	// TokenWarningRatio token 剩余低于此比例时，主动停止避免硬截断
 	// 经验值 0.30：30% 足够生成一个完整的 final answer + 不触发紧急压缩
 	TokenWarningRatio float64
@@ -49,9 +53,10 @@ type SmartStopConfig struct {
 // DefaultSmartStopConfig 默认配置
 func DefaultSmartStopConfig() SmartStopConfig {
 	return SmartStopConfig{
-		MaxConsecutiveToolErrors: 3,
-		MaxConsecutiveNoProgress: 10,
-		TokenWarningRatio:        0.30,
+		MaxConsecutiveToolErrors:   3,
+		MaxConsecutiveNoProgress:   10,
+		MaxConsecutiveToolNotFound: 3,
+		TokenWarningRatio:          0.30,
 	}
 }
 
@@ -151,6 +156,8 @@ func UpdateSmartStopState(state *State, cfg SmartStopConfig, toolResults []*tool
 		state.ConsecutiveToolErrors++
 	} else {
 		state.ConsecutiveToolErrors = 0 // 有成功就清零
+		// 有成功的工具执行 → 说明不再有 tool not found 问题，清零
+		state.ConsecutiveToolNotFound = 0
 	}
 
 	// --- 2. 停滞检测 ---
@@ -264,6 +271,13 @@ func CheckSmartStopSignals(state *State, cfg SmartStopConfig, params QueryParams
 		logger.NewModule("SmartStop").Warn("连续 %d 轮 tool result 都是 error，判定 agent 卡住（turn=%d）",
 			state.ConsecutiveToolErrors, state.TurnCount)
 		return SmartStopTooManyErrors
+	}
+
+	// --- 规则 2.5：连续 tool not found（模型幻觉，调用不存在的工具名）---
+	if state.ConsecutiveToolNotFound >= cfg.MaxConsecutiveToolNotFound {
+		logger.NewModule("SmartStop").Warn("连续 %d 次 tool_call 指向不存在的工具名，判定 agent 幻觉（turn=%d）",
+			state.ConsecutiveToolNotFound, state.TurnCount)
+		return SmartStopTooManyErrors // 复用 TooManyErrors 语义：模型无法正常工作
 	}
 
 	// --- 规则 3：连续停滞 ---
