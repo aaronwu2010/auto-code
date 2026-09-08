@@ -170,9 +170,11 @@ type State struct {
 	// 2) 连续停滞 → agent 在打转
 	// 3) 子任务全做完了 → 提前停止，不浪费轮数
 	// 4) token 快用完了 → 主动停止避免硬截断
-	ConsecutiveToolErrors  int    // 连续 N 轮 tool result 都是 error
-	ConsecutiveNoProgress  int    // 连续 N 轮没有实质性进展
+	ConsecutiveToolErrors  int      // 连续 N 轮 tool result 都是 error
+	ConsecutiveNoProgress  int      // 连续 N 轮没有实质性进展
 	LastToolNames          []string // 最近 N 个 tool 名，用于检测"读同一个文件"类的停滞
+	RecentReadTargets      []string // 最近读操作的目标指纹（file_path/pattern），用于多样性检测
+	SeenReadTargets        map[string]bool // 已见过的读目标集合，快速查重
 }
 
 type HistorySnipTrackingState struct {
@@ -193,6 +195,8 @@ type toolExecutionResult struct {
 	Err         error
 	ToolUseID   string
 	ToolCallIdx int
+	ToolName    string // 工具名（Read/Grep/Write/Bash 等），用于 SmartStop 多样性检测
+	ToolInput   any    // 工具原始输入，从中可提取 file_path / pattern 等目标
 }
 
 type StreamingToolExecutor struct {
@@ -264,7 +268,15 @@ func (e *StreamingToolExecutor) IsScheduled(toolUseID string) bool {
 	return ok
 }
 
-func (e *StreamingToolExecutor) executeTool(ctx context.Context, tool tools.Tool, input any, toolUseID string, toolCallIndex int) *toolExecutionResult {
+func (e *StreamingToolExecutor) executeTool(ctx context.Context, tool tools.Tool, input any, toolUseID string, toolCallIndex int) (result *toolExecutionResult) {
+	// 自动填充 ToolName/ToolInput：所有早返回都会被 defer 捕获
+	defer func() {
+		if result != nil {
+			result.ToolName = tool.Name()
+			result.ToolInput = input
+		}
+	}()
+
 	permResult, err := e.canUseTool(tool, input)
 	if err != nil {
 		logger.NewModule("Query").Debug("canUseTool error for %s: %v", tool.Name(), err)
@@ -1695,18 +1707,12 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		// 要主动感知"任务完成了"、"卡住了"、"token 快用完了"这些信号
 		smartStopCfg := DefaultSmartStopConfig()
 
-		// 1. 累积聪明循环信号（连续失败/停滞计数）
-		hasToolError := false
-		var toolNames []string
+		// 1. 累积聪明循环信号（连续失败/停滞计数 + 读目标多样性检测）
+		var resultSlice []*toolExecutionResult
 		for _, r := range allResults {
-			if r != nil {
-				if r.Err != nil {
-					hasToolError = true
-				}
-				toolNames = append(toolNames, toolNameFromResult(r))
-			}
+			resultSlice = append(resultSlice, r)
 		}
-		UpdateSmartStopState(&state, smartStopCfg, hasToolError, toolNames)
+		UpdateSmartStopState(&state, smartStopCfg, resultSlice)
 
 		// 2. 检查是否有聪明停止信号
 		if reason := CheckSmartStopSignals(&state, smartStopCfg, params); reason != SmartStopNone {
@@ -1815,7 +1821,15 @@ func getLastToolCalls(messages []types.Message) []types.ToolCall {
 	return nil
 }
 
-func executeToolCall(ctx context.Context, tool tools.Tool, input any, toolUseID string, canUseTool func(tool tools.Tool, input any) (types.PermissionResult, error), toolCtx *tools.ToolUseContext, hookExec *hooks.HookExecutor) *toolExecutionResult {
+func executeToolCall(ctx context.Context, tool tools.Tool, input any, toolUseID string, canUseTool func(tool tools.Tool, input any) (types.PermissionResult, error), toolCtx *tools.ToolUseContext, hookExec *hooks.HookExecutor) (result *toolExecutionResult) {
+	// 自动填充 ToolName/ToolInput：所有早返回都会被 defer 捕获
+	defer func() {
+		if result != nil {
+			result.ToolName = tool.Name()
+			result.ToolInput = input
+		}
+	}()
+
 	logger.NewModule("Query").Debug("executeToolCall: tool='%s'", tool.Name())
 	if canUseTool != nil {
 		permResult, err := canUseTool(tool, input)
