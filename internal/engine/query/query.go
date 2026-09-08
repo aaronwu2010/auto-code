@@ -1306,6 +1306,14 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		// 检测条件：assistantBuffer 为 nil 或 content+tool_calls 都为空，且 stop_reason="stop"
 		isEmptyResponse := assistantBuffer == nil ||
 			(len(assistantBuffer.Content) == 0 && len(assistantBuffer.ToolCalls) == 0)
+		if !isEmptyResponse {
+			// 成功返回了非空内容 → 清零空响应计数器
+			if state.EmptyResponseRetryCount > 0 {
+				logger.NewModule("Query").Debug("non-empty response received, resetting EmptyResponseRetryCount (%d → 0)",
+					state.EmptyResponseRetryCount)
+				state.EmptyResponseRetryCount = 0
+			}
+		}
 		if isEmptyResponse && stopReason != "max_output_tokens" {
 			// 统计连续空 response 次数，避免无限重试（独立于 MaxOutputTokensRecoveryCount）
 			state.EmptyResponseRetryCount++

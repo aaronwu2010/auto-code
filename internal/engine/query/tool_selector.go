@@ -93,9 +93,9 @@ func (ts *ToolSelector) RecordToolUsage(toolName string) {
 // Select 根据任务类型和项目上下文筛选工具
 // projectFileExt: 项目主要文件扩展名（如 ".go"、".ts"），空字符串表示未知
 //
-// 核心约束：AlwaysLoad=true 的工具（核心工具集）保底选入，不参与淘汰。
-// ToolSelector 只负责在核心工具集之间做**优先级排序**，而非裁剪核心工具。
-// 如果核心工具数本身超过 MaxTools，则按分数排序截断（保底也需要排队）。
+// 核心策略：AlwaysLoad=true 的核心工具**永不截断**——无论 MaxTools 设多大，
+// 核心工具集原样保留，然后从可选工具里补充到 MaxTools。
+// 如果核心工具本身就比 MaxTools 多，自动扩容到核心工具数 + N（可选预留位）。
 func (ts *ToolSelector) Select(allTools []tools.Tool, taskType TaskType, projectFileExt string) []tools.Tool {
 	if ts == nil || !ts.cfg.Enabled {
 		return allTools
@@ -107,9 +107,9 @@ func (ts *ToolSelector) Select(allTools []tools.Tool, taskType TaskType, project
 
 	// 给每个工具打分
 	type scoredTool struct {
-		tool     tools.Tool
-		score    float64
-		always   bool
+		tool   tools.Tool
+		score  float64
+		always bool
 	}
 	scored := make([]scoredTool, 0, len(allTools))
 
@@ -139,43 +139,55 @@ func (ts *ToolSelector) Select(allTools []tools.Tool, taskType TaskType, project
 		return scored[i].tool.Name() < scored[j].tool.Name()
 	})
 
-	max := ts.cfg.MaxTools
-	if max > len(scored) {
-		max = len(scored)
+	// 动态扩容：核心工具数 > MaxTools 时，自动扩容到核心工具 + 3 个可选预留位
+	// 而不是截断核心工具（核心工具 = 所有 AlwaysLoad=true 的工具，都是不可或缺的）
+	targetMax := ts.cfg.MaxTools
+	if len(alwaysSet) > targetMax {
+		expanded := len(alwaysSet) + 3 // 预留 3 个可选位
+		logger.NewModule("ToolSelector").Info(
+			"core tools (%d) > MaxTools (%d), auto-expanding to %d (never truncate core tools)",
+			len(alwaysSet), targetMax, expanded)
+		targetMax = expanded
 	}
 
-	// 核心工具数 <= MaxTools：全部保底 + 可选补满
-	if len(alwaysSet) <= max {
-		result := make([]tools.Tool, 0, max)
-		for _, s := range alwaysSet {
-			result = append(result, s.tool)
+	// 稳定排序 alwaysSet 和 optionalSet（按分数降序，同分按名字字典序）
+	sort.SliceStable(alwaysSet, func(i, j int) bool {
+		if alwaysSet[i].score != alwaysSet[j].score {
+			return alwaysSet[i].score > alwaysSet[j].score
 		}
-		// 用排序后的 scored 中剩余的非 always 工具补满
-		chosen := make(map[string]bool)
-		for _, s := range alwaysSet {
+		return alwaysSet[i].tool.Name() < alwaysSet[j].tool.Name()
+	})
+	sort.SliceStable(optionalSet, func(i, j int) bool {
+		if optionalSet[i].score != optionalSet[j].score {
+			return optionalSet[i].score > optionalSet[j].score
+		}
+		return optionalSet[i].tool.Name() < optionalSet[j].tool.Name()
+	})
+
+	// 核心工具全部保留
+	result := make([]tools.Tool, 0, targetMax)
+	for _, s := range alwaysSet {
+		result = append(result, s.tool)
+	}
+
+	// 用可选工具补满（达到 targetMax 或可选用完）
+	chosen := make(map[string]bool)
+	for _, s := range alwaysSet {
+		chosen[s.tool.Name()] = true
+	}
+	for _, s := range optionalSet {
+		if len(result) >= targetMax {
+			break
+		}
+		if !chosen[s.tool.Name()] {
+			result = append(result, s.tool)
 			chosen[s.tool.Name()] = true
 		}
-		for _, s := range scored {
-			if len(result) >= max {
-				break
-			}
-			if !chosen[s.tool.Name()] {
-				result = append(result, s.tool)
-				chosen[s.tool.Name()] = true
-			}
-		}
-		return result
 	}
 
-	// 核心工具数 > MaxTools：按分数截断（保底也要排队）
-	logger.NewModule("ToolSelector").Warn("core tools (%d) exceed MaxTools (%d), truncating by score",
-		len(alwaysSet), max)
+	logger.NewModule("ToolSelector").Debug("select: %d tools (core=%d, optional=%d, cap=%d)",
+		len(result), len(alwaysSet), len(result)-len(alwaysSet), targetMax)
 
-	// 取 Top N（已经排好序了）
-	result := make([]tools.Tool, 0, max)
-	for i := 0; i < max; i++ {
-		result = append(result, scored[i].tool)
-	}
 	return result
 }
 
