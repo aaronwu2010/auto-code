@@ -470,7 +470,13 @@ func (l *Landscaper) grepFiles(ctx context.Context, root, pattern string, keywor
 	go func() {
 		defer close(done)
 		filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() {
+			if err != nil {
+				return nil
+			}
+			if info.IsDir() {
+				if shouldSkipDir(info.Name()) {
+					return filepath.SkipDir
+				}
 				return nil
 			}
 			select {

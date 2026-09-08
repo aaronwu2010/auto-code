@@ -199,16 +199,16 @@ func (qe *QueryEngine) Startup(ctx context.Context) {
 	qe.perceptionMgr.RegisterProcessor(perception.NewBaseInputProcessor(perceptionCfg))
 
 	memCfg := memory.DefaultMemoryConfig()
-	if qe.config.CWD != "" {
-		memCfg.StoragePath = filepath.Join(qe.config.CWD, ".auto")
+	if dir := qe.getProjectDirectory(); dir != "" {
+		memCfg.StoragePath = filepath.Join(dir, ".auto")
 	}
 	if ltm, err := memory.NewBaseLongTermMemory(memCfg); err == nil {
 		qe.longTermMem = ltm
 	}
 
 	reflCfg := reflection.DefaultReflectionConfig()
-	if qe.config.CWD != "" {
-		reflCfg.StoragePath = filepath.Join(qe.config.CWD, ".auto", "reflections")
+	if dir := qe.getProjectDirectory(); dir != "" {
+		reflCfg.StoragePath = filepath.Join(dir, ".auto", "reflections")
 	}
 	if refl, err := reflection.NewBaseReflector(reflCfg); err == nil {
 		qe.reflector = refl
@@ -1822,10 +1822,7 @@ func (qe *QueryEngine) buildSystemPrompt(ctx context.Context) (*types.SystemProm
 		}
 	}
 
-	projectDir := qe.config.CWD
-	if projectDir == "" {
-		projectDir = qe.appState.GetProjectDirectory()
-	}
+	projectDir := qe.getProjectDirectory()
 	if projectDir != "" {
 		blocks = append(blocks, types.SystemPromptBlock{
 			Text:       fmt.Sprintf("# Project Directory\nThe current project directory is: %s\n\nIMPORTANT: When creating files, use this directory as the base path. For example, if the user asks to create 'hello.go', you should write to '%s/hello.go' (using the correct path separator for the operating system).", projectDir, projectDir),
