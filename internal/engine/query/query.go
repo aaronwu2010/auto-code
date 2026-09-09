@@ -799,8 +799,8 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			if !needsFollowUp {
 				logger.NewModule("Query").Info("terminal: no follow up needed (last role=%s, content_len=%d, tool_calls=%d, is_meta=%v)",
 					lastMsg.Role, len(lastMsg.Content), len(lastMsg.ToolCalls), lastMsg.IsMeta)
-				// 额外诊断：如果 LLM 返回了空 assistant（stop 无内容无 tool_calls），记录完整上下文
-				if lastMsg.Role == types.RoleAssistant && len(lastMsg.Content) == 0 && len(lastMsg.ToolCalls) == 0 {
+				// 额外诊断：如果 LLM 返回了空 assistant（stop 无内容无 tool_calls 无 thinking），记录完整上下文
+				if lastMsg.Role == types.RoleAssistant && len(lastMsg.Content) == 0 && len(lastMsg.ToolCalls) == 0 && len(lastMsg.Thinking) == 0 {
 					logger.NewModule("Query").Warn("WARNING: empty assistant response with stop reason!")
 					startIdx := len(messages) - 3
 					if startIdx < 0 {
@@ -1304,9 +1304,10 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		// === 空 response 自动重试 ===
 		// 问题：模型有时会返回空 response（content="", tool_calls=[]），stop_reason="stop"
 		// 这在 Ollama 云 API（ollama.com）上更常见，尤其是多轮对话后期
-		// 检测条件：assistantBuffer 为 nil 或 content+tool_calls 都为空，且 stop_reason="stop"
+		// 检测条件：assistantBuffer 为 nil 或 content+thinking+tool_calls 全为空，且 stop_reason="stop"
+		// 注意：模型可能返回 thinking（有思考内容）但不返回 content，这时不是空响应
 		isEmptyResponse := assistantBuffer == nil ||
-			(len(assistantBuffer.Content) == 0 && len(assistantBuffer.ToolCalls) == 0)
+			(len(assistantBuffer.Content) == 0 && len(assistantBuffer.ToolCalls) == 0 && len(assistantBuffer.Thinking) == 0)
 		if !isEmptyResponse {
 			// 成功返回了非空内容 → 清零空响应计数器
 			if state.EmptyResponseRetryCount > 0 {

@@ -1473,19 +1473,8 @@ function App() {
                 {renderActivityTimeline(activityLog)}
               </div>
             )}
-            {/* 兜底卡片：当最后一条 assistant 消息为空/不存在，或会话异常结束时显示结束原因 */}
-            {sessionEndInfo && !isLoading && !streamingMessage && (() => {
-              // 找最后一条 assistant 消息
-              const lastAssistantIdx = [...messages].reverse().findIndex((m) => m.role === "assistant");
-              const lastAssistant = lastAssistantIdx >= 0 ? messages[messages.length - 1 - lastAssistantIdx] : null;
-              const assistantContentEmpty =
-                !lastAssistant ||
-                (!lastAssistant.content &&
-                  (!lastAssistant.content_blocks || lastAssistant.content_blocks.filter((b) => b.type === "text" && b.text).length === 0));
-
-              // 只在内容为空时显示（正常结束且有内容时不打扰用户）
-              if (!assistantContentEmpty && !sessionEndInfo.isAbnormal) return null;
-
+            {/* 兜底卡片：异常会话结束或出错时显示结束原因 */}
+            {sessionEndInfo && !isLoading && !streamingMessage && sessionEndInfo.isAbnormal && (() => {
               const rawReason = sessionEndInfo.type === "result" ? (sessionEndInfo.subtype || "unknown") : "error";
               const info = SESSION_END_REASON_MAP[rawReason] || {
                 icon: "❓",
@@ -1495,15 +1484,9 @@ function App() {
 
               const borderClass = sessionEndInfo.type === "error"
                 ? "border-red-800/60 bg-red-950/30"
-                : sessionEndInfo.isAbnormal
-                ? "border-amber-800/60 bg-amber-950/20"
-                : "border-emerald-800/40 bg-emerald-950/10";
+                : "border-amber-800/60 bg-amber-950/20";
 
-              const titleText = sessionEndInfo.type === "error"
-                ? "对话失败"
-                : sessionEndInfo.isAbnormal
-                ? "对话中止"
-                : "对话结束";
+              const titleText = sessionEndInfo.type === "error" ? "对话失败" : "对话中止";
 
               return (
                 <div
