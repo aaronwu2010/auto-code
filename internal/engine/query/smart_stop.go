@@ -60,10 +60,10 @@ type SmartStopConfig struct {
 func DefaultSmartStopConfig() SmartStopConfig {
 	return SmartStopConfig{
 		MaxConsecutiveToolErrors:   3,
-		MaxConsecutiveNoProgress:   300, // 禁用规则 3（too_stuck）：10 轮在探索阶段会误伤
+		MaxConsecutiveNoProgress:   50, // 禁用规则 3（too_stuck）：10 轮在探索阶段会误伤
 		MaxConsecutiveToolNotFound: 3,
 		MaxConsecutiveNoAnyTool:    5,
-		TokenWarningRatio:          0, // 禁用规则 4（token 预警）：0.30 经常在任务中途误杀
+		TokenWarningRatio:          0.1, // 禁用规则 4（token 预警）：0.30 经常在任务中途误杀
 	}
 }
 
