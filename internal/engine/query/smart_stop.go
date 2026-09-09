@@ -258,9 +258,8 @@ func CheckSmartStopSignals(state *State, cfg SmartStopConfig, params QueryParams
 		return SmartStopNone
 	}
 
-	// ⚠️ SmartStop 总开关：当前禁用（所有规则都会导致任务中途被误杀）
-	// 需要彻底排查后再启用。
-	const smartStopEnabled = false
+	// SmartStop 总开关：启用
+	const smartStopEnabled = true
 	if !smartStopEnabled {
 		return SmartStopNone
 	}
