@@ -56,6 +56,26 @@ interface StateChangeEvent {
   value?: unknown;
 }
 
+// 会话结束 reason → 展示信息映射（模块级，事件处理和 JSX 共用）
+const SESSION_END_REASON_MAP: Record<string, { icon: string; label: string; color: string }> = {
+  completed:                    { icon: "✅", label: "任务完成",                                color: "text-emerald-300" },
+  goal_complete:                { icon: "✅", label: "子任务全部完成，自动停止",                color: "text-emerald-300" },
+  max_turns_reached:            { icon: "⏹️", label: "达到最大轮数上限 (MaxTurns)，强制中止",   color: "text-amber-300" },
+  max_turns:                    { icon: "⏹️", label: "达到最大轮数上限 (MaxTurns)，强制中止",   color: "text-amber-300" },
+  too_many_errors:              { icon: "⚠️", label: "连续失败次数过多，主动停止",              color: "text-red-300" },
+  too_stuck:                    { icon: "🔄", label: "检测到模型在打转/空转，主动停止",          color: "text-amber-300" },
+  max_consecutive_errors:       { icon: "⚠️", label: "连续失败次数过多，主动停止",              color: "text-red-300" },
+  max_consecutive_tool_not_found:{ icon: "🧠", label: "模型幻觉调用不存在的工具，主动停止",    color: "text-amber-300" },
+  max_consecutive_no_any_tool:  { icon: "🕳️", label: "连续多轮未调用任何工具（模型空转），主动停止", color: "text-amber-300" },
+  empty_response_persistent:    { icon: "🕳️", label: "模型持续返回空响应，放弃重试",            color: "text-red-300" },
+  max_output_tokens:            { icon: "📏", label: "模型输出达到上限，被截断",                 color: "text-amber-300" },
+  max_budget_usd:               { icon: "💰", label: "超出预算限制，强制中止",                   color: "text-amber-300" },
+  no_follow_up_needed:          { icon: "⏹️", label: "无需继续跟进，对话正常结束",               color: "text-slate-400" },
+  interrupted:                  { icon: "✋", label: "被用户手动中断",                           color: "text-slate-400" },
+  api_error:                    { icon: "❌", label: "API 调用失败",                            color: "text-red-300" },
+  system_prompt_error:          { icon: "❌", label: "系统提示构建失败",                         color: "text-red-300" },
+};
+
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -111,6 +131,14 @@ function App() {
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; filePath: string } | null>(null);
   const projectDirRef = useRef<string>("");
+
+  // 最后一次会话结束信息，用于空页面兜底显示失败原因
+  const [sessionEndInfo, setSessionEndInfo] = useState<{
+    type: "result" | "error";
+    subtype?: string;
+    errorMessage?: string;
+    isAbnormal: boolean;
+  } | null>(null);
 
   const [currentToolUse, setCurrentToolUse] = useState<{
     tool_name: string;
@@ -470,7 +498,9 @@ function App() {
       try {
         const msg: SDKMessage =
           typeof data === "string" ? JSON.parse(data) : (data as SDKMessage);
-        if (msg.type === "stream_chunk" && msg.message) {
+        if (msg.type === "user") {
+          setSessionEndInfo(null);
+        } else if (msg.type === "stream_chunk" && msg.message) {
           setStreamingMessage(msg.message);
           setIsToolCalling(false);
         } else if (msg.type === "tool_calls_start") {
@@ -497,25 +527,21 @@ function App() {
           setCurrentToolUse(null);
           setStatusText("");
 
-          // 根据 reason 显示中止原因到 activityLog
-          const reasonMap: Record<string, { icon: string; label: string; color: string }> = {
-            completed:           { icon: "✅", label: "任务完成",                    color: "text-emerald-300" },
-            goal_complete:       { icon: "✅", label: "子任务全部完成，自动停止",      color: "text-emerald-300" },
-            max_turns_reached:   { icon: "⏹️", label: "达到最大轮数上限 (MaxTurns)，强制中止", color: "text-amber-300" },
-            max_turns:           { icon: "⏹️", label: "达到最大轮数上限 (MaxTurns)，强制中止", color: "text-amber-300" },
-            too_many_errors:     { icon: "⚠️", label: "连续失败次数过多，主动停止",      color: "text-red-300" },
-            too_stuck:           { icon: "🔄", label: "检测到模型在打转/空转，主动停止",  color: "text-amber-300" },
-            max_consecutive_errors: { icon: "⚠️", label: "连续失败次数过多，主动停止", color: "text-red-300" },
-            max_consecutive_tool_not_found: { icon: "🧠", label: "模型幻觉调用不存在的工具，主动停止", color: "text-amber-300" },
-            max_consecutive_no_any_tool: { icon: "🕳️", label: "连续多轮未调用任何工具（模型空转），主动停止", color: "text-amber-300" },
-            empty_response_persistent: { icon: "🕳️", label: "模型持续返回空响应，放弃重试", color: "text-red-300" },
-            max_output_tokens:   { icon: "📏", label: "模型输出达到上限，被截断",        color: "text-amber-300" },
-            max_budget_usd:      { icon: "💰", label: "超出预算限制，强制中止",          color: "text-amber-300" },
-            no_follow_up_needed: { icon: "⏹️", label: "无需继续跟进，对话正常结束",      color: "text-slate-400" },
-            interrupted:         { icon: "✋", label: "被用户手动中断",                  color: "text-slate-400" },
-          };
+          // 判断是否为异常结束
+          const normalReasons = ["completed", "goal_complete", "no_follow_up_needed"];
           const rawReason = (msg.type === "result" ? msg.subtype : "error") || "unknown";
-          const info = reasonMap[rawReason] || { icon: "❓", label: `会话结束 (${rawReason})`, color: "text-slate-400" };
+          const isAbnormal = !normalReasons.includes(rawReason);
+
+          // 记录会话结束信息，供空页面兜底显示
+          setSessionEndInfo({
+            type: msg.type as "result" | "error",
+            subtype: msg.subtype,
+            errorMessage: msg.message?.content || "",
+            isAbnormal,
+          });
+
+          // 根据 reason 显示中止原因到 activityLog
+          const info = SESSION_END_REASON_MAP[rawReason] || { icon: "❓", label: `会话结束 (${rawReason})`, color: "text-slate-400" };
           appendActivity({
             phase: "session_end",
             status: rawReason === "completed" || rawReason === "goal_complete" ? "done" : "info",
@@ -1447,6 +1473,60 @@ function App() {
                 {renderActivityTimeline(activityLog)}
               </div>
             )}
+            {/* 兜底卡片：当最后一条 assistant 消息为空/不存在，或会话异常结束时显示结束原因 */}
+            {sessionEndInfo && !isLoading && !streamingMessage && (() => {
+              // 找最后一条 assistant 消息
+              const lastAssistantIdx = [...messages].reverse().findIndex((m) => m.role === "assistant");
+              const lastAssistant = lastAssistantIdx >= 0 ? messages[messages.length - 1 - lastAssistantIdx] : null;
+              const assistantContentEmpty =
+                !lastAssistant ||
+                (!lastAssistant.content &&
+                  (!lastAssistant.content_blocks || lastAssistant.content_blocks.filter((b) => b.type === "text" && b.text).length === 0));
+
+              // 只在内容为空时显示（正常结束且有内容时不打扰用户）
+              if (!assistantContentEmpty && !sessionEndInfo.isAbnormal) return null;
+
+              const rawReason = sessionEndInfo.type === "result" ? (sessionEndInfo.subtype || "unknown") : "error";
+              const info = SESSION_END_REASON_MAP[rawReason] || {
+                icon: "❓",
+                label: sessionEndInfo.type === "error" ? "对话出错" : `会话结束 (${rawReason})`,
+                color: "text-slate-400",
+              };
+
+              const borderClass = sessionEndInfo.type === "error"
+                ? "border-red-800/60 bg-red-950/30"
+                : sessionEndInfo.isAbnormal
+                ? "border-amber-800/60 bg-amber-950/20"
+                : "border-emerald-800/40 bg-emerald-950/10";
+
+              const titleText = sessionEndInfo.type === "error"
+                ? "对话失败"
+                : sessionEndInfo.isAbnormal
+                ? "对话中止"
+                : "对话结束";
+
+              return (
+                <div
+                  className={`mb-4 px-4 py-3 rounded-2xl max-w-[85%] border text-slate-200 shadow-sm ${borderClass}`}
+                >
+                  <div className="flex items-center gap-2 text-sm mb-1.5">
+                    <span className="text-lg leading-none">{info.icon}</span>
+                    <span className={`font-semibold ${info.color}`}>{titleText}</span>
+                  </div>
+                  <div className={`text-xs ${info.color}`}>{info.label}</div>
+                  {sessionEndInfo.errorMessage && (
+                    <details className="mt-2">
+                      <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-400 transition-colors select-none">
+                        查看错误详情
+                      </summary>
+                      <pre className="whitespace-pre-wrap break-words text-xs text-red-300/80 mt-2 p-2 bg-slate-950/60 rounded border border-slate-800/50 font-mono">
+                        {sessionEndInfo.errorMessage}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              );
+            })()}
             <div ref={messagesEndRef} />
           </div>
 
