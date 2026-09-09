@@ -26,9 +26,12 @@ const (
 
 	// DefaultMaxTurns 主 agent 默认最大 ReAct 轮数。
 	// 1 turn = 1 次 LLM call + 0~N 次 tool call。
-	// 100 轮被截断（日志 steps=200 = 100 个 thought+action），说明复杂开发任务远超 100。
-	// 300 覆盖：多文件重构 → 完整测试 → 反思 → 修复 → 再验证。
-	DefaultMaxTurns = 1000
+	// 开发历史：
+	//   100 → 太松，复杂任务直接被截断
+	//   300 → 多文件重构刚够，但加上完整测试+反思+修复就不够
+	//   1000 → 中等开发任务 OK，但超复杂任务（>10 文件 + 多轮修改 + 验证 + 记忆压缩）仍可能不够
+	//   3000 → 覆盖完整的大任务：需求分析 → 多文件实现 → 构建验证 → 反思修复 → 再验证 → 收尾
+	DefaultMaxTurns = 3000
 
 	// DefaultSubAgentMaxTurns 子 agent 默认最大轮数。
 	// 子 agent 只负责一件事（如"分析 X"、"修复 Y"、"实现 Z"），20 轮足够。
@@ -1301,26 +1304,39 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			return
 		}
 
-		// === 空 response 自动重试 ===
-		// 问题：模型有时会返回空 response（content="", tool_calls=[]），stop_reason="stop"
+		// === 空 response / thinking-only response 自动重试 ===
+		// 问题 1：模型有时会返回完全空 response（content="", thinking="", tool_calls=[]）
+		// 问题 2：模型有时只返回 thinking（有思考过程）但 content 和 tool_calls 都为空
+		//         → 有思考但没有产出，对用户来说也是空页面
 		// 这在 Ollama 云 API（ollama.com）上更常见，尤其是多轮对话后期
-		// 检测条件：assistantBuffer 为 nil 或 content+thinking+tool_calls 全为空，且 stop_reason="stop"
-		// 注意：模型可能返回 thinking（有思考内容）但不返回 content，这时不是空响应
+		//
+		// isEmptyResponse: 三个字段全空
+		// isThinkingOnly:  有 thinking 但 content+tool_calls 都空
 		isEmptyResponse := assistantBuffer == nil ||
 			(len(assistantBuffer.Content) == 0 && len(assistantBuffer.ToolCalls) == 0 && len(assistantBuffer.Thinking) == 0)
-		if !isEmptyResponse {
-			// 成功返回了非空内容 → 清零空响应计数器
+		isThinkingOnly := assistantBuffer != nil &&
+			len(assistantBuffer.Thinking) > 0 &&
+			len(assistantBuffer.Content) == 0 &&
+			len(assistantBuffer.ToolCalls) == 0
+
+		if !isEmptyResponse && !isThinkingOnly {
+			// 成功返回了非空内容（content 或 tool_calls）→ 清零计数器
 			if state.EmptyResponseRetryCount > 0 {
 				logger.NewModule("Query").Debug("non-empty response received, resetting EmptyResponseRetryCount (%d → 0)",
 					state.EmptyResponseRetryCount)
 				state.EmptyResponseRetryCount = 0
 			}
 		}
-		if isEmptyResponse && stopReason != "max_output_tokens" {
-			// 统计连续空 response 次数，避免无限重试（独立于 MaxOutputTokensRecoveryCount）
+
+		if (isEmptyResponse || isThinkingOnly) && stopReason != "max_output_tokens" {
+			emptyKind := "完全空"
+			if isThinkingOnly {
+				emptyKind = "thinking-only (有思考但无产出)"
+			}
 			state.EmptyResponseRetryCount++
 			if state.EmptyResponseRetryCount <= 2 {
-				logger.NewModule("Query").Warn("EMPTY RESPONSE detected (count=%d), injecting retry prompt...", state.EmptyResponseRetryCount)
+				logger.NewModule("Query").Warn("EMPTY RESPONSE detected (%s, count=%d), injecting retry prompt...",
+					emptyKind, state.EmptyResponseRetryCount)
 
 				// 注入一个重试 prompt，引导模型继续工作
 				retryMsg := types.Message{
@@ -1339,7 +1355,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 				logger.NewModule("Query").Info("Empty response retry prompt injected, will re-call model")
 			} else {
 				// 连续 3 次空 response，放弃重试
-				logger.NewModule("Query").Error("EMPTY RESPONSE x%d, giving up", state.EmptyResponseRetryCount)
+				logger.NewModule("Query").Error("EMPTY RESPONSE x%d (%s), giving up", state.EmptyResponseRetryCount, emptyKind)
 				if state.ReActBridge != nil {
 					state.ReActBridge.MarkFailed("empty_response_persistent")
 				}
