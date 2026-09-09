@@ -1137,7 +1137,11 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			case "assistant":
 				if msg.Message != nil {
 					assistantBuffer = mergeAssistantFragment(assistantBuffer, msg.Message)
-					ch <- QueryOutput{Type: "assistant", Message: msg.Message}
+
+					// 关键修复：流式增量 → 发 stream_chunk（前端 setStreamingMessage 做流式显示）
+					// 而不是 assistant（前端 append 到 messages 数组）
+					// 这样几百个 token chunk 只触发流式更新，不会无限追加 messages
+					ch <- QueryOutput{Type: "stream_chunk", Message: assistantBuffer}
 
 					if assistantBuffer.HasToolCalls() {
 						needsFollowUp = true
@@ -1277,10 +1281,19 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		}
 
 		if assistantBuffer != nil && !assistantHasAppended {
+			// 给完整的 assistant 消息分配稳定 ID（用 UUID 确保唯一性）
+			if assistantBuffer.ID == "" {
+				assistantBuffer.ID = deps.GenerateUUID()
+			}
 			state.Messages = append(state.Messages, *assistantBuffer)
 			assistantHasAppended = true
 			logger.NewModule("Query").Debug("assistantBuffer appended to state.Messages: content_len=%d, thinking_len=%d, tool_calls=%d",
 				len(assistantBuffer.Content), len(assistantBuffer.Thinking), len(assistantBuffer.ToolCalls))
+
+			// 关键：streaming 期间我们发的是 stream_chunk（流式增量）
+			// stream 结束后发一条完整的 assistant 消息，前端 append 到 messages 数组
+			// 不再让几百个 chunk 各自触发一次 append
+			ch <- QueryOutput{Type: "assistant", Message: assistantBuffer}
 
 			// === L2 ReAct Bridge Hook 2: 记录 Thought + Action ===
 			if state.ReActBridge != nil {
