@@ -158,6 +158,11 @@ type State struct {
 	InjectedScenes  map[prompts.SceneType]bool // 已注入的场景（去重）
 	InjectedRisks   map[prompts.RiskType]bool  // 已注入的风险（去重）
 
+	// --- ReflectLoop 内部反思内容过滤 ---
+	// ReflectLoop 注入反思 prompt 后，模型可能在 content 里复述反思模板
+	// 这些内部内容不该展示给用户，用这个 flag 标记"下一次 LLM 回复里的反思内容要 suppress"
+	SuppressReflectContent bool
+
 	// --- L5 全栈交付 + L6 参考迁移（完美交付能力） ---
 	InjectedStackDelivery  bool // 是否已注入全栈交付清单
 	InjectedReferenceGuide bool // 是否已注入参考项目迁移指南
@@ -889,6 +894,9 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 					}
 					messages = append(messages, reflectMsg)
 					state.Messages = append(state.Messages, reflectMsg)
+					// 标记下一次 LLM 回复可能包含反思内容，需要 suppress
+					state.SuppressReflectContent = true
+					logger.NewModule("ReflectLoop").Debug("SuppressReflectContent set to true for next LLM call")
 					// 反思后重置 cycle
 					state.ReflectLoop.CompleteReflectCycle(&ReflectResult{
 						CycleID:     state.ReflectLoop.cycleID,
@@ -1138,10 +1146,33 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 				if msg.Message != nil {
 					assistantBuffer = mergeAssistantFragment(assistantBuffer, msg.Message)
 
+					// === ReflectLoop 内部反思内容过滤 ===
+					// 如果刚注入过反思 prompt，且模型 content 以 "# Deep Reflection" 开头
+					// 这些是内部反思内容，不该展示给用户 → suppress
+					shouldSuppress := false
+					if state.SuppressReflectContent {
+						hasToolCalls := len(assistantBuffer.ToolCalls) > 0
+						contentPrefix := strings.TrimSpace(assistantBuffer.Content)
+						if hasToolCalls {
+							// 出现 tool_calls → 正常工作了，清除 suppress
+							state.SuppressReflectContent = false
+							logger.NewModule("ReflectLoop").Debug("SuppressReflectContent cleared (tool_calls detected)")
+						} else if strings.HasPrefix(contentPrefix, "# Deep Reflection") {
+							// 仍然是反思内容 → suppress
+							shouldSuppress = true
+						} else if len(contentPrefix) > 10 {
+							// content 已超过 10 字符且不以反思开头 → 清除 suppress
+							state.SuppressReflectContent = false
+							logger.NewModule("ReflectLoop").Debug("SuppressReflectContent cleared (content no longer reflection)")
+						}
+					}
+
 					// 关键修复：流式增量 → 发 stream_chunk（前端 setStreamingMessage 做流式显示）
 					// 而不是 assistant（前端 append 到 messages 数组）
 					// 这样几百个 token chunk 只触发流式更新，不会无限追加 messages
-					ch <- QueryOutput{Type: "stream_chunk", Message: assistantBuffer}
+					if !shouldSuppress {
+						ch <- QueryOutput{Type: "stream_chunk", Message: assistantBuffer}
+					}
 
 					if assistantBuffer.HasToolCalls() {
 						needsFollowUp = true
@@ -1290,10 +1321,22 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			logger.NewModule("Query").Debug("assistantBuffer appended to state.Messages: content_len=%d, thinking_len=%d, tool_calls=%d",
 				len(assistantBuffer.Content), len(assistantBuffer.Thinking), len(assistantBuffer.ToolCalls))
 
-			// 关键：streaming 期间我们发的是 stream_chunk（流式增量）
-			// stream 结束后发一条完整的 assistant 消息，前端 append 到 messages 数组
-			// 不再让几百个 chunk 各自触发一次 append
-			ch <- QueryOutput{Type: "assistant", Message: assistantBuffer}
+			// === ReflectLoop 过滤：如果完整 content 仍是反思开头，跳过发给前端 ===
+			// 但 state.Messages 里已经保留了（上下文链不能断）
+			contentIsReflection := strings.HasPrefix(strings.TrimSpace(assistantBuffer.Content), "# Deep Reflection")
+			skipSend := state.SuppressReflectContent && contentIsReflection && len(assistantBuffer.ToolCalls) == 0
+			if skipSend {
+				logger.NewModule("ReflectLoop").Debug("skipping assistant send (full content is internal reflection)")
+				// suppress 到此结束，下次正常
+				state.SuppressReflectContent = false
+			} else {
+				// 关键：streaming 期间我们发的是 stream_chunk（流式增量）
+				// stream 结束后发一条完整的 assistant 消息，前端 append 到 messages 数组
+				// 不再让几百个 chunk 各自触发一次 append
+				ch <- QueryOutput{Type: "assistant", Message: assistantBuffer}
+				// 清除 suppress flag（无论是否还在 suppress，这轮已经过了）
+				state.SuppressReflectContent = false
+			}
 
 			// === L2 ReAct Bridge Hook 2: 记录 Thought + Action ===
 			if state.ReActBridge != nil {
