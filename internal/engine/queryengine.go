@@ -2203,11 +2203,12 @@ func (qe *QueryEngine) getMessagesAfterCompactBoundary() []types.Message {
 
 func (qe *QueryEngine) getConfig() *QueryEngineConfig {
 	if qe.config == nil {
-		return &QueryEngineConfig{MaxTurns: query.DefaultMaxTurns}
+		qe.config = &QueryEngineConfig{}
 	}
 	if qe.config.MaxTurns <= 0 {
 		qe.config.MaxTurns = query.DefaultMaxTurns
 	}
+	logger.NewModule("Engine").Debug("getConfig: MaxTurns=%d (DefaultMaxTurns=%d)", qe.config.MaxTurns, query.DefaultMaxTurns)
 	return qe.config
 }
 

@@ -37,7 +37,7 @@ func run() error {
 	}
 
 	engineConfig := &engine.QueryEngineConfig{
-		MaxTurns:           100,
+		// MaxTurns 未显式设置 → getConfig() 自动 fallback 到 query.DefaultMaxTurns
 		UserSpecifiedModel: types.ModelSetting(ollamaConfig.Model),
 		OllamaConfig:       ollamaConfig,
 	}

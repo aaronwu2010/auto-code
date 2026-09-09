@@ -1794,6 +1794,7 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 		}
 
 		if state.TurnCount >= params.MaxTurns {
+			logger.NewModule("Query").Warn("MaxTurns reached: TurnCount=%d >= params.MaxTurns=%d, forcing terminal", state.TurnCount, params.MaxTurns)
 			if state.ReActBridge != nil {
 				state.ReActBridge.MarkFailed("max_turns_reached")
 			}

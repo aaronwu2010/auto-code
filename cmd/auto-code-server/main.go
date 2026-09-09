@@ -90,8 +90,8 @@ func main() {
 	engineConfig := &engine.QueryEngineConfig{
 		CWD:                *cwd,
 		UserSpecifiedModel: types.ModelSetting(ollamaConfig.Model),
-		MaxTurns:           100,
-		OllamaConfig:       ollamaConfig,
+		// MaxTurns 未显式设置 → getConfig() 自动 fallback 到 query.DefaultMaxTurns
+		OllamaConfig: ollamaConfig,
 	}
 
 	eng := engine.NewQueryEngine(app, engineConfig)
