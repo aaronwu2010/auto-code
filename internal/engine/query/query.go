@@ -728,6 +728,8 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 
 		if deps.Microcompact != nil {
 			messages = deps.Microcompact(messages)
+			// 同步 state.Messages：microcompact 裁剪了消息列表，state.Messages 必须跟随
+			state.Messages = messages
 		}
 
 		if state.HistorySnipTracking != nil && state.HistorySnipTracking.Enabled {
@@ -755,6 +757,8 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 					})
 				}
 				messages = collapsedMessages
+				// 同步 state.Messages：context collapse 折叠了消息历史，state.Messages 必须跟随
+				state.Messages = collapsedMessages
 
 				ch <- QueryOutput{
 					Type: "system",
@@ -788,6 +792,9 @@ func queryLoop(ctx context.Context, params QueryParams, deps QueryDeps, initialS
 			result, err := deps.AutoCompact(messages)
 			if err == nil && result != nil {
 				messages = result.Messages
+				// 同步 state.Messages：auto compact 压缩了历史消息，state.Messages 必须跟随
+				state.Messages = result.Messages
+				logger.NewModule("Compact").Info("auto compact 成功, state.Messages 已同步为 %d 条", len(result.Messages))
 				ch <- QueryOutput{
 					Type:    "system",
 					Message: &types.Message{Role: types.RoleSystem, Content: "compact_boundary", Timestamp: time.Now().Unix()},
