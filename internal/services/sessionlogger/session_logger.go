@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -152,26 +153,38 @@ func (s *SessionLogger) LogResponse(content string, thinking string, toolCalls i
 	sb.WriteString("\n--- Response ---\n")
 	sb.WriteString(fmt.Sprintf("Stop Reason: %s\n", stopReason))
 
+	// 用标志位判断是否有任何实质性输出
+	hasContent := false
+
 	if thinking != "" {
 		sb.WriteString("\n[Thinking]\n")
 		sb.WriteString(thinking)
 		sb.WriteString("\n")
+		hasContent = true
 	}
 
 	if content != "" {
 		sb.WriteString("\n[Content]\n")
 		sb.WriteString(content)
 		sb.WriteString("\n")
+		hasContent = true
 	}
 
-	if toolCalls != nil {
+	// 对 slice 类型：检查长度而非 nil（空 slice != nil）
+	if toolCalls != nil && !isEmptySlice(toolCalls) {
 		sb.WriteString("\n[Tool Calls]\n")
 		writeJSONBlock(&sb, toolCalls)
+		hasContent = true
 	}
 
 	if usage != nil {
 		sb.WriteString("\n[Usage]\n")
 		writeJSONBlock(&sb, usage)
+		hasContent = true
+	}
+
+	if !hasContent {
+		sb.WriteString("\n(empty response — model returned no content, thinking, or tool_calls)\n")
 	}
 
 	sb.WriteString("\n")
@@ -186,6 +199,15 @@ func writeJSONBlock(sb *strings.Builder, v interface{}) {
 		return
 	}
 	sb.WriteString(string(data))
+}
+
+// isEmptySlice 判断 v 是否为空 slice（nil 或 len==0）
+func isEmptySlice(v interface{}) bool {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.Slice {
+		return rv.Len() == 0
+	}
+	return false
 }
 
 // sessionsDir 返回 sessions 目录路径

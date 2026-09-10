@@ -1598,12 +1598,16 @@ func (qe *QueryEngine) bridgeStream(streamCh <-chan api.StreamMessage) <-chan qu
 			msgCount++
 
 			// 同时收集响应内容给 SessionLogger
+			// 不依赖 msg.Type 判断内容类型——直接检查 Message 里哪些字段有值，
+			// 兼容某些 API 实现在一个 StreamMessage 里同时返回 Content + Thinking 的情况
 			if sl.IsEnabled() && msg.Message != nil {
-				if msg.Type == "assistant" {
+				if msg.Message.Content != "" {
 					loggerContent += msg.Message.Content
-				} else if msg.Type == "thinking" {
+				}
+				if msg.Message.Thinking != "" {
 					loggerThinking += msg.Message.Thinking
-				} else if msg.Type == "tool_calls" && len(msg.Message.ToolCalls) > 0 {
+				}
+				if len(msg.Message.ToolCalls) > 0 {
 					loggerToolCalls = append(loggerToolCalls, msg.Message.ToolCalls...)
 				}
 			}
