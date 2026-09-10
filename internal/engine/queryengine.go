@@ -36,6 +36,7 @@ import (
 	"github.com/auto-code/auto-code/internal/services/policylimits"
 	"github.com/auto-code/auto-code/internal/services/remotemanagedsettings"
 	"github.com/auto-code/auto-code/internal/services/sessionmemory"
+	"github.com/auto-code/auto-code/internal/services/sessionlogger"
 	"github.com/auto-code/auto-code/internal/services/settingssync"
 	"github.com/auto-code/auto-code/internal/services/teammemorysync"
 	"github.com/auto-code/auto-code/internal/state"
@@ -248,6 +249,15 @@ func (qe *QueryEngine) Startup(ctx context.Context) {
 	}
 
 	go qe.initRemoteServices(ctx)
+
+	// 会话日志记录器：根据 settings 中的 "session_log_enabled" 开关启用
+	if enabledVal, ok := qe.appState.GetSetting("session_log_enabled"); ok {
+		if enabled, ok := enabledVal.(bool); ok && enabled {
+			if err := sessionlogger.GetInstance().Enable(); err != nil {
+				logger.NewModule("Engine").Warn("SessionLogger 启用失败: %v", err)
+			}
+		}
+	}
 }
 
 // SetContextBuilder 注入上下文构建器，用于在系统提示中包含记忆文件和 Git 状态
@@ -696,6 +706,7 @@ func (qe *QueryEngine) Shutdown(_ context.Context) {
 	if qe.cancel != nil {
 		qe.cancel()
 	}
+	sessionlogger.GetInstance().Close()
 }
 
 func (qe *QueryEngine) SubmitMessage(ctx context.Context, prompt string) <-chan SDKMessage {
@@ -1460,6 +1471,11 @@ func (qe *QueryEngine) callModelOllama(ctx context.Context, params query.QueryPa
 		req.Think = true
 	}
 
+	// 会话日志：记录请求
+	if sessionlogger.GetInstance().IsEnabled() {
+		sessionlogger.GetInstance().LogRequest(params.SystemPrompt.Content, req.Messages, req.Tools, req.Model)
+	}
+
 	logger.NewModule("Engine").Debug("callModel(Ollama): calling ChatWithStreaming...")
 	streamCh, err := qe.apiClient.ChatWithStreaming(ctx, req)
 	if err != nil {
@@ -1500,6 +1516,11 @@ func (qe *QueryEngine) callModelLocalAI(ctx context.Context, params query.QueryP
 
 	if len(toolDefs) > 0 {
 		req.Tools = api.ConvertToolsToLocalAI(toolDefs)
+	}
+
+	// 会话日志：记录请求
+	if sessionlogger.GetInstance().IsEnabled() {
+		sessionlogger.GetInstance().LogRequest(params.SystemPrompt.Content, req.Messages, req.Tools, req.Model)
 	}
 
 	logger.NewModule("Engine").Debug("callModel(LocalAI): calling ChatWithStreaming...")
@@ -1543,6 +1564,11 @@ func (qe *QueryEngine) callModelOpenAI(ctx context.Context, params query.QueryPa
 		req.Tools = api.ConvertToolsToOpenAI(toolDefs)
 	}
 
+	// 会话日志：记录请求
+	if sessionlogger.GetInstance().IsEnabled() {
+		sessionlogger.GetInstance().LogRequest(params.SystemPrompt.Content, req.Messages, req.Tools, req.Model)
+	}
+
 	logger.NewModule("Engine").Debug("callModel(OpenAI): calling ChatWithStreaming...")
 	streamCh, err := qe.openaiClient.ChatWithStreaming(ctx, req)
 	if err != nil {
@@ -1559,8 +1585,29 @@ func (qe *QueryEngine) bridgeStream(streamCh <-chan api.StreamMessage) <-chan qu
 	go func() {
 		defer close(outputCh)
 		msgCount := 0
+
+		// 会话日志：收集完整响应
+		loggerContent := ""
+		loggerThinking := ""
+		var loggerToolCalls []types.ToolCall
+		var loggerStopReason string
+		var loggerUsage *api.Usage
+		sl := sessionlogger.GetInstance()
+
 		for msg := range streamCh {
 			msgCount++
+
+			// 同时收集响应内容给 SessionLogger
+			if sl.IsEnabled() && msg.Message != nil {
+				if msg.Type == "assistant" {
+					loggerContent += msg.Message.Content
+				} else if msg.Type == "thinking" {
+					loggerThinking += msg.Message.Thinking
+				} else if msg.Type == "tool_calls" && len(msg.Message.ToolCalls) > 0 {
+					loggerToolCalls = append(loggerToolCalls, msg.Message.ToolCalls...)
+				}
+			}
+
 			switch msg.Type {
 			case "assistant", "thinking", "tool_calls":
 				if msg.Message != nil {
@@ -1574,15 +1621,34 @@ func (qe *QueryEngine) bridgeStream(streamCh <-chan api.StreamMessage) <-chan qu
 					qe.mu.Lock()
 					qe.usage = *msg.Usage
 					qe.mu.Unlock()
+					loggerUsage = msg.Usage
 				}
+				loggerStopReason = msg.StopReason
+
+				// 会话日志：记录完整响应
+				if sl.IsEnabled() {
+					sl.LogResponse(loggerContent, loggerThinking, loggerToolCalls, loggerStopReason, loggerUsage)
+				}
+
 				outputCh <- query.QueryOutput{Type: "stream_event", Data: msg}
 			case "error":
 				logger.NewModule("Engine").Error("stream error at msg %d: %v", msgCount, msg.Error)
+
+				// 会话日志：也记录错误
+				if sl.IsEnabled() {
+					sl.LogResponse(loggerContent, loggerThinking, loggerToolCalls, "error: "+msg.Error.Error(), loggerUsage)
+				}
+
 				outputCh <- query.QueryOutput{Type: "error", Error: msg.Error}
 				return
 			}
 		}
 		logger.NewModule("Engine").Debug("callModel: streamCh closed after %d messages", msgCount)
+
+		// 防止 streamCh 正常关闭但没有收到 done 事件（极端情况）
+		if sl.IsEnabled() && loggerStopReason == "" {
+			sl.LogResponse(loggerContent, loggerThinking, loggerToolCalls, "stream_closed_no_done", loggerUsage)
+		}
 	}()
 	return outputCh
 }
